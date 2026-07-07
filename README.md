@@ -1,32 +1,41 @@
-# NDSForwarder
-### this takes the place of the Forwarder3-DS java app listed on the gbatemp page
+# romm3ds
 
-This app will create nds forwarders and install them to the home screen of the 3ds.
+3DS homebrew: browse your self-hosted [RomM](https://github.com/rommapp/romm) NDS library on-console, download ROMs to SD, and auto-install HOME-menu forwarders — an hShop-like experience for your own DS collection. Fork of [NDSForwarder v1.4.7](https://github.com/volkanturkut/NDSForwarder) (GPL-3); all forwarder generation/install machinery is inherited from it (see `README.upstream.md`).
 
-* The easiest method of installation will be to download it from Universal Updater. This will include all required files for the sd card as well.
-* It is recommended to use full dumps (not trimmed ones) as the current dumping tools on both 3ds and dsi seem to have issues dumping trimmed files (already fixed in development but not released to you guys as of my typing)
+## Features
 
+- **RomM Library (NDS)** — lists the `nds` platform of your RomM server (HTTP Basic auth, works against a stock authenticated instance — no `DISABLE_DOWNLOAD_ENDPOINT_AUTH` needed). `*` marks games already on SD. Select → downloads to `sd:/roms/nds/` with progress → builds + installs the DSiWare forwarder on-device (in-memory CIA → AM). Multi-part ROMs are skipped.
+- **Manage Installed** — lists `sd:/roms/nds/*.nds` with forwarder state (`[+]` = forwarder on NAND, TID derived from the ROM game code), SD free space and DSiWare count in the header. Per game: delete forwarder + ROM, forwarder only, or ROM file only (with confirmation).
+- **SD Card Browser** — the original NDSForwarder browser/Install All, unchanged.
+- **RomM Server Settings** — re-prompt host/user/password (stored in `sd:/3ds/forwarder/romm.json`, plaintext).
 
-The forwarders created with this app work in conjunction with the nds-boostrap forwarder pack for SD cards [here](https://github.com/RocketRobz/NTR_Forwarder/releases).  Read more about it on the [GBATemp page](https://gbatemp.net/threads/nds-forwarder-cias-for-your-home-menu.426174/)
- 
----
-DSiWare Template downloaded from http://olmectron.github.io/forwarders/sdcard.(fwd|nds). Thanks to Olmectron for providing templates via their website.
+## Requirements (same runtime chain as NDSForwarder)
 
-Thanks to Martin Korth for GBATek, which provided pretty much all the information needed about the nds and dsi formats.
+- Luma3DS CFW (sig patches), Homebrew Launcher.
+- [NTR_Forwarder pack](https://github.com/RocketRobz/NTR_Forwarder) `_nds` folder on SD root + TWiLight Menu++ / nds-bootstrap.
+- Forwarder template (`sdcard.nds`/`sdcard.fwd`) in romfs (bundled) or `sd:/3ds/forwarder/templates/`.
+- RomM ≥ 4.x reachable over plain HTTP on the LAN (HTTPS works with cert verification disabled).
+- ~40 DSiWare HOME-menu cap applies (hardware limit; the app warns).
 
-Thanks to 3DSGuy and everyone else who contributed to CTR Toolkit (of which, make_cia which is used in Olmectron's forwarder3ds app)
+## Build
 
-Thanks to RocketRobz and the DS-Homebrew team for all the nds-bootstrap and TWiLightMenu++ stuff. 
+```sh
+docker run --rm -v $PWD:/romm3ds -w /romm3ds devkitpro/devkitarm:latest make
+```
 
-Thanks to Evie (pk11) and the Universal Updater folks for helping bring things to the Universal Updater with automatic install of sd card files.
+Produces `romm3ds.3dsx` (+`.smdh`). Copy to `sd:/3ds/` (e.g. via ftpd on the 3DS: `curl -T romm3ds.3dsx ftp://<3ds-ip>:5000/3ds/`).
 
-Thanks to Evie also for some code cleanup/proper handling of non-ascii strings
+## First run
 
-Thanks to Oreo639, Piepie62, Fenrir, and everyone else who helped me in my development career.
+1. Open Homebrew Launcher → romm3ds.
+2. "RomM Library (NDS)" → prompts for server (`http://ip[:port]`), username, password.
+3. Pick a game → Yes → downloaded + forwarder installed → HOME menu.
 
-Thanks to lifehackerhansol, AnemoMETA, and GanonTheDork for helping me test
+## Upstream fixes carried in this fork
 
-Finally, thanks to the DevKitPro team for the toolchain (wintermute et al). Without that, homebrew just wouldn't be a thing.
+- `error.hpp`: parenthesized error macros (`code == ERROR_INSTALL_ALREADY_EXISTS` previously parsed as `(code==ERROR_INSTALL)|0x102` — always true, causing a spurious overwrite prompt after every install).
 
+## Notes
 
-Anyone else that I forgot to list, it's not you, it's me. Thank you. My progress is a product of the community and all it gives back. Thank everyone for being a part of it and helping.
+- Forwarder TID = `00048004` + game code (default template, non-random TID). RomM-driven installs always use non-random TIDs so Manage can map ROM ↔ forwarder; the SD browser still honors the random-TID setting, but such installs show as `[ ]` in Manage.
+- Deleting a forwarder never touches the `.nds` on SD (and vice versa) — the two are independent, matching System Settings behavior where removing the tiny DSiWare entry keeps the ROM.
