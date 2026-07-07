@@ -1,0 +1,14 @@
+*.srl
+*.cia
+*.3dsx
+*.smdh
+*.elf
+*.bin
+*.3ds
+.vscode/
+build/
+!romfs/
+!romfs/templates/*.nds
+core
+*.bmp
+*.srl1
