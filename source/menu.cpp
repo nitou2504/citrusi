@@ -15,8 +15,20 @@ extern "C" {
 #include "helpers.hpp"
 #include "lang.hpp"
 #include "manage.hpp"
+#include "zip.hpp"
 
 #define MAX_DSIWARE 40
+
+static bool isZipName(const std::string& n) {
+    std::string l = toLowerCase(n);
+    return l.size() > 4 && l.rfind(".zip") == l.size()-4;
+}
+// expected local playable rom path for a server file name
+// (zips extract to <stem>.nds; inner name may differ, best effort)
+static std::string rommLocalPath(const std::string& fsName) {
+    if (!isZipName(fsName)) return ROMM_ROM_DIR + fsName;
+    return ROMM_ROM_DIR + fsName.substr(0, fsName.size()-4) + ".nds";
+}
 
 RommClient gRomm;
 
@@ -199,7 +211,7 @@ RommClient gRomm;
         std::vector<MenuSelection*> entries;
         for (auto& rom : roms) {
             MenuSelection* e = new MenuSelection();
-            bool onSD = fileExists(ROMM_ROM_DIR + rom.fsName);
+            bool onSD = fileExists(rommLocalPath(rom.fsName));
             e->display=(onSD?"* ":"  ")+rom.name+" ("+humanSize(rom.sizeBytes)+")";
             e->action=RommInstall;
             e->rommId=rom.id;
@@ -470,8 +482,9 @@ RommClient gRomm;
                         Dialog(target,0,0,320,240,{"Saved.","Server: "+gRomm.host},{"OK"}).handle();
                     break;
                 case RommInstall: {
-                    std::string dest = ROMM_ROM_DIR + entry.fsName;
-                    bool onSD = fileExists(dest);
+                    std::string dest = ROMM_ROM_DIR + entry.fsName;   // as downloaded (may be .zip)
+                    std::string romPath = rommLocalPath(entry.fsName); // playable .nds
+                    bool onSD = fileExists(romPath);
                     bool needDownload = true;
                     if (onSD) {
                         int c = Dialog(target,0,0,320,240,{"Already on SD:",entry.fsName},{"Install fwd","Redownload","Cancel"}).handle();
@@ -500,9 +513,20 @@ RommClient gRomm;
                             Dialog(target,0,0,320,240,{"Download failed",gRomm.lastError},{"OK"}).handle();
                             break;
                         }
+                        if (isZipName(entry.fsName)) {
+                            Dialog(target,0,0,320,240,{"Extracting...",shorten(entry.fsName,28)},{},0).handle();
+                            std::string extracted, zerr;
+                            if (!extractFirstNds(dest, ROMM_ROM_DIR, extracted, zerr)) {
+                                remove(dest.c_str());
+                                Dialog(target,0,0,320,240,{"Extract failed",zerr},{"OK"}).handle();
+                                break;
+                            }
+                            remove(dest.c_str());
+                            romPath = extracted;
+                        }
                     }
                     Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shorten(entry.fsName,28)},{},0).handle();
-                    if (installForwarder(builder,target,config,dest,false)) {
+                    if (installForwarder(builder,target,config,romPath,false)) {
                         config->dsiwareCount++;
                         Dialog(target,0,0,320,240,{"Installed!",shorten(entry.fsName,28)},{"OK"}).handle();
                         // refresh the on-SD marker
