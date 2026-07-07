@@ -131,12 +131,18 @@ Result RommClient::get(const std::string& url, std::string& out, u32* statusOut)
         httpcCloseContext(&ctx);
         return -1;
     }
-    u8 chunk[0x20000];
+    static u8 chunk[0x20000];
     u32 readSize = 0;
-    do {
-        res = httpcDownloadData(&ctx, chunk, sizeof(chunk), &readSize);
-        out.append((char*)chunk, readSize);
-    } while (res == (Result)HTTPC_RESULTCODE_DOWNLOADPENDING);
+    try {
+        do {
+            res = httpcDownloadData(&ctx, chunk, sizeof(chunk), &readSize);
+            out.append((char*)chunk, readSize);
+        } while (res == (Result)HTTPC_RESULTCODE_DOWNLOADPENDING);
+    } catch (...) {
+        lastError = "out of memory reading response";
+        httpcCloseContext(&ctx);
+        return -1;
+    }
     httpcCloseContext(&ctx);
     if (R_FAILED(res)) { lastError = "download failed mid-transfer"; return res; }
     return 0;

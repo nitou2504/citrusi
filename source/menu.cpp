@@ -34,6 +34,7 @@ RommClient gRomm;
         this->fsName=old->fsName;
         this->sizeBytes=old->sizeBytes;
         this->tid=old->tid;
+        this->ytid=old->ytid;
         this->installed=old->installed;
     }
     MenuSelection* MenuSelection::setPath(std::filesystem::path p) {
@@ -220,17 +221,22 @@ RommClient gRomm;
         std::vector<ManagedRom> roms = scanManagedRoms(ROMM_ROM_DIR);
         for (auto& rom : roms) {
             MenuSelection* e = new MenuSelection();
-            e->display=(rom.installed?"[+] ":"[ ] ")+rom.display+" ("+humanSize(rom.sizeBytes)+")";
+            std::string marker = "[ ] ";
+            if (rom.installed && rom.yanbfTid) marker="[+Y] ";
+            else if (rom.installed) marker="[+] ";
+            else if (rom.yanbfTid) marker="[Y] ";
+            e->display=marker+rom.display+" ("+humanSize(rom.sizeBytes)+")";
             e->action=ManageRom;
             e->path=std::filesystem::path(rom.path);
             e->tid=rom.tid;
+            e->ytid=rom.yanbfTid;
             e->installed=rom.installed;
             entries.push_back(e);
         }
         Menu* menu = new Menu(entries);
         menu->currentDirectory=std::filesystem::path("/");
         menu->type=MENU_MANAGE;
-        menu->heading=storageSummary(dsiwareCount)+" [+]=fwd";
+        menu->heading=storageSummary(dsiwareCount)+" +=fwd Y=YANBF";
         menu->init();
         return menu;
     }
@@ -509,7 +515,10 @@ RommClient gRomm;
                 }
                 case ManageRom: {
                     std::string name = entry.path.filename().generic_string();
-                    std::string fwdState = entry.installed ? "fwd: installed" : "fwd: none";
+                    std::string fwdState = "fwd: none";
+                    if (entry.installed && entry.ytid) fwdState="fwd: TWL + YANBF";
+                    else if (entry.installed) fwdState="fwd: TWL installed";
+                    else if (entry.ytid) fwdState="fwd: YANBF (CTR)";
                     int c = Dialog(target,0,0,320,240,{name,fwdState},{"Del all","Del fwd","Del ROM","Back"}).handle();
                     if (c==3 || c==-1) break;
                     bool delFwd = (c==0 || c==1);
@@ -519,10 +528,16 @@ RommClient gRomm;
                     bool err=false;
                     if (delFwd && entry.installed && entry.tid!=0) {
                         if (R_FAILED(deleteForwarder(entry.tid))) {
-                            Dialog(target,0,0,320,240,{"Failed to delete forwarder"},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{"Failed to delete TWL forwarder"},{"OK"}).handle();
                             err=true;
                         } else if (config->dsiwareCount>0) {
                             config->dsiwareCount--;
+                        }
+                    }
+                    if (delFwd && entry.ytid!=0) {
+                        if (R_FAILED(deleteYanbfForwarder(entry.ytid))) {
+                            Dialog(target,0,0,320,240,{"Failed to delete YANBF forwarder"},{"OK"}).handle();
+                            err=true;
                         }
                     }
                     if (delRom && !err) {

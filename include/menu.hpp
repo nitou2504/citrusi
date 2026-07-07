@@ -39,6 +39,7 @@ class MenuSelection {
         u64 sizeBytes=0;
         // Manage entries
         u64 tid=0;
+        u64 ytid=0;
         bool installed=false;
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);

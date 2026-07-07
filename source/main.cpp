@@ -20,6 +20,9 @@ extern "C" {
 #include "helpers.hpp"
 namespace fs = std::filesystem;
 
+// default 3dsx main-thread stack is 32KB; http/json/dialog paths need headroom
+extern "C" { unsigned int __stacksize__ = 0x40000; }
+
 #define SYSTEM_APP_COUNT 6
 static u64 systemApps[SYSTEM_APP_COUNT] = { 
 					 0x00048005484E4441,

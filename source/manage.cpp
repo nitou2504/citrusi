@@ -57,11 +57,48 @@ bool twlTitleInstalled(const std::vector<u64>& list, u64 tid) {
     return false;
 }
 
+static std::string basenameLower(std::string p) {
+    size_t slash = p.find_last_of("/\\");
+    if (slash != std::string::npos) p = p.substr(slash + 1);
+    // strip trailing whitespace/newlines
+    while (!p.empty() && (p.back() == '\n' || p.back() == '\r' || p.back() == ' ' || p.back() == '\0'))
+        p.pop_back();
+    return toLowerCase(p);
+}
+
+std::map<std::string, u64> getYanbfForwarders() {
+    std::map<std::string, u64> out;
+    u32 count = 0;
+    if (R_FAILED(AM_GetTitleCount(MEDIATYPE_SD, &count)) || count == 0) return out;
+    std::vector<u64> titles(count);
+    u32 read = 0;
+    if (R_FAILED(AM_GetTitleList(&read, MEDIATYPE_SD, count, titles.data()))) return out;
+    for (u32 i = 0; i < read; i++) {
+        u64 tid = titles[i];
+        if ((tid >> 32) != 0x00040000ULL) continue;
+        u32 low = (u32)(tid & 0xFFFFFFFF);
+        if (low < 0x0FF40000 || low > 0x0FF7FFFF) continue;
+        // YANBF forwarder: romfs holds path.txt with the rom path
+        if (R_FAILED(romfsMountFromTitle(tid, MEDIATYPE_SD, "yfwd"))) continue;
+        FILE* f = fopen("yfwd:/path.txt", "rb");
+        if (f) {
+            char buf[512] = {0};
+            fread(buf, 1, sizeof(buf) - 1, f);
+            fclose(f);
+            std::string name = basenameLower(std::string(buf));
+            if (!name.empty()) out[name] = tid;
+        }
+        romfsUnmount("yfwd");
+    }
+    return out;
+}
+
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
     std::vector<ManagedRom> out;
     std::error_code ec;
     if (!std::filesystem::exists(romDir, ec)) return out;
     std::vector<u64> installed = getInstalledTwlTitles();
+    std::map<std::string, u64> yanbf = getYanbfForwarders();
     for (const auto& entry : std::filesystem::directory_iterator(romDir, ec)) {
         if (entry.is_directory()) continue;
         std::string filename = entry.path().filename();
@@ -73,6 +110,8 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         r.sizeBytes = fileSize(r.path);
         r.tid = computeForwarderTID(r.path);
         r.installed = r.tid != 0 && twlTitleInstalled(installed, r.tid);
+        auto y = yanbf.find(toLowerCase(filename));
+        r.yanbfTid = (y != yanbf.end()) ? y->second : 0;
         out.push_back(r);
     }
     std::sort(out.begin(), out.end(), [](const ManagedRom& a, const ManagedRom& b) {
@@ -83,6 +122,12 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
 
 Result deleteForwarder(u64 tid) {
     Result res = AM_DeleteTitle(MEDIATYPE_NAND, tid);
+    AM_DeleteTicket(tid);
+    return res;
+}
+
+Result deleteYanbfForwarder(u64 tid) {
+    Result res = AM_DeleteTitle(MEDIATYPE_SD, tid);
     AM_DeleteTicket(tid);
     return res;
 }
