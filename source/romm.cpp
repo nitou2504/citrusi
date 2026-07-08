@@ -104,6 +104,24 @@ bool RommClient::promptConfig() {
     return hasConfig();
 }
 
+bool RommClient::promptOne(int field) {
+    bool ok = false;
+    if (field == 0) {
+        if (this->host.empty()) this->host = "http://";
+        ok = swkbdPrompt("RomM server (http://ip[:port])", this->host);
+        while (ok && !this->host.empty() && this->host.back() == '/') this->host.pop_back();
+    } else if (field == 1) {
+        ok = swkbdPrompt("RomM username", this->user);
+    } else if (field == 2) {
+        ok = swkbdPrompt("RomM password", this->pass, true);
+    }
+    if (ok) {
+        buildAuth();
+        saveConfig();
+    }
+    return ok;
+}
+
 void RommClient::buildAuth() {
     this->authHeader = "Basic " + base64Encode(this->user + ":" + this->pass);
 }
@@ -196,12 +214,37 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out) {
             rom.fsName = r.value("fs_name", "");
             rom.name = (r.contains("name") && !r["name"].is_null()) ? r["name"].get<std::string>() : rom.fsName;
             if (rom.name.empty()) rom.name = rom.fsName;
+            rom.name = utf8FoldLatin(rom.name);
             rom.sizeBytes = r.value("fs_size_bytes", (u64)0);
             if (r.contains("path_cover_large") && !r["path_cover_large"].is_null()) {
                 rom.coverPath = r["path_cover_large"].get<std::string>();
                 // strip ?ts= cache-buster: raw datetime breaks nginx (HTTP 400)
                 size_t q = rom.coverPath.find('?');
                 if (q != std::string::npos) rom.coverPath = rom.coverPath.substr(0, q);
+            }
+            if (r.contains("path_cover_small") && !r["path_cover_small"].is_null()) {
+                rom.coverSmallPath = r["path_cover_small"].get<std::string>();
+                size_t q = rom.coverSmallPath.find('?');
+                if (q != std::string::npos) rom.coverSmallPath = rom.coverSmallPath.substr(0, q);
+            }
+            if (r.contains("summary") && !r["summary"].is_null())
+                rom.summary = utf8FoldLatin(r["summary"].get<std::string>());
+            if (r.contains("metadatum") && r["metadatum"].is_object()) {
+                auto& m = r["metadatum"];
+                if (m.contains("genres") && m["genres"].is_array()) {
+                    for (auto& g : m["genres"]) {
+                        if (!rom.genres.empty()) rom.genres += ", ";
+                        rom.genres += g.get<std::string>();
+                        if (rom.genres.size() > 40) break;
+                    }
+                }
+                if (m.contains("first_release_date") && m["first_release_date"].is_number()) {
+                    long long ts = m["first_release_date"].get<long long>();
+                    if (ts > 100000000000LL) ts /= 1000; // some sources store ms
+                    if (ts > 0) rom.year = 1970 + (int)(ts / 31556952LL);
+                }
+                if (m.contains("average_rating") && m["average_rating"].is_number())
+                    rom.rating = m["average_rating"].get<float>();
             }
             rom.multiFile = r.value("multi", false) || r.value("has_multiple_files", false);
             // multi-part roms download as a zip, not a playable .nds — skip

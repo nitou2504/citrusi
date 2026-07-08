@@ -12,7 +12,12 @@ struct RommRom {
     int id;
     std::string name;    // display name (metadata name or fs_name)
     std::string fsName;  // file name on the server
-    std::string coverPath; // server path of large cover ("" if none)
+    std::string coverPath;      // server path of large cover ("" if none)
+    std::string coverSmallPath; // server path of small cover ("" if none)
+    std::string summary;
+    std::string genres;  // joined, e.g. "Strategy, Tactical"
+    int year=0;          // first release year (0 = unknown)
+    float rating=0;      // 0-100 average rating (0 = unknown)
     u64 sizeBytes;
     bool multiFile;
 };
@@ -31,6 +36,8 @@ class RommClient {
     void saveConfig();
     // prompts with the software keyboard for host/user/pass; returns false if cancelled
     bool promptConfig();
+    // prompts a single field (0=host, 1=user, 2=pass); saves on confirm
+    bool promptOne(int field);
     bool hasConfig();
     void buildAuth();
 
