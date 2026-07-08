@@ -87,35 +87,21 @@ int main() {
     u64 fwdr = 0x0004800546574452ULL;
     ret = AM_GetTitleInfo(MEDIATYPE_NAND, 1, &fwdr, &bootstrap);
     logline("AM_GetTitleInfo=%08lX", (u32)ret);
-    if (R_SUCCEEDED(ret)) {
-        ret = APT_PrepareToDoApplicationJump(0, fwdr, 0);
-        logline("APT_PrepareToDoApplicationJump=%08lX", (u32)ret);
-        if (R_SUCCEEDED(ret)) {
-            u8 param[0x300];
-            u8 hmac[0x20];
-            memset(param, 0, sizeof(param));
-            memset(hmac, 0, sizeof(hmac));
-            logline("jumping");
-            ret = APT_DoApplicationJump(param, sizeof(param), hmac);
-            logline("APT_DoApplicationJump=%08lX", (u32)ret);
-            if (R_SUCCEEDED(ret)) {
-                // the jump executes asynchronously: keep pumping APT events
-                // until NS terminates this application
-                logline("waiting for APT to take over");
-                if (plog) { fclose(plog); plog = NULL; }
-                while (aptMainLoop()) {
-                    gspWaitForVBlank();
-                }
-                amExit();
-                return 0;
-            }
-        }
-    }
     if (R_FAILED(ret)) {
-        fatal("Failed to launch bootstrap.\n\nInstall bootstrap.cia from the\nYANBF release with FBI.", ret);
+        fatal("bootstrap.cia not installed.\n\nInstall bootstrap.cia from the\nYANBF release with FBI.", ret);
+        if (plog) fclose(plog);
+        amExit();
+        return 1;
     }
 
-    if (plog) fclose(plog);
+    // canonical libctru 2.x way to jump to another title: register the
+    // chainload target and exit cleanly. aptExit() (run during process
+    // teardown) performs PrepareToDoApplicationJump/DoApplicationJump and
+    // crucially skips APT_PrepareToCloseApplication, which would otherwise
+    // cancel the HOME-menu-mediated launch and wedge NS.
+    logline("aptSetChainloader -> FWDR, exiting cleanly");
+    if (plog) { fclose(plog); plog = NULL; }
+    aptSetChainloader(fwdr, MEDIATYPE_NAND);
     amExit();
     return 0;
 }
