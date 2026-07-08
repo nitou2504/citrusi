@@ -17,6 +17,8 @@ extern "C" {
 #include "manage.hpp"
 #include "zip.hpp"
 #include "ctrbuilder.hpp"
+#include "boxart.hpp"
+#include "cwav.hpp"
 
 #define MAX_DSIWARE 40
 
@@ -59,6 +61,7 @@ RommClient gRomm;
         this->rommId=old->rommId;
         this->fsName=old->fsName;
         this->title=old->title;
+        this->coverPath=old->coverPath;
         this->sizeBytes=old->sizeBytes;
         this->tid=old->tid;
         this->ytid=old->ytid;
@@ -233,6 +236,7 @@ RommClient gRomm;
             e->rommId=rom.id;
             e->fsName=rom.fsName;
             e->title=rom.name;
+            e->coverPath=rom.coverPath;
             e->sizeBytes=rom.sizeBytes;
             e->path=std::filesystem::path(ROMM_ROM_DIR + rom.fsName);
             entries.push_back(e);
@@ -519,7 +523,13 @@ RommClient gRomm;
                         std::error_code ec;
                         std::filesystem::create_directories(std::filesystem::path(ROMM_ROM_DIR), ec);
                         u64 lastDrawn = 0;
-                        bool ok = gRomm.download(RommRom{entry.rommId, entry.display, entry.fsName, entry.sizeBytes, false}, dest,
+                        RommRom dlRom;
+                        dlRom.id = entry.rommId;
+                        dlRom.name = entry.title;
+                        dlRom.fsName = entry.fsName;
+                        dlRom.sizeBytes = entry.sizeBytes;
+                        dlRom.multiFile = false;
+                        bool ok = gRomm.download(dlRom, dest,
                             [&](u64 done, u64 total) -> bool {
                                 hidScanInput();
                                 if (hidKeysDown() & KEY_B) return false; // cancel
@@ -559,13 +569,26 @@ RommClient gRomm;
                             romPath = extracted;
                         }
                     }
+                    std::string boxart;
+                    if (!entry.coverPath.empty()) {
+                        Dialog(target,0,0,320,240,{"Fetching box art...",shorten(entry.title,28)},{},0).handle();
+                        boxart = fetchBoxartEtc1a4(gRomm, entry.coverPath,
+                            [&](int done, int total) -> bool {
+                                hidScanInput();
+                                if (hidKeysDown() & KEY_B) return false;
+                                Dialog(target,0,0,320,240,{"Encoding box art...",std::to_string(done*100/total)+"%"},{},0).handle();
+                                return true;
+                            });
+                    }
+                    Dialog(target,0,0,320,240,{"Fetching sound...",shorten(entry.title,28)},{},0).handle();
+                    std::string gameCwav = fetchGameSound(gRomm, romPath);
                     Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shorten(entry.title,28)},{},0).handle();
                     u64 ctid = gCtr.allocateTID(entry.fsName);
                     if (ctid == 0) {
                         Dialog(target,0,0,320,240,{"No free forwarder title IDs"},{"OK"}).handle();
                         break;
                     }
-                    ReturnResult* r = gCtr.buildCIA(romPath, entry.title, ctid, "", "");
+                    ReturnResult* r = gCtr.buildCIA(romPath, entry.title, ctid, boxart, gameCwav);
                     if (r->isSuccess()) {
                         Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
                         // refresh the on-SD marker

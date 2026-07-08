@@ -37,6 +37,7 @@ class MenuSelection {
         int rommId=0;
         std::string fsName;
         std::string title;
+        std::string coverPath;
         u64 sizeBytes=0;
         // Manage entries
         u64 tid=0;

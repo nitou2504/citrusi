@@ -12,6 +12,7 @@ struct RommRom {
     int id;
     std::string name;    // display name (metadata name or fs_name)
     std::string fsName;  // file name on the server
+    std::string coverPath; // server path of large cover ("" if none)
     u64 sizeBytes;
     bool multiFile;
 };
@@ -40,6 +41,9 @@ class RommClient {
     // return false from it to cancel (sets lastError="cancelled")
     bool download(const RommRom& rom, const std::string& destPath,
                   std::function<bool(u64,u64)> progress);
+    // GET into memory. Server-relative paths (starting '/') get the host prefix
+    // + Basic auth; absolute http(s) URLs are fetched WITHOUT credentials.
+    bool fetchUrl(const std::string& url, std::string& out);
 };
 
 std::string urlEncodePath(const std::string& s);

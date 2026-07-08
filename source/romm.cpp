@@ -108,6 +108,18 @@ void RommClient::buildAuth() {
     this->authHeader = "Basic " + base64Encode(this->user + ":" + this->pass);
 }
 
+bool RommClient::fetchUrl(const std::string& url, std::string& out) {
+    std::string full = url;
+    bool external = url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0;
+    if (!external) full = this->host + url;
+    // never send RomM credentials to external hosts
+    std::string saved = this->authHeader;
+    if (external) this->authHeader = "";
+    Result res = get(full, out);
+    if (external) this->authHeader = saved;
+    return R_SUCCEEDED(res);
+}
+
 Result RommClient::get(const std::string& url, std::string& out, u32* statusOut) {
     httpcContext ctx;
     out.clear();
@@ -116,7 +128,8 @@ Result RommClient::get(const std::string& url, std::string& out, u32* statusOut)
     httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
     httpcSetKeepAlive(&ctx, HTTPC_KEEPALIVE_ENABLED);
     httpcAddRequestHeaderField(&ctx, "User-Agent", "romm3ds/0.1");
-    httpcAddRequestHeaderField(&ctx, "Authorization", this->authHeader.c_str());
+    if (!this->authHeader.empty())
+        httpcAddRequestHeaderField(&ctx, "Authorization", this->authHeader.c_str());
     httpcAddRequestHeaderField(&ctx, "Connection", "Keep-Alive");
     res = httpcBeginRequest(&ctx);
     if (R_FAILED(res)) { lastError = "httpcBeginRequest failed"; httpcCloseContext(&ctx); return res; }
@@ -184,6 +197,8 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out) {
             rom.name = (r.contains("name") && !r["name"].is_null()) ? r["name"].get<std::string>() : rom.fsName;
             if (rom.name.empty()) rom.name = rom.fsName;
             rom.sizeBytes = r.value("fs_size_bytes", (u64)0);
+            if (r.contains("path_cover_large") && !r["path_cover_large"].is_null())
+                rom.coverPath = r["path_cover_large"].get<std::string>();
             rom.multiFile = r.value("multi", false) || r.value("has_multiple_files", false);
             // multi-part roms download as a zip, not a playable .nds — skip
             if (rom.fsName.empty() || rom.multiFile) continue;
