@@ -503,14 +503,20 @@ RommClient gRomm;
                         std::filesystem::create_directories(std::filesystem::path(ROMM_ROM_DIR), ec);
                         u64 lastDrawn = 0;
                         bool ok = gRomm.download(RommRom{entry.rommId, entry.display, entry.fsName, entry.sizeBytes, false}, dest,
-                            [&](u64 done, u64 total) {
-                                if (done - lastDrawn < (1<<20) && done != total) return; // redraw each ~1MB
+                            [&](u64 done, u64 total) -> bool {
+                                hidScanInput();
+                                if (hidKeysDown() & KEY_B) return false; // cancel
+                                if (done - lastDrawn < (1<<20) && done != total) return true; // redraw each ~1MB
                                 lastDrawn = done;
                                 int pct = (total>0)?(int)(done*100/total):0;
-                                Dialog(target,0,0,320,240,{"Downloading...",shorten(entry.fsName,28),humanSize(done)+" / "+humanSize(total)+" ("+std::to_string(pct)+"%)"},{},0).handle();
+                                Dialog(target,0,0,320,240,{"Downloading... (B = cancel)",shorten(entry.fsName,28),humanSize(done)+" / "+humanSize(total)+" ("+std::to_string(pct)+"%)"},{},0).handle();
+                                return true;
                             });
                         if (!ok) {
-                            Dialog(target,0,0,320,240,{"Download failed",gRomm.lastError},{"OK"}).handle();
+                            if (gRomm.lastError == "cancelled")
+                                Dialog(target,0,0,320,240,{"Download cancelled"},{"OK"}).handle();
+                            else
+                                Dialog(target,0,0,320,240,{"Download failed",gRomm.lastError},{"OK"}).handle();
                             break;
                         }
                         if (isZipName(entry.fsName)) {

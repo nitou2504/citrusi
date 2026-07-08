@@ -200,7 +200,7 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out) {
 }
 
 bool RommClient::download(const RommRom& rom, const std::string& destPath,
-                          std::function<void(u64,u64)> progress) {
+                          std::function<bool(u64,u64)> progress) {
     std::string url = this->host + "/api/roms/" + std::to_string(rom.id) +
                       "/content/" + urlEncodePath(rom.fsName);
     httpcContext ctx;
@@ -244,7 +244,14 @@ bool RommClient::download(const RommRom& rom, const std::string& destPath,
                 return false;
             }
             written += readSize;
-            if (progress) progress(written, expected);
+            if (progress && !progress(written, expected)) {
+                lastError = "cancelled";
+                fclose(f);
+                remove(tmpPath.c_str());
+                httpcCancelConnection(&ctx);
+                httpcCloseContext(&ctx);
+                return false;
+            }
         }
     } while (res == (Result)HTTPC_RESULTCODE_DOWNLOADPENDING);
     fclose(f);

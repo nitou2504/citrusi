@@ -36,9 +36,10 @@ class RommClient {
     // returns platform id for ROMM_PLATFORM_SLUG or -1
     int findNdsPlatform();
     bool listRoms(int platformId, std::vector<RommRom>& out);
-    // downloads to destPath; progress(downloaded,total) called between chunks
+    // downloads to destPath; progress(downloaded,total) called between chunks,
+    // return false from it to cancel (sets lastError="cancelled")
     bool download(const RommRom& rom, const std::string& destPath,
-                  std::function<void(u64,u64)> progress);
+                  std::function<bool(u64,u64)> progress);
 };
 
 std::string urlEncodePath(const std::string& s);
