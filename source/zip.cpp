@@ -1,5 +1,6 @@
 #include <string>
 #include <cstring>
+#include <cstdio>
 #include "zip.hpp"
 #include "miniz.h"
 #include "helpers.hpp"
@@ -11,8 +12,30 @@ static bool ndsExtension(const std::string& lower) {
             lower.rfind(".ids") == lower.size()-4);
 }
 
+struct ExtractCtx {
+    FILE* f;
+    unsigned long long written;
+    unsigned long long total;
+    bool cancelled;
+    bool ioError;
+    std::function<bool(unsigned long long, unsigned long long)>* progress;
+};
+
+static size_t extractCb(void* opaque, mz_uint64 ofs, const void* buf, size_t n) {
+    (void)ofs;
+    ExtractCtx* ctx = (ExtractCtx*)opaque;
+    if (fwrite(buf, 1, n, ctx->f) != n) { ctx->ioError = true; return 0; }
+    ctx->written += n;
+    if (*ctx->progress && !(*ctx->progress)(ctx->written, ctx->total)) {
+        ctx->cancelled = true;
+        return 0; // abort decompression
+    }
+    return n;
+}
+
 bool extractFirstNds(const std::string& zipPath, const std::string& destDir,
-                     std::string& outPath, std::string& err) {
+                     std::string& outPath, std::string& err,
+                     std::function<bool(unsigned long long, unsigned long long)> progress) {
     mz_zip_archive zip;
     memset(&zip, 0, sizeof(zip));
     if (!mz_zip_reader_init_file(&zip, zipPath.c_str(), 0)) {
@@ -38,13 +61,26 @@ bool extractFirstNds(const std::string& zipPath, const std::string& destDir,
     if (slash != std::string::npos) name = name.substr(slash + 1);
     outPath = destDir + name;
     std::string tmp = outPath + ".part";
-    if (!mz_zip_reader_extract_to_file(&zip, found, tmp.c_str(), 0)) {
+
+    FILE* f = fopen(tmp.c_str(), "wb");
+    if (!f) {
         mz_zip_reader_end(&zip);
-        remove(tmp.c_str());
-        err = "extract failed (SD full?)";
+        err = "cannot create file on SD";
         return false;
     }
+    static char iobuf[0x20000];
+    setvbuf(f, iobuf, _IOFBF, sizeof(iobuf));
+
+    ExtractCtx ctx = { f, 0, st.m_uncomp_size, false, false, &progress };
+    mz_bool ok = mz_zip_reader_extract_to_callback(&zip, found, extractCb, &ctx, 0);
+    fclose(f);
     mz_zip_reader_end(&zip);
+
+    if (!ok || ctx.cancelled || ctx.ioError) {
+        remove(tmp.c_str());
+        err = ctx.cancelled ? "cancelled" : (ctx.ioError ? "SD write failed (full?)" : "extract failed (corrupt zip?)");
+        return false;
+    }
     remove(outPath.c_str());
     if (rename(tmp.c_str(), outPath.c_str()) != 0) {
         err = "rename failed";

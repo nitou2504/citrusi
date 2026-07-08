@@ -537,10 +537,21 @@ RommClient gRomm;
                             break;
                         }
                         if (isZipName(entry.fsName)) {
-                            Dialog(target,0,0,320,240,{"Extracting...",shorten(entry.fsName,28)},{},0).handle();
+                            Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28)},{},0).handle();
                             std::string extracted, zerr;
-                            if (!extractFirstNds(dest, ROMM_ROM_DIR, extracted, zerr)) {
-                                remove(dest.c_str());
+                            u64 lastZDrawn = 0;
+                            bool zok = extractFirstNds(dest, ROMM_ROM_DIR, extracted, zerr,
+                                [&](unsigned long long done, unsigned long long total) -> bool {
+                                    hidScanInput();
+                                    if (hidKeysDown() & KEY_B) return false;
+                                    if (done - lastZDrawn < (2<<20) && done != total) return true;
+                                    lastZDrawn = done;
+                                    int pct = (total>0)?(int)(done*100/total):0;
+                                    Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28),humanSize(done)+" / "+humanSize(total)+" ("+std::to_string(pct)+"%)"},{},0).handle();
+                                    return true;
+                                });
+                            if (!zok) {
+                                if (zerr != "cancelled") remove(dest.c_str());
                                 Dialog(target,0,0,320,240,{"Extract failed",zerr},{"OK"}).handle();
                                 break;
                             }

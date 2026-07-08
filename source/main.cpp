@@ -87,6 +87,7 @@ u32 getDsiWareCount() {
 	return 1000;
 }
 Result init() {
+	osSetSpeedupEnable(true); // New3DS 804MHz for download/extract/hashing
 	gfxInitDefault();
 	C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
 	C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
