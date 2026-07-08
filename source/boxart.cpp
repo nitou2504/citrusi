@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <cstring>
+#include <cstdio>
 #include <vector>
 #include "boxart.hpp"
 #include "logger.hpp"
@@ -34,36 +35,19 @@ static inline void sampleBilinear(const u8* src, int sw, int sh, float fx, float
     }
 }
 
-// bannertool banner texture: 256x128 RGBA4444, 8x8 tiles, Morton order in-tile
-std::string fetchBoxartEtc1a4(RommClient& client, const std::string& coverUrl,
-                              std::function<bool(int,int)> progress) {
-    if (coverUrl.empty()) return "";
-    std::string img;
-    if (!client.fetchUrl(coverUrl, img) || img.empty()) {
-        boxLogger.info("cover fetch failed: " + client.lastError);
-        return "";
-    }
-    int sw = 0, sh = 0, comp = 0;
-    u8* src = stbi_load_from_memory((const u8*)img.data(), img.size(), &sw, &sh, &comp, 4);
-    if (!src) {
-        boxLogger.info("cover decode failed");
-        return "";
-    }
-
-    // fit into 256x128: height 128, keep aspect, center horizontally (YANBF style)
-    static u8 canvas[BA_W * BA_H * 4];
-    memset(canvas, 0, sizeof(canvas)); // transparent padding
-    int dw = BA_H * sw / sh;
-    if (dw > BA_W) dw = BA_W;
-    int xoff = (BA_W - dw) / 2;
-    for (int y = 0; y < BA_H; y++)
+// renders src region (rx,ry,rw,rh) into dst rect (dx,dy,dw,dh) of the canvas
+static void renderRegion(const u8* src, int sw, int sh,
+                         float rx, float ry, float rw, float rh,
+                         u8* canvas, int dx, int dy, int dw, int dh) {
+    for (int y = 0; y < dh; y++)
         for (int x = 0; x < dw; x++)
             sampleBilinear(src, sw, sh,
-                           (float)x * sw / dw, (float)y * sh / BA_H,
-                           &canvas[(y*BA_W + xoff + x)*4]);
-    stbi_image_free(src);
+                           rx + (float)x * rw / dw,
+                           ry + (float)y * rh / dh,
+                           &canvas[((dy+y)*BA_W + dx+x)*4]);
+}
 
-    // RGBA4444 tiled (bannertool image_data_to_tiles layout)
+static std::string tileRgba4444(const u8* canvas) {
     std::string out(BA_W * BA_H * 2, '\0');
     u16* dst = (u16*)&out[0];
     for (u32 y = 0; y < BA_H; y++) {
@@ -76,6 +60,81 @@ std::string fetchBoxartEtc1a4(RommClient& client, const std::string& coverUrl,
                                (p[2] & ~0xF) | (p[3] >> 4));
         }
     }
-    if (progress) progress(1, 1);
     return out;
+}
+
+// decodes image bytes and renders to 256x128 canvas, YANBF-style:
+// 512x256 assets get the animation-mask crop and fill the banner fully;
+// anything else is height-fit and centered.
+static bool renderImage(const std::string& img, u8* canvas) {
+    int sw = 0, sh = 0, comp = 0;
+    u8* src = stbi_load_from_memory((const u8*)img.data(), img.size(), &sw, &sh, &comp, 4);
+    if (!src) return false;
+    memset(canvas, 0, BA_W * BA_H * 4);
+    if (sw == 512 && sh == 256) {
+        renderRegion(src, sw, sh, 51, 27, 408, 204, canvas, 0, 0, BA_W, BA_H);
+    } else {
+        int dw = BA_H * sw / sh;
+        if (dw > BA_W) dw = BA_W;
+        renderRegion(src, sw, sh, 0, 0, sw, sh, canvas, (BA_W - dw) / 2, 0, dw, BA_H);
+    }
+    stbi_image_free(src);
+    return true;
+}
+
+static bool readGamecode(const std::string& romPath, char gc[5]) {
+    FILE* f = fopen(romPath.c_str(), "rb");
+    if (!f) return false;
+    fseek(f, 0x0C, SEEK_SET);
+    size_t n = fread(gc, 1, 4, f);
+    fclose(f);
+    gc[4] = 0;
+    if (n != 4) return false;
+    for (int i = 0; i < 4; i++)
+        if (gc[i] < 0x20 || gc[i] > 0x7E) return false;
+    return true;
+}
+
+std::string fetchBoxart(RommClient& client, const std::string& romPath,
+                        const std::string& coverPath) {
+    static u8 canvas[BA_W * BA_H * 4];
+    char gc[5] = {0};
+    bool haveGc = readGamecode(romPath, gc);
+    std::string img;
+
+    if (haveGc) {
+        std::string gc4(gc, 4), gc3(gc, 3);
+        std::string base = "https://raw.githubusercontent.com/YANBForwarder/assets/main/assets/";
+        if (client.fetchUrl(base + gc4 + "/" + gc4 + ".png", img) && renderImage(img, canvas)) {
+            boxLogger.info("banner art: YANBF assets " + gc4);
+            return tileRgba4444(canvas);
+        }
+        if (client.fetchUrl(base + gc3 + "/" + gc3 + ".png", img) && renderImage(img, canvas)) {
+            boxLogger.info("banner art: YANBF assets " + gc3);
+            return tileRgba4444(canvas);
+        }
+        boxLogger.info("no YANBF asset for " + gc4 + " (" + client.lastError + ")");
+        // GameTDB coverM by region letter
+        const char* region = "EN";
+        switch (gc[3]) {
+            case 'D': region = "DE"; break; case 'E': region = "US"; break;
+            case 'F': region = "FR"; break; case 'H': region = "NL"; break;
+            case 'I': region = "IT"; break; case 'J': region = "JA"; break;
+            case 'K': region = "KO"; break; case 'R': region = "RU"; break;
+            case 'S': region = "ES"; break; case 'T': region = "US"; break;
+            case 'U': region = "AU"; break;
+        }
+        std::string tdb = std::string("https://art.gametdb.com/ds/coverM/") + region + "/" + gc4 + ".jpg";
+        if (client.fetchUrl(tdb, img) && renderImage(img, canvas)) {
+            boxLogger.info("banner art: GameTDB " + gc4);
+            return tileRgba4444(canvas);
+        }
+        boxLogger.info("no GameTDB cover (" + client.lastError + ")");
+    }
+    if (!coverPath.empty() && client.fetchUrl(coverPath, img) && renderImage(img, canvas)) {
+        boxLogger.info("banner art: RomM cover");
+        return tileRgba4444(canvas);
+    }
+    boxLogger.info("no banner art found, keeping template");
+    return "";
 }

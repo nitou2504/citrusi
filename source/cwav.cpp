@@ -134,8 +134,12 @@ std::string fetchGameSound(RommClient& client, const std::string& romPath) {
     std::string base = "https://raw.githubusercontent.com/YANBForwarder/assets/main/assets/";
     std::string wav;
     std::string gc4(gc, 4), gc3(gc, 3);
-    if (!client.fetchUrl(base + gc4 + "/" + gc4 + ".wav", wav) || wav.size() < 44)
-        if (!client.fetchUrl(base + gc3 + "/" + gc3 + ".wav", wav) || wav.size() < 44)
+    if (!client.fetchUrl(base + gc4 + "/" + gc4 + ".wav", wav) || wav.size() < 44) {
+        if (!client.fetchUrl(base + gc3 + "/" + gc3 + ".wav", wav) || wav.size() < 44) {
+            cwavLogger.info("no YANBF sound for " + gc4 + " (" + client.lastError + ")");
             return "";
+        }
+    }
+    cwavLogger.info("sound: YANBF assets, " + std::to_string(wav.size()) + " bytes");
     return wavToCwav(wav);
 }

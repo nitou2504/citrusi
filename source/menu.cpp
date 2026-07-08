@@ -569,17 +569,8 @@ RommClient gRomm;
                             romPath = extracted;
                         }
                     }
-                    std::string boxart;
-                    if (!entry.coverPath.empty()) {
-                        Dialog(target,0,0,320,240,{"Fetching box art...",shorten(entry.title,28)},{},0).handle();
-                        boxart = fetchBoxartEtc1a4(gRomm, entry.coverPath,
-                            [&](int done, int total) -> bool {
-                                hidScanInput();
-                                if (hidKeysDown() & KEY_B) return false;
-                                Dialog(target,0,0,320,240,{"Encoding box art...",std::to_string(done*100/total)+"%"},{},0).handle();
-                                return true;
-                            });
-                    }
+                    Dialog(target,0,0,320,240,{"Fetching box art...",shorten(entry.title,28)},{},0).handle();
+                    std::string boxart = fetchBoxart(gRomm, romPath, entry.coverPath);
                     Dialog(target,0,0,320,240,{"Fetching sound...",shorten(entry.title,28)},{},0).handle();
                     std::string gameCwav = fetchGameSound(gRomm, romPath);
                     Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shorten(entry.title,28)},{},0).handle();
