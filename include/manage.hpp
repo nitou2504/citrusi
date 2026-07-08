@@ -24,6 +24,7 @@ bool twlTitleInstalled(const std::vector<u64>& list, u64 tid);
 // YANBF CTR forwarders on SD (TID 000400000FF40000-000400000FF7FFFF):
 // maps lowercase rom filename (from the title's romfs path.txt) -> tid
 std::map<std::string, u64> getYanbfForwarders();
+void invalidateYanbfCache();
 
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir);
 
@@ -34,6 +35,7 @@ std::map<std::string, u64> getRommCtrForwarders();
 Result deleteForwarder(u64 tid);            // TWL, NAND
 Result deleteYanbfForwarder(u64 tid);       // CTR, SD
 Result deleteRommCtrForwarder(u64 tid);     // CTR, SD + path file
+
 
 std::string humanSize(u64 bytes);
 // "SD: 12.3GB free | DSiWare: 27/40"

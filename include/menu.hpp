@@ -18,14 +18,18 @@ enum MenuAction {
     OpenManage,
     ManageRom,
     OpenSDBrowser,
-    EditRommConfig
+    EditRommConfig,
+    OpenSettings,
+    SettingToggle
 };
 
 enum MenuType {
     MENU_MAIN,
     MENU_SD,
     MENU_ROMM,
-    MENU_MANAGE
+    MENU_MANAGE,
+    MENU_SETTINGS,
+    MENU_SERVER
 };
 
 class MenuSelection {
@@ -38,6 +42,11 @@ class MenuSelection {
         std::string fsName;
         std::string title;
         std::string coverPath;
+        std::string coverSmallPath;
+        std::string summary;
+        std::string genres;
+        int year=0;
+        float rating=0;
         u64 sizeBytes=0;
         // Manage entries
         u64 tid=0;
@@ -60,6 +69,7 @@ class Menu {
         std::filesystem::path currentDirectory;
         MenuType type=MENU_SD;
         std::string heading;
+        std::string filter; // active search query (RomM view)
         Menu(std::vector<MenuSelection*> entries);
         Menu();
         ~Menu();
@@ -68,6 +78,15 @@ class Menu {
 //        Menu* setSelections(std::vector<MenuSelection> s);
 //        std::vector<MenuSelection> getSelections();
         void drawMenu();
+        // bottom-screen: details panel for RomM/Manage menus, config otherwise
+        void drawBottom(Config* config);
+        // pre-frame work for the bottom panel (cover fetch/decode) — call
+        // OUTSIDE the C3D frame
+        void tickBottom();
+        // scroll the description panel (X/Y)
+        void scrollDesc(int dir);
+        // SELECT: search prompt (RomM view); returns the (possibly new) menu
+        Menu* searchPrompt();
         void refreshStrings();
         void init();
         void down();
@@ -84,6 +103,7 @@ Menu* generateMenu(std::filesystem::path path, Menu* prev);
 Menu* generateMainMenu(Menu* prev);
 Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target);
 Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount);
+Menu* generateSettingsMenu(Menu* prev, Config* config);
 bool sortMenuSelections(MenuSelection* a, MenuSelection* b);
 std::string shorten(std::string s, u16 len);
 extern RommClient gRomm;

@@ -18,6 +18,8 @@ extern "C" {
 #include "settings.hpp"
 #include "config.hpp"
 #include "helpers.hpp"
+#include "covercache.hpp"
+#include "dialog.hpp"
 namespace fs = std::filesystem;
 
 // default 3dsx main-thread stack is 32KB; http/json/dialog paths need headroom
@@ -136,7 +138,8 @@ int main()
 
 	C3D_RenderTarget* top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
 	C3D_RenderTarget* bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
-	
+	gLoadingTargets(top, bottom);
+
 	Menu* menu = generateMainMenu(nullptr);
 	Builder b;
 	b.initialize();
@@ -153,34 +156,11 @@ int main()
 		touchPosition touch;
 		hidTouchRead(&touch);
 		
-		if (kDown & KEY_TOUCH) {
-			config->interact(&touch);
-			menu->refreshStrings();
-		}
 			// Button Handling
 
 		if (kDown & KEY_START) break; // break in order to return to hbmenu
 
-		if (kHeld & KEY_L) {
-			config->interactKey(&kDown);
-		}else if(kHeld & KEY_R) {
-			if (kDown & KEY_LEFT) {
-				config->selectedLanguage--;
-				if (config->selectedLanguage < 0) config->selectedLanguage = 12;
-				u8 langIdx = config->selectedLanguage;
-				if (langIdx == 12) CFGU_GetSystemLanguage(&langIdx);
-				gLang.loadStrings(langIdx);
-				menu->refreshStrings();
-			}
-			if (kDown & KEY_RIGHT) {
-				config->selectedLanguage++;
-				if (config->selectedLanguage > 12) config->selectedLanguage = 0;
-				u8 langIdx = config->selectedLanguage;
-				if (langIdx == 12) CFGU_GetSystemLanguage(&langIdx);
-				gLang.loadStrings(langIdx);
-				menu->refreshStrings();
-			}
-		}else{
+		{
 
 			if (kDown & KEY_DOWN) menu->down();
 
@@ -192,18 +172,24 @@ int main()
 
 			else if(kDown & KEY_A) menu->action();
 
+			else if(kDown & KEY_X) menu->scrollDesc(1);
+
+			else if(kDown & KEY_Y) menu->scrollDesc(-1);
+
+			else if(kDown & KEY_SELECT) menu = menu->searchPrompt();
 
 			else if(kDown & KEY_B) menu = menu->back();
 		}
 		// Draw Screens
 
+		menu->tickBottom(); // cover fetch/decode, outside the frame
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C2D_TargetClear(top, BGColor);
 		C2D_TargetClear(bottom, C2D_Color32f(0,0,0,1));
-		C2D_SceneBegin(top);	
+		C2D_SceneBegin(top);
 		menu->drawMenu();
 		C2D_SceneBegin(bottom);
-		config->draw();
+		menu->drawBottom(config);
 		C3D_FrameEnd(0);
 
 		// Process queue
@@ -211,6 +197,7 @@ int main()
 
 	}
 	config->save();
+	coverCacheStop();
 	denit();
 	return 0;
 

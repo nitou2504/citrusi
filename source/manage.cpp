@@ -67,10 +67,21 @@ static std::string basenameLower(std::string p) {
     return toLowerCase(p);
 }
 
+// mounting each YANBF title's romfs is slow (~27 mounts), so cache it for
+// the session. YANBF titles never change while the app runs; invalidated on
+// our own YANBF delete.
+static bool gYanbfCached = false;
+static std::map<std::string, u64> gYanbfCache;
+
+void invalidateYanbfCache() { gYanbfCached = false; }
+
 std::map<std::string, u64> getYanbfForwarders() {
+    if (gYanbfCached) return gYanbfCache;
     std::map<std::string, u64> out;
     u32 count = 0;
-    if (R_FAILED(AM_GetTitleCount(MEDIATYPE_SD, &count)) || count == 0) return out;
+    if (R_FAILED(AM_GetTitleCount(MEDIATYPE_SD, &count)) || count == 0) {
+        gYanbfCache = out; gYanbfCached = true; return out;
+    }
     std::vector<u64> titles(count);
     u32 read = 0;
     if (R_FAILED(AM_GetTitleList(&read, MEDIATYPE_SD, count, titles.data()))) return out;
@@ -91,6 +102,8 @@ std::map<std::string, u64> getYanbfForwarders() {
         }
         romfsUnmount("yfwd");
     }
+    gYanbfCache = out;
+    gYanbfCached = true;
     return out;
 }
 
@@ -149,6 +162,7 @@ Result deleteForwarder(u64 tid) {
 Result deleteYanbfForwarder(u64 tid) {
     Result res = AM_DeleteTitle(MEDIATYPE_SD, tid);
     AM_DeleteTicket(tid);
+    invalidateYanbfCache();
     return res;
 }
 

@@ -10,15 +10,24 @@
 #define SDCARD_BANNER_PATH FORWARDER_DIR+std::string("/banners/")
 #define SDCARD_ICON_PATH FORWARDER_DIR+std::string("/icons/")
 #define SDCARD_LANG_DIR FORWARDER_DIR+std::string("/lang/")
-#define ENTRY_HEIGHT 48
+#define ENTRY_HEIGHT 32
 #define FILELIST_HEIGHT (240-MENU_HEADING_HEIGHT-MENU_BORDER_HEIGHT)
-#define MENU_BORDER_HEIGHT 8
-#define MENU_HEADING_HEIGHT 40
+#define MENU_BORDER_HEIGHT 4
+#define MENU_HEADING_HEIGHT 28
 #define MAX_ENTRY_COUNT ((FILELIST_HEIGHT-(FILELIST_HEIGHT%ENTRY_HEIGHT))/ENTRY_HEIGHT)
 
-#define BGColor HexColor(0x293B5F)
-#define BORDER_COLOR HexColor(0x77ACF1)
-#define BORDER_FOREGROUND HexColor(0x293B5F)
-#define HIGHLIGHT_BGCOLOR HexColor(0xDBE6FD)
-#define HIGHLIGHT_FOREGROUND HexColor(0x293B5F)
-#define FOREGROUND_COLOR HexColor(0xDBE6FD)
+// flat dark design system
+#define COL_BG        HexColor(0x10141C)
+#define COL_SURFACE   HexColor(0x1A2130)
+#define COL_ELEV      HexColor(0x232C40)
+#define COL_ACCENT    HexColor(0x7C5CFF)
+#define COL_TEXT      HexColor(0xF2F5FA)
+#define COL_TEXT_DIM  HexColor(0x8E9AB3)
+
+// legacy names (dialogs/config inherit the new palette)
+#define BGColor COL_BG
+#define BORDER_COLOR COL_ELEV
+#define BORDER_FOREGROUND COL_TEXT_DIM
+#define HIGHLIGHT_BGCOLOR COL_ACCENT
+#define HIGHLIGHT_FOREGROUND COL_TEXT
+#define FOREGROUND_COLOR COL_TEXT_DIM
