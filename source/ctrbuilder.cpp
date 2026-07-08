@@ -170,24 +170,10 @@ std::string CtrBuilder::buildSmdh(const std::string& templateSmdh, const std::st
 
 // ---- banner ------------------------------------------------------------
 
-// YANBF edit_bcmdl walk: returns texture data offset within (decompressed) cgfx, 0 on failure
-static u32 findTxobTexture(const std::string& cgfx, u32* texSize) {
-    if (cgfx.size() < 0x100 || memcmp(cgfx.data(), "CGFX", 4) != 0) return 0;
-    u32 o = 4+2+2+4+4 + 4+4+4;
-    u32 dict1 = 0;
-    for (int i = 0; i < 15; i++) {
-        if (i == 1) dict1 = o + 4 + rd32(cgfx, o + 4);
-        o += 8;
-    }
-    if (!dict1 || dict1 + 0x40 > cgfx.size()) return 0;
-    u32 p = dict1 + 4+4+4+4+2+0xA+4+2+2+4;
-    u32 objOff = p + 4 + rd32(cgfx, p);
-    if (objOff + 0x50 > cgfx.size()) return 0;
-    *texSize = rd32(cgfx, objOff + 0x44);
-    u32 texOff = objOff + 0x48 + rd32(cgfx, objOff + 0x48);
-    if (texOff + *texSize > cgfx.size()) return 0;
-    return texOff;
-}
+// bannertool banners have a constant 0x1580-byte CGFX header followed by the
+// 256x128 RGBA4444 texture (0x10000 bytes) — see bannertool data.h
+#define BANNER_TEX_OFFSET 0x1580
+#define BANNER_TEX_SIZE   0x10000
 
 std::string CtrBuilder::buildBanner(const std::string& templateBanner,
                                     const std::string& etc1a4, const std::string& cwav) {
@@ -199,13 +185,13 @@ std::string CtrBuilder::buildBanner(const std::string& templateBanner,
 
     if (!etc1a4.empty()) {
         std::string cgfx = lz11Decompress(cgfxLz);
-        u32 texSize = 0;
-        u32 texOff = findTxobTexture(cgfx, &texSize);
-        if (texOff && texSize == etc1a4.size()) {
-            cgfx.replace(texOff, texSize, etc1a4);
+        if (cgfx.size() >= BANNER_TEX_OFFSET + BANNER_TEX_SIZE &&
+            memcmp(cgfx.data(), "CGFX", 4) == 0 &&
+            etc1a4.size() == BANNER_TEX_SIZE) {
+            cgfx.replace(BANNER_TEX_OFFSET, BANNER_TEX_SIZE, etc1a4);
             cgfxLz = lz11StoreCompress(cgfx);
         } else {
-            ctrLogger.error("TXOB texture not found/size mismatch, keeping template art");
+            ctrLogger.error("banner texture patch failed, keeping template art");
         }
     }
     u32 newCwavOff = 0x88 + (u32)cgfxLz.size();

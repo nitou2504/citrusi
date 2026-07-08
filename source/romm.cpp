@@ -197,8 +197,12 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out) {
             rom.name = (r.contains("name") && !r["name"].is_null()) ? r["name"].get<std::string>() : rom.fsName;
             if (rom.name.empty()) rom.name = rom.fsName;
             rom.sizeBytes = r.value("fs_size_bytes", (u64)0);
-            if (r.contains("path_cover_large") && !r["path_cover_large"].is_null())
+            if (r.contains("path_cover_large") && !r["path_cover_large"].is_null()) {
                 rom.coverPath = r["path_cover_large"].get<std::string>();
+                // strip ?ts= cache-buster: raw datetime breaks nginx (HTTP 400)
+                size_t q = rom.coverPath.find('?');
+                if (q != std::string::npos) rom.coverPath = rom.coverPath.substr(0, q);
+            }
             rom.multiFile = r.value("multi", false) || r.value("has_multiple_files", false);
             // multi-part roms download as a zip, not a playable .nds — skip
             if (rom.fsName.empty() || rom.multiFile) continue;

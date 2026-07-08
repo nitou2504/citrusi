@@ -12,8 +12,6 @@
 #define STBI_NO_LINEAR
 #include "stb_image.h"
 
-#include "rg_etc1.h"
-
 static Logger boxLogger("Boxart");
 
 #define BA_W 256
@@ -36,6 +34,7 @@ static inline void sampleBilinear(const u8* src, int sw, int sh, float fx, float
     }
 }
 
+// bannertool banner texture: 256x128 RGBA4444, 8x8 tiles, Morton order in-tile
 std::string fetchBoxartEtc1a4(RommClient& client, const std::string& coverUrl,
                               std::function<bool(int,int)> progress) {
     if (coverUrl.empty()) return "";
@@ -64,42 +63,19 @@ std::string fetchBoxartEtc1a4(RommClient& client, const std::string& coverUrl,
                            &canvas[(y*BA_W + xoff + x)*4]);
     stbi_image_free(src);
 
-    // ETC1A4 encode, 3DS tiling (tex3ds layout)
-    static bool etcInit = false;
-    if (!etcInit) { rg_etc1::pack_etc1_block_init(); etcInit = true; }
-    rg_etc1::etc1_pack_params params;
-    params.clear();
-    params.m_quality = rg_etc1::cLowQuality;
-
-    std::string out;
-    out.reserve(BA_W * BA_H); // 1 byte/px
-    int tilesY = BA_H / 8, tilesX = BA_W / 8;
-    for (int ty = 0; ty < tilesY; ty++) {
-        for (int tx = 0; tx < tilesX; tx++) {
-            for (int j = 0; j < 8; j += 4) {
-                for (int i = 0; i < 8; i += 4) {
-                    u8 inBlock[4*4*4];
-                    u8 outAlpha[8] = {0};
-                    for (int y = 0; y < 4; y++) {
-                        for (int x = 0; x < 4; x++) {
-                            const u8* p = &canvas[((ty*8 + j + y)*BA_W + tx*8 + i + x)*4];
-                            inBlock[y*16 + x*4 + 0] = p[0];
-                            inBlock[y*16 + x*4 + 1] = p[1];
-                            inBlock[y*16 + x*4 + 2] = p[2];
-                            inBlock[y*16 + x*4 + 3] = 0xFF;
-                            u8 a4 = p[3] >> 4;
-                            if (y & 1) outAlpha[2*x + y/2] |= (a4 << 4);
-                            else       outAlpha[2*x + y/2] |= a4;
-                        }
-                    }
-                    u8 outBlock[8];
-                    rg_etc1::pack_etc1_block(outBlock, (const unsigned int*)inBlock, params);
-                    out.append((char*)outAlpha, 8);
-                    for (int k = 7; k >= 0; k--) out += (char)outBlock[k];
-                }
-            }
+    // RGBA4444 tiled (bannertool image_data_to_tiles layout)
+    std::string out(BA_W * BA_H * 2, '\0');
+    u16* dst = (u16*)&out[0];
+    for (u32 y = 0; y < BA_H; y++) {
+        for (u32 x = 0; x < BA_W; x++) {
+            u32 index = (((y >> 3) * (BA_W >> 3) + (x >> 3)) << 6) +
+                        ((x & 1) | ((y & 1) << 1) | ((x & 2) << 1) |
+                         ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3));
+            const u8* p = &canvas[(y*BA_W + x)*4];
+            dst[index] = (u16)(((p[0] & ~0xF) << 8) | ((p[1] & ~0xF) << 4) |
+                               (p[2] & ~0xF) | (p[3] >> 4));
         }
-        if (progress && !progress(ty + 1, tilesY)) return "";
     }
+    if (progress) progress(1, 1);
     return out;
 }
