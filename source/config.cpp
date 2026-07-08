@@ -155,6 +155,22 @@ void Config::interactKey(u32* key) {
     }
 }
 
+const char* Config::languageName() {
+    if (this->selectedLanguage == 12) return "System";
+    if (this->selectedLanguage >= 0 && this->selectedLanguage < 12)
+        return langNames[this->selectedLanguage];
+    return "System";
+}
+
+void Config::cycleLanguage(int dir) {
+    this->selectedLanguage += dir;
+    if (this->selectedLanguage < 0) this->selectedLanguage = 12;
+    if (this->selectedLanguage > 12) this->selectedLanguage = 0;
+    u8 langIdx = this->selectedLanguage;
+    if (langIdx == 12) CFGU_GetSystemLanguage(&langIdx);
+    gLang.loadStrings(langIdx);
+}
+
 void Config::save() {
     nlohmann::json j;
     j["randomTID"] = this->randomTID;

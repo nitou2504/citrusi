@@ -12,6 +12,7 @@ std::string aligned(const void* data, u64 size, u64 padTo);
 std::string aligned(std::string data, u64 padTo);
 std::string alignmentPadding(u64 size, u64 padTo);
 std::string toLowerCase(std::string s);
+std::string utf8FoldLatin(const std::string& s);
 
 typedef struct 
 {

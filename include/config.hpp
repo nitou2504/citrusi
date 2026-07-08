@@ -19,5 +19,7 @@ class Config {
     void interactKey(u32 *key);
     void save();
     void load();
+    const char* languageName();
+    void cycleLanguage(int dir);
     Config();
 };

@@ -65,6 +65,58 @@ std::string alignmentPadding(u64 size, u64 padTo) {
     }
     return std::string();
 }
+// folds Latin-1/Latin-Ext-A diacritics to ASCII so the 3DS system font
+// doesn't render '?' for characters like the macron O in Okamiden
+std::string utf8FoldLatin(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = s[i];
+        if (c < 0x80) { out += (char)c; i++; continue; }
+        if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+            unsigned int cp = ((c & 0x1F) << 6) | (s[i+1] & 0x3F);
+            i += 2;
+            const char* r = nullptr;
+            if (cp >= 0xC0 && cp <= 0xC5) r = "A";
+            else if (cp == 0xC6) r = "AE";
+            else if (cp == 0xC7) r = "C";
+            else if (cp >= 0xC8 && cp <= 0xCB) r = "E";
+            else if (cp >= 0xCC && cp <= 0xCF) r = "I";
+            else if (cp == 0xD1) r = "N";
+            else if ((cp >= 0xD2 && cp <= 0xD6) || cp == 0xD8) r = "O";
+            else if (cp >= 0xD9 && cp <= 0xDC) r = "U";
+            else if (cp == 0xDD) r = "Y";
+            else if (cp == 0xDF) r = "ss";
+            else if (cp >= 0xE0 && cp <= 0xE5) r = "a";
+            else if (cp == 0xE6) r = "ae";
+            else if (cp == 0xE7) r = "c";
+            else if (cp >= 0xE8 && cp <= 0xEB) r = "e";
+            else if (cp >= 0xEC && cp <= 0xEF) r = "i";
+            else if (cp == 0xF1) r = "n";
+            else if ((cp >= 0xF2 && cp <= 0xF6) || cp == 0xF8) r = "o";
+            else if (cp >= 0xF9 && cp <= 0xFC) r = "u";
+            else if (cp == 0xFD || cp == 0xFF) r = "y";
+            else if (cp >= 0x100 && cp <= 0x17F) {
+                // Latin Extended-A: base letters, one char per codepoint
+                static const char base[129] =
+                    "AaAaAa" "CcCcCcCc" "DdDd" "EeEeEeEeEe" "GgGgGgGg" "HhHh"
+                    "IiIiIiIiIi" "Ii" "Jj" "Kkk" "LlLlLlLlLl" "NnNnNnn" "Nn"
+                    "OoOoOoOo" "RrRrRr" "SsSsSsSs" "TtTtTt" "UuUuUuUuUuUu"
+                    "Ww" "YyY" "ZzZzZz" "s";
+                out += base[cp - 0x100];
+                continue;
+            }
+            if (r) out += r;
+            else { out += s[i-2]; out += s[i-1]; } // keep as-is
+            continue;
+        }
+        // longer sequences (CJK etc): keep untouched
+        int len = ((c & 0xF0) == 0xE0) ? 3 : ((c & 0xF8) == 0xF0) ? 4 : 1;
+        for (int k = 0; k < len && i < s.size(); k++) out += s[i++];
+    }
+    return out;
+}
+
 std::string toLowerCase(std::string s) {
     std::string ret=s;
     std::transform(ret.begin(), ret.end(), ret.begin(),[](unsigned char c){ return std::tolower(c); });
