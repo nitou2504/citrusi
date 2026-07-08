@@ -4,7 +4,9 @@
 #include <string>
 #include <sstream>
 #include "dialog.hpp"
+extern "C" {
 #include "graphics.h"
+}
 #include "settings.hpp"
 
 void Dialog::wrapText(std::string text) {
@@ -51,7 +53,8 @@ void Dialog::draw() {
     C2D_TextBufDelete(buf);
 
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-    C2D_SceneBegin(this->target);	
+    C2D_TargetClear(this->target, BGColor); // avoid stale double-buffer bleed
+    C2D_SceneBegin(this->target);
     drawPanel(this->x,this->y,0,this->width, this->height,MENU_BORDER_HEIGHT,BGColor,BORDER_COLOR);
     float drawx = this->x+MENU_BORDER_HEIGHT;
     float drawxOffset = (this->width/this->options.size());
@@ -92,13 +95,44 @@ int Dialog::handle() {
         }else if(kDown & KEY_RIGHT) {
             this->selected++;
             if (this->selected >= this->options.size()) this->selected=0;
-        }else if(kDown & KEY_A || kDown & KEY_START) {
+        }else if((kDown & KEY_A) || (kDown & KEY_START)) {
             return this->selected;
+        }else if(kDown & KEY_B) {
+            return -1; // cancel
         }
         this->draw();
     }
     return -1;
 }
+// full-frame loading screen. Renders through the real render targets (both
+// screens) and leaves the message on-screen while the caller's blocking work
+// runs afterwards — the framebuffer keeps showing it until the next frame.
+static C3D_RenderTarget* gLoadTop = nullptr;
+static C3D_RenderTarget* gLoadBottom = nullptr;
+void gLoadingTargets(C3D_RenderTarget* top, C3D_RenderTarget* bottom) {
+    gLoadTop = top;
+    gLoadBottom = bottom;
+}
+
+void showLoading(C3D_RenderTarget* target, std::initializer_list<std::string> message) {
+    (void)target;
+    if (!gLoadBottom) return;
+    std::vector<std::string> lines(message.begin(), message.end());
+    // draw a couple of frames so the present definitely lands before blocking
+    for (int f = 0; f < 2; f++) {
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        if (gLoadTop) { C2D_TargetClear(gLoadTop, BGColor); }
+        C2D_TargetClear(gLoadBottom, BGColor);
+        C2D_SceneBegin(gLoadBottom);
+        float y = 240.0f / 2 - (lines.size() * 9);
+        for (auto& l : lines) {
+            drawText(160, y, 0.5f, 0.5f, 0, FOREGROUND_COLOR, l.c_str(), C2D_AlignCenter);
+            y += 18;
+        }
+        C3D_FrameEnd(0);
+    }
+}
+
 Dialog::Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, std::string message, std::initializer_list<std::string> options, int defaultChoice) {
     this->options = std::vector(options.begin(),options.end());
     this->target=target;

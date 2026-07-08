@@ -15,5 +15,8 @@ class Dialog {
     int handle();
     Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, std::string message, std::initializer_list<std::string> options, int defaultChoice=0);
     Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, std::initializer_list<std::string> message, std::initializer_list<std::string> options, int defaultChoice=0);
-    
+
 };
+
+void showLoading(C3D_RenderTarget* target, std::initializer_list<std::string> message);
+void gLoadingTargets(C3D_RenderTarget* top, C3D_RenderTarget* bottom);
