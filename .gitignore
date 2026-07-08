@@ -12,3 +12,10 @@ build/
 core
 *.bmp
 *.srl1
+
+# downloaded tools + generated intermediates + local backups
+tools/bin/
+ctr-template/template.bnr
+cia/app.bnr
+backups/
+ctr-payload/build/

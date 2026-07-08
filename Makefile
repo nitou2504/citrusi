@@ -29,7 +29,7 @@ include $(DEVKITARM)/3ds_rules
 
 APP_TITLE	:= romm3ds
 APP_DESCRIPTION := RomM NDS client + forwarder manager
-APP_AUTHOR := sthefano + RandalHoffman
+APP_AUTHOR := Nitou25
 
 TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
