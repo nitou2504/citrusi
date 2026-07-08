@@ -574,7 +574,8 @@ RommClient gRomm;
                     Dialog(target,0,0,320,240,{"Fetching sound...",shorten(entry.title,28)},{},0).handle();
                     std::string gameCwav = fetchGameSound(gRomm, romPath);
                     Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shorten(entry.title,28)},{},0).handle();
-                    u64 ctid = gCtr.allocateTID(entry.fsName);
+                    std::string romBase = std::filesystem::path(romPath).filename().generic_string();
+                    u64 ctid = gCtr.allocateTID(romBase);
                     if (ctid == 0) {
                         Dialog(target,0,0,320,240,{"No free forwarder title IDs"},{"OK"}).handle();
                         break;

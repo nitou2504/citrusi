@@ -338,9 +338,10 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     // --- path file for the payload
     char cfg[64];
     snprintf(cfg, sizeof(cfg), "%s%016llX.txt", CTR_CONFIG_DIR.c_str(), tid);
-    // match the known-working YANBF format: "/roms/nds/x.nds" (no sd: prefix)
+    // nds-bootstrap needs the "sd:" device prefix (verified against a working
+    // YANBF launch: NDS_PATH = sd:/roms/nds/...)
     std::string launchPath = romPath;
-    if (launchPath.rfind("sdmc:", 0) == 0) launchPath = launchPath.substr(5);
+    if (launchPath.rfind("sdmc:", 0) == 0) launchPath = "sd:" + launchPath.substr(5);
     std::ofstream o(cfg);
     o << launchPath;
     o.close();
