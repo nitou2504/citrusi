@@ -8,15 +8,27 @@ to the YANBF bootstrap TWL title (FWDR).
 */
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <3ds.h>
 
-static void fatal(const char* msg) {
+static FILE* plog;
+static void logline(const char* fmt, ...) {
+    if (!plog) return;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(plog, fmt, args);
+    va_end(args);
+    fputc('\n', plog);
+    fflush(plog);
+}
+
+static void fatal(const char* msg, Result code) {
     gfxInitDefault();
     consoleInit(GFX_TOP, NULL);
-    printf("%s\n\nPress START to exit.", msg);
+    printf("%s\n\ncode: %08lX\n\nPress START to exit.", msg, (u32)code);
     while (aptMainLoop()) {
         gfxFlushBuffers();
         gfxSwapBuffers();
@@ -28,10 +40,13 @@ static void fatal(const char* msg) {
 }
 
 int main() {
-    amInit();
+    Result amres = amInit();
+    plog = fopen("sdmc:/3ds/forwarder/payload.log", "w");
+    logline("payload start, amInit=%08lX", (u32)amres);
 
     u64 tid = 0;
-    APT_GetProgramID(&tid);
+    Result r = APT_GetProgramID(&tid);
+    logline("APT_GetProgramID=%08lX tid=%016llX", (u32)r, tid);
 
     char cfgPath[64];
     snprintf(cfgPath, sizeof(cfgPath), "sdmc:/3ds/forwarder/ctr/%016llX.txt", tid);
@@ -39,7 +54,8 @@ int main() {
     char line[512] = {0};
     FILE* f = fopen(cfgPath, "r");
     if (!f) {
-        fatal("Missing forwarder path file.\nReinstall this forwarder with romm3ds.");
+        logline("missing %s", cfgPath);
+        fatal("Missing forwarder path file.\nReinstall this forwarder with romm3ds.", 0);
         amExit();
         return 1;
     }
@@ -48,8 +64,9 @@ int main() {
     // strip newline
     size_t len = strlen(line);
     while (len && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = 0;
+    logline("path=[%s]", line);
     if (!len) {
-        fatal("Empty forwarder path file.\nReinstall this forwarder with romm3ds.");
+        fatal("Empty forwarder path file.\nReinstall this forwarder with romm3ds.", 0);
         amExit();
         return 1;
     }
@@ -60,22 +77,34 @@ int main() {
     if (path) {
         fputs(line, path);
         fclose(path);
+        logline("path.txt written");
+    } else {
+        logline("path.txt write FAILED");
     }
 
     Result ret = 0;
     AM_TitleEntry bootstrap;
     u64 fwdr = 0x0004800546574452ULL;
-    if (ret = AM_GetTitleInfo(MEDIATYPE_NAND, 1, &fwdr, &bootstrap), R_SUCCEEDED(ret)) {
-        if (ret = APT_PrepareToDoApplicationJump(0, fwdr, 0), R_SUCCEEDED(ret)) {
+    ret = AM_GetTitleInfo(MEDIATYPE_NAND, 1, &fwdr, &bootstrap);
+    logline("AM_GetTitleInfo=%08lX", (u32)ret);
+    if (R_SUCCEEDED(ret)) {
+        ret = APT_PrepareToDoApplicationJump(0, fwdr, 0);
+        logline("APT_PrepareToDoApplicationJump=%08lX", (u32)ret);
+        if (R_SUCCEEDED(ret)) {
             u8 param[0x300];
             u8 hmac[0x20];
+            memset(param, 0, sizeof(param));
+            memset(hmac, 0, sizeof(hmac));
+            logline("jumping");
             ret = APT_DoApplicationJump(param, sizeof(param), hmac);
+            logline("APT_DoApplicationJump=%08lX (returned!)", (u32)ret);
         }
     }
     if (R_FAILED(ret)) {
-        fatal("Failed to launch bootstrap.\n\nInstall bootstrap.cia from the\nYANBF release with FBI.");
+        fatal("Failed to launch bootstrap.\n\nInstall bootstrap.cia from the\nYANBF release with FBI.", ret);
     }
 
+    if (plog) fclose(plog);
     amExit();
     return 0;
 }

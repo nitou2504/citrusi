@@ -4,6 +4,8 @@
 #include <vector>
 #include "boxart.hpp"
 #include "logger.hpp"
+#include "helpers.hpp"
+#include "settings.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_JPEG
@@ -102,8 +104,19 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
     bool haveGc = readGamecode(romPath, gc);
     std::string img;
 
+    (void)coverPath; // deliberately unused: portrait covers look wrong in banners
     if (haveGc) {
         std::string gc4(gc, 4), gc3(gc, 3);
+        // local mirror on SD first (sd:/3ds/forwarder/assets/<GC>/<GC>.png)
+        std::string assetsDir = FORWARDER_DIR + std::string("/assets/");
+        for (const std::string& c : {gc4, gc3}) {
+            std::string p = assetsDir + c + "/" + c + ".png";
+            if (fileExists(p) && renderImage(readEntireFile(p), canvas)) {
+                boxLogger.info("banner art: SD assets " + c);
+                return tileRgba4444(canvas);
+            }
+        }
+        // github as best-effort (TLS to github often fails on 3DS httpc)
         std::string base = "https://raw.githubusercontent.com/YANBForwarder/assets/main/assets/";
         if (client.fetchUrl(base + gc4 + "/" + gc4 + ".png", img) && renderImage(img, canvas)) {
             boxLogger.info("banner art: YANBF assets " + gc4);
@@ -113,28 +126,7 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
             boxLogger.info("banner art: YANBF assets " + gc3);
             return tileRgba4444(canvas);
         }
-        boxLogger.info("no YANBF asset for " + gc4 + " (" + client.lastError + ")");
-        // GameTDB coverM by region letter
-        const char* region = "EN";
-        switch (gc[3]) {
-            case 'D': region = "DE"; break; case 'E': region = "US"; break;
-            case 'F': region = "FR"; break; case 'H': region = "NL"; break;
-            case 'I': region = "IT"; break; case 'J': region = "JA"; break;
-            case 'K': region = "KO"; break; case 'R': region = "RU"; break;
-            case 'S': region = "ES"; break; case 'T': region = "US"; break;
-            case 'U': region = "AU"; break;
-        }
-        std::string tdb = std::string("https://art.gametdb.com/ds/coverM/") + region + "/" + gc4 + ".jpg";
-        if (client.fetchUrl(tdb, img) && renderImage(img, canvas)) {
-            boxLogger.info("banner art: GameTDB " + gc4);
-            return tileRgba4444(canvas);
-        }
-        boxLogger.info("no GameTDB cover (" + client.lastError + ")");
+        boxLogger.info("no asset art for " + gc4 + ", keeping template");
     }
-    if (!coverPath.empty() && client.fetchUrl(coverPath, img) && renderImage(img, canvas)) {
-        boxLogger.info("banner art: RomM cover");
-        return tileRgba4444(canvas);
-    }
-    boxLogger.info("no banner art found, keeping template");
     return "";
 }

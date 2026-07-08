@@ -3,6 +3,8 @@
 #include <cstdio>
 #include "cwav.hpp"
 #include "logger.hpp"
+#include "helpers.hpp"
+#include "settings.hpp"
 
 static Logger cwavLogger("CWAV");
 
@@ -131,15 +133,27 @@ std::string fetchGameSound(RommClient& client, const std::string& romPath) {
     for (int i = 0; i < 4; i++)
         if (gc[i] < 0x20 || gc[i] > 0x7E) return "";
 
-    std::string base = "https://raw.githubusercontent.com/YANBForwarder/assets/main/assets/";
     std::string wav;
     std::string gc4(gc, 4), gc3(gc, 3);
+    // local mirror on SD first
+    std::string assetsDir = FORWARDER_DIR + std::string("/assets/");
+    for (const std::string& c : {gc4, gc3}) {
+        std::string p = assetsDir + c + "/" + c + ".wav";
+        if (fileExists(p)) {
+            wav = readEntireFile(p);
+            if (wav.size() >= 44) {
+                cwavLogger.info("sound: SD assets " + c);
+                return wavToCwav(wav);
+            }
+        }
+    }
+    std::string base = "https://raw.githubusercontent.com/YANBForwarder/assets/main/assets/";
     if (!client.fetchUrl(base + gc4 + "/" + gc4 + ".wav", wav) || wav.size() < 44) {
         if (!client.fetchUrl(base + gc3 + "/" + gc3 + ".wav", wav) || wav.size() < 44) {
             cwavLogger.info("no YANBF sound for " + gc4 + " (" + client.lastError + ")");
             return "";
         }
     }
-    cwavLogger.info("sound: YANBF assets, " + std::to_string(wav.size()) + " bytes");
+    cwavLogger.info("sound: YANBF assets github, " + std::to_string(wav.size()) + " bytes");
     return wavToCwav(wav);
 }
