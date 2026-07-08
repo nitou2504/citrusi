@@ -97,7 +97,18 @@ int main() {
             memset(hmac, 0, sizeof(hmac));
             logline("jumping");
             ret = APT_DoApplicationJump(param, sizeof(param), hmac);
-            logline("APT_DoApplicationJump=%08lX (returned!)", (u32)ret);
+            logline("APT_DoApplicationJump=%08lX", (u32)ret);
+            if (R_SUCCEEDED(ret)) {
+                // the jump executes asynchronously: keep pumping APT events
+                // until NS terminates this application
+                logline("waiting for APT to take over");
+                if (plog) { fclose(plog); plog = NULL; }
+                while (aptMainLoop()) {
+                    gspWaitForVBlank();
+                }
+                amExit();
+                return 0;
+            }
         }
     }
     if (R_FAILED(ret)) {
