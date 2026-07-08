@@ -551,8 +551,8 @@ RommClient gRomm;
                                     return true;
                                 });
                             if (!zok) {
-                                if (zerr != "cancelled") remove(dest.c_str());
-                                Dialog(target,0,0,320,240,{"Extract failed",zerr},{"OK"}).handle();
+                                remove(dest.c_str());
+                                Dialog(target,0,0,320,240,{(zerr=="cancelled")?"Extract cancelled":"Extract failed",zerr},{"OK"}).handle();
                                 break;
                             }
                             remove(dest.c_str());
