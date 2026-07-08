@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "manage.hpp"
 #include "helpers.hpp"
+#include "ctrbuilder.hpp"
 
 u64 computeForwarderTID(const std::string& ndsPath) {
     FILE* f = fopen(ndsPath.c_str(), "rb");
@@ -93,12 +94,29 @@ std::map<std::string, u64> getYanbfForwarders() {
     return out;
 }
 
+std::map<std::string, u64> getRommCtrForwarders() {
+    std::map<std::string, u64> out;
+    std::error_code ec;
+    if (!std::filesystem::exists(CTR_CONFIG_DIR, ec)) return out;
+    for (const auto& entry : std::filesystem::directory_iterator(CTR_CONFIG_DIR, ec)) {
+        std::string fn = entry.path().filename();
+        if (fn.size() != 20 || entry.path().extension() != ".txt") continue; // 16 hex + .txt
+        u64 tid = strtoull(fn.substr(0, 16).c_str(), nullptr, 16);
+        if (!tid) continue;
+        std::string content = readEntireFile(entry.path().generic_string());
+        std::string name = basenameLower(content);
+        if (!name.empty()) out[name] = tid;
+    }
+    return out;
+}
+
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
     std::vector<ManagedRom> out;
     std::error_code ec;
     if (!std::filesystem::exists(romDir, ec)) return out;
     std::vector<u64> installed = getInstalledTwlTitles();
     std::map<std::string, u64> yanbf = getYanbfForwarders();
+    std::map<std::string, u64> rommCtr = getRommCtrForwarders();
     for (const auto& entry : std::filesystem::directory_iterator(romDir, ec)) {
         if (entry.is_directory()) continue;
         std::string filename = entry.path().filename();
@@ -112,6 +130,8 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         r.installed = r.tid != 0 && twlTitleInstalled(installed, r.tid);
         auto y = yanbf.find(toLowerCase(filename));
         r.yanbfTid = (y != yanbf.end()) ? y->second : 0;
+        auto rc = rommCtr.find(toLowerCase(filename));
+        r.rommTid = (rc != rommCtr.end()) ? rc->second : 0;
         out.push_back(r);
     }
     std::sort(out.begin(), out.end(), [](const ManagedRom& a, const ManagedRom& b) {
@@ -129,6 +149,15 @@ Result deleteForwarder(u64 tid) {
 Result deleteYanbfForwarder(u64 tid) {
     Result res = AM_DeleteTitle(MEDIATYPE_SD, tid);
     AM_DeleteTicket(tid);
+    return res;
+}
+
+Result deleteRommCtrForwarder(u64 tid) {
+    Result res = AM_DeleteTitle(MEDIATYPE_SD, tid);
+    AM_DeleteTicket(tid);
+    char cfg[64];
+    snprintf(cfg, sizeof(cfg), "%s%016llX.txt", CTR_CONFIG_DIR.c_str(), tid);
+    remove(cfg);
     return res;
 }
 

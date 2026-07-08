@@ -10,6 +10,7 @@ struct ManagedRom {
     u64 tid;              // expected TWL forwarder title id (0 if unknown)
     bool installed;       // TWL forwarder present on NAND
     u64 yanbfTid;         // YANBF CTR forwarder title id on SD (0 if none)
+    u64 rommTid;          // romm3ds CTR forwarder title id on SD (0 if none)
     u64 sizeBytes;
 };
 
@@ -26,8 +27,13 @@ std::map<std::string, u64> getYanbfForwarders();
 
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir);
 
+// romm3ds CTR forwarders: maps lowercase rom filename -> tid
+// (from sd:/3ds/forwarder/ctr/<tid>.txt bookkeeping, verified against AM)
+std::map<std::string, u64> getRommCtrForwarders();
+
 Result deleteForwarder(u64 tid);            // TWL, NAND
 Result deleteYanbfForwarder(u64 tid);       // CTR, SD
+Result deleteRommCtrForwarder(u64 tid);     // CTR, SD + path file
 
 std::string humanSize(u64 bytes);
 // "SD: 12.3GB free | DSiWare: 27/40"

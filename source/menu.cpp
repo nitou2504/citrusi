@@ -16,8 +16,22 @@ extern "C" {
 #include "lang.hpp"
 #include "manage.hpp"
 #include "zip.hpp"
+#include "ctrbuilder.hpp"
 
 #define MAX_DSIWARE 40
+
+static CtrBuilder gCtr;
+static bool gCtrReady = false;
+
+static bool ensureCtrBuilder(C3D_RenderTarget* target) {
+    if (gCtrReady) return true;
+    ReturnResult* r = gCtr.initialize();
+    gCtrReady = r->isSuccess();
+    if (!gCtrReady)
+        Dialog(target,0,0,320,240,{"CTR template error",r->message},{"OK"}).handle();
+    delete r;
+    return gCtrReady;
+}
 
 static bool isZipName(const std::string& n) {
     std::string l = toLowerCase(n);
@@ -44,9 +58,11 @@ RommClient gRomm;
         this->action=old->action;
         this->rommId=old->rommId;
         this->fsName=old->fsName;
+        this->title=old->title;
         this->sizeBytes=old->sizeBytes;
         this->tid=old->tid;
         this->ytid=old->ytid;
+        this->rtid=old->rtid;
         this->installed=old->installed;
     }
     MenuSelection* MenuSelection::setPath(std::filesystem::path p) {
@@ -216,6 +232,7 @@ RommClient gRomm;
             e->action=RommInstall;
             e->rommId=rom.id;
             e->fsName=rom.fsName;
+            e->title=rom.name;
             e->sizeBytes=rom.sizeBytes;
             e->path=std::filesystem::path(ROMM_ROM_DIR + rom.fsName);
             entries.push_back(e);
@@ -233,22 +250,25 @@ RommClient gRomm;
         std::vector<ManagedRom> roms = scanManagedRoms(ROMM_ROM_DIR);
         for (auto& rom : roms) {
             MenuSelection* e = new MenuSelection();
-            std::string marker = "[ ] ";
-            if (rom.installed && rom.yanbfTid) marker="[+Y] ";
-            else if (rom.installed) marker="[+] ";
-            else if (rom.yanbfTid) marker="[Y] ";
+            std::string marker = "[";
+            if (rom.rommTid) marker += "R";
+            if (rom.installed) marker += "+";
+            if (rom.yanbfTid) marker += "Y";
+            if (marker.size()==1) marker += " ";
+            marker += "] ";
             e->display=marker+rom.display+" ("+humanSize(rom.sizeBytes)+")";
             e->action=ManageRom;
             e->path=std::filesystem::path(rom.path);
             e->tid=rom.tid;
             e->ytid=rom.yanbfTid;
+            e->rtid=rom.rommTid;
             e->installed=rom.installed;
             entries.push_back(e);
         }
         Menu* menu = new Menu(entries);
         menu->currentDirectory=std::filesystem::path("/");
         menu->type=MENU_MANAGE;
-        menu->heading=storageSummary(dsiwareCount)+" +=fwd Y=YANBF";
+        menu->heading=storageSummary(dsiwareCount)+" R=romm +=TWL Y=YANBF";
         menu->init();
         return menu;
     }
@@ -494,10 +514,7 @@ RommClient gRomm;
                         if (Dialog(target,0,0,320,240,{"Download + install forwarder?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
                     }
-                    if (config->dsiwareCount >= MAX_DSIWARE) {
-                        Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
-                        break;
-                    }
+                    if (!ensureCtrBuilder(target)) break;
                     if (needDownload) {
                         std::error_code ec;
                         std::filesystem::create_directories(std::filesystem::path(ROMM_ROM_DIR), ec);
@@ -531,24 +548,33 @@ RommClient gRomm;
                             romPath = extracted;
                         }
                     }
-                    Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shorten(entry.fsName,28)},{},0).handle();
-                    if (installForwarder(builder,target,config,romPath,false)) {
-                        config->dsiwareCount++;
-                        Dialog(target,0,0,320,240,{"Installed!",shorten(entry.fsName,28)},{"OK"}).handle();
+                    Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shorten(entry.title,28)},{},0).handle();
+                    u64 ctid = gCtr.allocateTID(entry.fsName);
+                    if (ctid == 0) {
+                        Dialog(target,0,0,320,240,{"No free forwarder title IDs"},{"OK"}).handle();
+                        break;
+                    }
+                    ReturnResult* r = gCtr.buildCIA(romPath, entry.title, ctid, "", "");
+                    if (r->isSuccess()) {
+                        Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
                         // refresh the on-SD marker
                         for (auto e : this->entries) {
                             if (e->action==RommInstall && e->fsName==entry.fsName && e->display.rfind("* ",0)!=0)
                                 e->display="* "+e->display.substr(2);
                         }
+                    } else {
+                        Dialog(target,0,0,320,240,{"Forwarder install failed",r->message,gLang.parseString("format_hex",(u32)r->code)},{"OK"}).handle();
                     }
+                    delete r;
                     break;
                 }
                 case ManageRom: {
                     std::string name = entry.path.filename().generic_string();
-                    std::string fwdState = "fwd: none";
-                    if (entry.installed && entry.ytid) fwdState="fwd: TWL + YANBF";
-                    else if (entry.installed) fwdState="fwd: TWL installed";
-                    else if (entry.ytid) fwdState="fwd: YANBF (CTR)";
+                    std::string fwdState = "fwd:";
+                    if (entry.rtid) fwdState += " romm3ds";
+                    if (entry.installed) fwdState += " TWL";
+                    if (entry.ytid) fwdState += " YANBF";
+                    if (fwdState == "fwd:") fwdState = "fwd: none";
                     int c = Dialog(target,0,0,320,240,{name,fwdState},{"Del all","Del fwd","Del ROM","Back"}).handle();
                     if (c==3 || c==-1) break;
                     bool delFwd = (c==0 || c==1);
@@ -567,6 +593,12 @@ RommClient gRomm;
                     if (delFwd && entry.ytid!=0) {
                         if (R_FAILED(deleteYanbfForwarder(entry.ytid))) {
                             Dialog(target,0,0,320,240,{"Failed to delete YANBF forwarder"},{"OK"}).handle();
+                            err=true;
+                        }
+                    }
+                    if (delFwd && entry.rtid!=0) {
+                        if (R_FAILED(deleteRommCtrForwarder(entry.rtid))) {
+                            Dialog(target,0,0,320,240,{"Failed to delete romm3ds forwarder"},{"OK"}).handle();
                             err=true;
                         }
                     }
