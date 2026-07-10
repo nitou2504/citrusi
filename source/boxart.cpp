@@ -97,6 +97,55 @@ static bool readGamecode(const std::string& romPath, char gc[5]) {
     return true;
 }
 
+// renders the ROM's own DS banner icon (32x32) as a clean white stamp on the
+// 256x128 banner, RGBA4444 tiled. "" if the ROM has no banner.
+std::string dsIconBanner(const std::string& romPath) {
+    FILE* f = fopen(romPath.c_str(), "rb");
+    if (!f) return "";
+    u32 bannerOff = 0;
+    fseek(f, 0x68, SEEK_SET);
+    if (fread(&bannerOff, 4, 1, f) != 1 || !bannerOff) { fclose(f); return ""; }
+    u8 icon[0x200]; u16 pal[16];
+    fseek(f, bannerOff + 0x20, SEEK_SET);
+    if (fread(icon, 1, 0x200, f) != 0x200) { fclose(f); return ""; }
+    fseek(f, bannerOff + 0x220, SEEK_SET);
+    if (fread(pal, 2, 16, f) != 16) { fclose(f); return ""; }
+    fclose(f);
+
+    // decode 32x32 (4bpp, 8x8 tiles) to linear RGBA on white
+    static u8 icon32[32 * 32 * 4];
+    for (int y = 0; y < 32; y++)
+        for (int x = 0; x < 32; x++) {
+            int tile = (y / 8) * 4 + (x / 8);
+            int off = tile * 32 + (y % 8) * 4 + (x % 8) / 2;
+            u8 px = icon[off];
+            u8 idx = (x & 1) ? (px >> 4) : (px & 0xF);
+            u8* o = &icon32[(y * 32 + x) * 4];
+            if (idx == 0) { o[0] = o[1] = o[2] = 255; o[3] = 255; }
+            else {
+                u16 c = pal[idx];
+                o[0] = ((c & 0x1F) << 3) | ((c >> 2) & 7);
+                o[1] = (((c >> 5) & 0x1F) << 3) | ((c >> 7) & 7);
+                o[2] = (((c >> 10) & 0x1F) << 3) | ((c >> 12) & 7);
+                o[3] = 255;
+            }
+        }
+
+    // white canvas, icon nearest-scaled 3x (96x96) centered — crisp pixel art
+    static u8 canvas[BA_W * BA_H * 4];
+    for (int i = 0; i < BA_W * BA_H; i++) { canvas[i*4]=255; canvas[i*4+1]=255; canvas[i*4+2]=255; canvas[i*4+3]=255; }
+    int scale = 3, dim = 32 * scale;               // 96x96
+    int ox = (BA_W - dim) / 2, oy = (BA_H - dim) / 2;
+    for (int y = 0; y < dim; y++)
+        for (int x = 0; x < dim; x++) {
+            u8* s = &icon32[((y/scale) * 32 + (x/scale)) * 4];
+            u8* d = &canvas[((oy + y) * BA_W + ox + x) * 4];
+            d[0]=s[0]; d[1]=s[1]; d[2]=s[2]; d[3]=255;
+        }
+    boxLogger.info("banner art: DS icon stamp");
+    return tileRgba4444(canvas);
+}
+
 std::string fetchBoxart(RommClient& client, const std::string& romPath,
                         const std::string& coverPath) {
     static u8 canvas[BA_W * BA_H * 4];
@@ -146,7 +195,10 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
             boxLogger.info("banner art: GameTDB EN/" + gc4);
             return tileRgba4444(canvas);
         }
-        boxLogger.info("no asset/GameTDB art for " + gc4 + ", keeping template");
+        boxLogger.info("no asset/GameTDB art for " + gc4 + ", using DS icon");
     }
+    // 4) last resort: the game's own DS icon as a clean white stamp
+    std::string stamp = dsIconBanner(romPath);
+    if (!stamp.empty()) return stamp;
     return "";
 }
