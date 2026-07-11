@@ -543,7 +543,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             MenuSelection* sel = *this->selection;
             bool is3ds = (sel->platformSlug == ROMM_SLUG_3DS);
             bool onSD = is3ds ? installed3dsHasTitle(sel->titleId)
-                              : fileExists(rommLocalPath(sel->fsName, sel->platformSlug));
+                      : sel->platformSlug == ROMM_SLUG_GBA
+                          ? installed3dsHasTitle(gbaTidForRom(std::filesystem::path(rommLocalPath(sel->fsName, sel->platformSlug)).filename().generic_string()))
+                          : fileExists(rommLocalPath(sel->fsName, sel->platformSlug));
             if (gDescForId != sel->rommId) {
                 wrapLines(sel->summary, CTW, 0.45f, gDescLines);
                 gDescForId = sel->rommId;
@@ -837,11 +839,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (rom.platformSlug == ROMM_SLUG_3DS && !rom.installable && !show3ds)
                 continue;
             MenuSelection* e = new MenuSelection();
-            // marker: 3DS = title installed on the console (AM, by resolved title id);
+            // marker: 3DS/GBA = title installed on the console (AM, by title id);
             //         NDS = rom downloaded to SD
             bool marked = (rom.platformSlug == ROMM_SLUG_3DS)
                           ? installed3dsHasTitle(rom.titleId)
-                          : fileExists(rommLocalPath(rom.fsName, rom.platformSlug));
+                          : rom.platformSlug == ROMM_SLUG_GBA
+                              ? installed3dsHasTitle(gbaTidForRom(std::filesystem::path(rommLocalPath(rom.fsName, rom.platformSlug)).filename().generic_string()))
+                              : fileExists(rommLocalPath(rom.fsName, rom.platformSlug));
             std::string tag = cross ? (std::string("[") + (rom.platformSlug==ROMM_SLUG_3DS?"3DS":
                                        rom.platformSlug==ROMM_SLUG_GBA?"GBA":"DS") + "] ") : "";
             e->display=(marked?"* ":"  ")+tag+rom.name;

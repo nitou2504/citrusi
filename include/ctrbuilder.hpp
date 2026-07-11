@@ -54,3 +54,6 @@ class CtrBuilder {
                               const std::string& bannerTex,
                               std::function<bool(u64,u64)> progress = nullptr);
 };
+
+// tid a GBA ROM base name maps to (read-only); 0 if none free
+u64 gbaTidForRom(const std::string& romBase);

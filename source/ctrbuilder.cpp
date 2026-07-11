@@ -91,6 +91,19 @@ u64 CtrBuilder::allocateGbaTID(const std::string& fsName) {
     return allocateTIDIn(GBA_UID_BASE, GBA_UID_COUNT, fsName);
 }
 
+// read-only: the tid a GBA ROM would occupy (its own slot if already claimed,
+// else the first free one). Lets the library show real install state via AM
+// instead of "is the .gba still on SD".
+u64 gbaTidForRom(const std::string& romBase) {
+    u32 uid = GBA_UID_BASE + (fnv1a(romBase) % GBA_UID_COUNT);
+    for (u32 tries = 0; tries < GBA_UID_COUNT; tries++) {
+        u64 tid = 0x0004000000000000ULL | ((u64)uid << 8);
+        if (!ctrTidTaken(tid, romBase)) return tid;
+        uid = GBA_UID_BASE + ((uid - GBA_UID_BASE + 1) % GBA_UID_COUNT);
+    }
+    return 0;
+}
+
 // ---- SMDH --------------------------------------------------------------
 
 static inline u16 bgr555ToRgb565(u16 c) {
