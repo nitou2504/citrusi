@@ -162,6 +162,11 @@ static bool parseForwarderCia(const std::string& ciaPath, u64& tidOut, std::stri
         if (!readAt(f, ncch + 0x188, flags, 8) || !(flags[7] & 0x4)) break; // encrypted
         u64 tid = 0; u32 romfsOff = 0, romfsSize = 0;
         if (!readAt(f, ncch + 0x118, &tid, 8)) break;
+        // bail before touching the romfs unless the tid is in the YANBF
+        // forwarder range: decrypted full-game cias pass the NoCrypto check,
+        // and walking their thousands-of-files romfs takes seconds each
+        u32 tlow = (u32)(tid & 0xFFFFFFFF);
+        if ((tid >> 32) != 0x00040000ULL || tlow < 0x0FF40000 || tlow > 0x0FF7FFFF) break;
         if (!readAt(f, ncch + 0x1B0, &romfsOff, 4) || !readAt(f, ncch + 0x1B4, &romfsSize, 4)) break;
         if (!romfsOff || !romfsSize) break;
         long romfs = ncch + (long)romfsOff * 0x200;
@@ -171,8 +176,8 @@ static bool parseForwarderCia(const std::string& ciaPath, u64& tidOut, std::stri
         long lvl3 = romfs + 0x1000;
         u32 l3[10];
         if (!readAt(f, lvl3, l3, sizeof(l3)) || l3[0] != 0x28) break;
-        u32 pos = 0;
-        while (pos + 0x20 <= l3[8]) {
+        u32 pos = 0, entriesLeft = 64;   // forwarder romfs holds a handful of files
+        while (pos + 0x20 <= l3[8] && entriesLeft--) {
             u8 ent[0x20];
             if (!readAt(f, lvl3 + l3[7] + pos, ent, 0x20)) break;
             u64 dataOff, dataSize; u32 nameLen;
@@ -218,6 +223,9 @@ static void scanForwarderCias(const std::set<u64>& wanted, const std::set<u64>& 
             if (it.depth() > 2 || it->is_directory(ec)) continue;
             std::string p = it->path().generic_string();
             if (toLowerCase(it->path().extension().generic_string()) != ".cia") continue;
+            std::error_code fec;
+            uintmax_t fsz = it->file_size(fec);
+            if (fec || fsz > 16 * 1024 * 1024) continue;   // forwarder cias are <1MB
             u64 tid = 0; std::string name;
             if (!parseForwarderCia(p, tid, name)) continue;
             u32 low = (u32)(tid & 0xFFFFFFFF);
@@ -288,7 +296,11 @@ std::map<std::string, u64> getYanbfForwarders() {
         romfsUnmount("yfwd");
     }
     gYanbfOrphans.clear();
+    u64 t0 = osGetTime();
     scanForwarderCias(unresolved, allSd, out, gYanbfOrphans);
+    mlog.info("cia scan: " + std::to_string(out.size()) + " matched, " +
+              std::to_string(gYanbfOrphans.size()) + " orphans, " +
+              std::to_string((unsigned long long)(osGetTime() - t0)) + "ms");
     gYanbfCache = out;
     gYanbfCached = true;
     return out;
