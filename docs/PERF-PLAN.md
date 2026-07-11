@@ -124,6 +124,17 @@ hypotheses, in likelihood order:
    whole list on the UI thread). Only when the list actually changed; also
    resets the selection to the top — preserve selection when addressing.
 
+### Known issue — SD contention with the cover worker (2026-07-11, gba build)
+
+Manage→NDS "slow again" after the GBA merge was NOT a code regression:
+the same scan measured `fwd=2155ms` with idle background vs `fwd=14343ms`
+(cia scan 1674→6933ms) while the cover worker was fetching+writing the new
+GBA library's 175 covers and a background refresh ran. One SD card — the
+scan's many small reads starve behind cover writes. Self-heals once covers
+are cached. Fix candidate: `coverCachePause()/Resume()` around
+`scanManagedRoms`, or have the scan run on the worker too (manage snapshot
+item below) so nothing user-visible competes.
+
 ### Remaining Phase 2 items
 - Manage-NDS snapshot json + background rescan (open instantly even on the
   first Manage visit of a session).
