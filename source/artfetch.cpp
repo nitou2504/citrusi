@@ -201,6 +201,30 @@ std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int 
     return artBannerFromImage(bytes);
 }
 
+std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
+                            const std::string& query, ArtEntry& entry) {
+    if (!sgdb.hasKey()) return "";
+    std::vector<SgdbGame> games;
+    if (!sgdb.search(query, games) || games.empty()) return "";
+    std::vector<std::string> names;
+    for (auto& g : games) names.push_back(g.name);
+    int best = -1;
+    if (artConfidence(query, names, &best) != ART_MATCH_STRONG) return "";
+    std::vector<SgdbAsset> logos;
+    if (!sgdb.logos(games[best].id, logos) || logos.empty()) return "";
+    std::string bytes;
+    if (!artGetUrl(sgdb, romm, logos[0].url,
+                   "sgdb-logo-" + std::to_string(logos[0].id), bytes)) return "";
+    std::string tex = artBannerFromImage(bytes);
+    if (!tex.empty()) {
+        entry.sgdbGameId = games[best].id;
+        entry.bannerSource = "sgdb";
+        entry.bannerId = logos[0].id;
+        aflog.info("sgdb logo hit for '" + query + "'");
+    }
+    return tex;
+}
+
 bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& coverPath,
                       bool wantIcon, bool wantBanner, ArtPieces& out) {
     if (coverPath.empty()) return false;

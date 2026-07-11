@@ -44,6 +44,10 @@ std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pic
 std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
 // SGDB logo (banner source) by asset id
 std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
+// auto banner tier (NDS): strong SGDB match for query -> its first logo.
+// On success fills entry.sgdbGameId/bannerSource/bannerId.
+std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
+                            const std::string& query, ArtEntry& entry);
 
 // RomM box cover (server path, by rom id — immune to bad file names) ->
 // requested pieces. Fills only the requested members of out.

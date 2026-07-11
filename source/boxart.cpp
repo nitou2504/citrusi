@@ -147,11 +147,12 @@ std::string dsIconBanner(const std::string& romPath) {
 }
 
 std::string fetchBoxart(RommClient& client, const std::string& romPath,
-                        const std::string& coverPath) {
+                        const std::string& coverPath, std::string* sourceOut) {
     static u8 canvas[BA_W * BA_H * 4];
     char gc[5] = {0};
     bool haveGc = readGamecode(romPath, gc);
     std::string img;
+    if (sourceOut) sourceOut->clear();
 
     (void)coverPath;
     if (haveGc) {
@@ -162,6 +163,7 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
             std::string p = assetsDir + c + "/" + c + ".png";
             if (fileExists(p) && renderImage(readEntireFile(p), canvas)) {
                 boxLogger.info("banner art: SD assets " + c);
+                if (sourceOut) *sourceOut = "assets";
                 return tileRgba4444(canvas);
             }
         }
@@ -169,10 +171,12 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
         std::string base = "https://raw.githubusercontent.com/YANBForwarder/assets/main/assets/";
         if (client.fetchUrl(base + gc4 + "/" + gc4 + ".png", img) && renderImage(img, canvas)) {
             boxLogger.info("banner art: YANBF assets " + gc4);
+            if (sourceOut) *sourceOut = "yanbf";
             return tileRgba4444(canvas);
         }
         if (client.fetchUrl(base + gc3 + "/" + gc3 + ".png", img) && renderImage(img, canvas)) {
             boxLogger.info("banner art: YANBF assets " + gc3);
+            if (sourceOut) *sourceOut = "yanbf";
             return tileRgba4444(canvas);
         }
         // 3) GameTDB box art fallback — same as YANBF's generator. Region from
@@ -189,16 +193,16 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
         std::string tdb = "http://art.gametdb.com/ds/coverM/";
         if (client.fetchUrl(tdb + region + "/" + gc4 + ".jpg", img) && renderImage(img, canvas)) {
             boxLogger.info("banner art: GameTDB " + std::string(region) + "/" + gc4);
+            if (sourceOut) *sourceOut = "gametdb";
             return tileRgba4444(canvas);
         }
         if (client.fetchUrl(tdb + "EN/" + gc4 + ".jpg", img) && renderImage(img, canvas)) {
             boxLogger.info("banner art: GameTDB EN/" + gc4);
+            if (sourceOut) *sourceOut = "gametdb";
             return tileRgba4444(canvas);
         }
-        boxLogger.info("no asset/GameTDB art for " + gc4 + ", using DS icon");
+        boxLogger.info("no asset/GameTDB art for " + gc4);
     }
-    // 4) last resort: the game's own DS icon as a clean white stamp
-    std::string stamp = dsIconBanner(romPath);
-    if (!stamp.empty()) return stamp;
+    // miss: the caller continues with SGDB logos -> RomM cover -> DS-icon stamp
     return "";
 }

@@ -78,19 +78,81 @@ static bool ensureCtrBuilder(C3D_RenderTarget* target) {
     return gCtrReady;
 }
 
-// builds + installs a CTR forwarder for an on-SD rom. art from RomM cover /
-// YANBF assets, sound from YANBF assets. shows its own progress. returns true
-// on success.
-static bool buildForwarderFor(C3D_RenderTarget* target, const std::string& romPath,
-                              const std::string& title, const std::string& coverPath) {
+// builds + installs a CTR forwarder for an on-SD rom. Banner art tiers
+// (ART-UX-SPEC): art.json reuse -> SD assets/YANBF/GameTDB chain -> SGDB
+// logo (strong match) -> notify [Search]/[Use RomM cover] -> DS-icon stamp.
+// The SMDH icon is always the ROM's own DS icon. Shows its own progress.
+static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
+                              const std::string& romPath, const std::string& title,
+                              const std::string& coverPath) {
     if (!ensureCtrBuilder(target)) return false;
-    // Dialog word-wraps each message line — pass full titles, no shorten()
-    Dialog(target,0,0,320,240,{"Fetching box art...",title},{},0).handle();
-    std::string boxart = fetchBoxart(gRomm, romPath, coverPath);
+    std::string romBase = std::filesystem::path(romPath).filename().generic_string();
+    ensureSgdb();
+
+    ArtEntry ae = artStoreGet(romBase);
+    std::string boxart;
+    bool persist = false;
+    if (ae.valid && !ae.bannerSource.empty()) {   // F6: reuse silently
+        showLoading(target, {"Preparing art...", title});
+        ArtPieces p;
+        if (artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, p))
+            boxart = p.bannerTex;
+    }
+    if (boxart.empty()) {
+        // Dialog word-wraps each message line — pass full titles, no shorten()
+        Dialog(target,0,0,320,240,{"Fetching box art...",title},{},0).handle();
+        boxart = fetchBoxart(gRomm, romPath, coverPath);
+    }
+    if (boxart.empty()) {                          // SGDB logo tier (auto, strong only)
+        ArtEntry ne;
+        ne.query = artSanitizeQuery(romBase);
+        boxart = artSgdbLogoAuto(gSgdb, gRomm, ne.query, ne);
+        if (!boxart.empty()) { ae = ne; persist = true; }
+    }
+    if (boxart.empty() && config && config->artNotify) {   // S2, banner line only
+        ArtEntry ne;
+        ne.query = artSanitizeQuery(romBase);
+        const char* coverBtn = coverPath.empty() ? "Use DS icon" : "Use RomM cover";
+        for (;;) {
+            int c = Dialog(target,0,0,320,240,{"Art not found:","banner: not found for \""+ne.query+"\""},{"Search",coverBtn}).handle();
+            if (c != 0) break;
+            SwkbdState kb;
+            char buf[128] = {0};
+            swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 63);
+            swkbdSetHintText(&kb, "Game name");
+            swkbdSetFeatures(&kb, SWKBD_DEFAULT_QWERTY);
+            swkbdSetInitialText(&kb, ne.query.c_str());
+            if (swkbdInputText(&kb, buf, sizeof(buf)) != SWKBD_BUTTON_CONFIRM || !buf[0])
+                continue;
+            ne.query = buf;
+            ne.sgdbGameId = 0;
+            ArtPieces picked;
+            if (artPickerRun(target, romBase, title, coverPath, ROMM_SLUG_NDS,
+                             ne, picked, false, true)) {
+                boxart = picked.bannerTex;
+                ne.weak = false;
+                ae = ne; persist = true;
+            }
+            break;
+        }
+    }
+    if (boxart.empty() && !coverPath.empty()) {    // RomM cover fallback (⚠)
+        ArtPieces cov;
+        if (artFromRommCover(gSgdb, gRomm, coverPath, false, true, cov) && !cov.bannerTex.empty()) {
+            boxart = cov.bannerTex;
+            ArtEntry ne;
+            ne.query = artSanitizeQuery(romBase);
+            ne.bannerSource = "romm-cover";
+            ne.weak = true;
+            ae = ne; persist = true;
+        }
+    }
+    if (boxart.empty())                            // last resort: DS-icon stamp
+        boxart = dsIconBanner(romPath);
+
     Dialog(target,0,0,320,240,{"Fetching sound...",title},{},0).handle();
     std::string gameCwav = fetchGameSound(gRomm, romPath);
     Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),title},{},0).handle();
-    std::string romBase = std::filesystem::path(romPath).filename().generic_string();
     u64 ctid = gCtr.allocateTID(romBase);
     if (ctid == 0) {
         Dialog(target,0,0,320,240,{"No free forwarder title IDs"},{"OK"}).handle();
@@ -100,6 +162,8 @@ static bool buildForwarderFor(C3D_RenderTarget* target, const std::string& romPa
     bool ok = r->isSuccess();
     if (!ok)
         Dialog(target,0,0,320,240,{"Forwarder install failed",r->message,gLang.parseString("format_hex",(u32)r->code)},{"OK"}).handle();
+    else if (persist)
+        artStorePut(romBase, ae);
     delete r;
     return ok;
 }
@@ -1242,7 +1306,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             size_t dot = clean.find_last_of('.');
             if (dot != std::string::npos) clean = clean.substr(0, dot);
             bool hasFwd = rom.rommTid || rom.installed || rom.yanbfTid;
-            e->display = (hasFwd ? "* " : "  ") + utf8FoldLatin(clean);
+            bool weakArt = hasFwd && artStoreGet(rom.display).weak;   // ⚠: fallback art
+            e->display = (hasFwd ? "* " : "  ") + std::string(weakArt ? "[!] " : "") + utf8FoldLatin(clean);
             e->title = utf8FoldLatin(clean);
             e->action=ManageRom;
             e->path=std::filesystem::path(rom.path);
@@ -1755,7 +1820,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
                         delete gr;
                     } else {
-                        installed = buildForwarderFor(target, romPath, entry.title, entry.coverPath);
+                        installed = buildForwarderFor(target, config, romPath, entry.title, entry.coverPath);
                         if (installed) { gFwdReady = false; invalidateManagedRoms(); }   // refresh forwarder detection
                     }
                     if (installed) {
@@ -1913,7 +1978,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
                                 break;
                             }
-                            if (buildForwarderFor(target, entry.path.generic_string(), entry.title, entry.coverPath))
+                            if (buildForwarderFor(target, config, entry.path.generic_string(), entry.title, entry.coverPath))
                                 Dialog(target,0,0,320,240,{"Installed!",entry.title},{"OK"}).handle();
                             while (this->queue.size() > 0) this->queue.pop();
                             gFwdReady = false; invalidateYanbfCache();
@@ -1935,8 +2000,43 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.rtid) fwdState += " romm3ds";
                     if (entry.installed) fwdState += " TWL";
                     if (entry.ytid) fwdState += " YANBF";
-                    // single-pass: uninstall removes the forwarder AND the ROM file
-                    if (Dialog(target,0,0,320,240,{name,fwdState},{"Uninstall","Back"}).handle()!=0) break;
+                    if (artStoreGet(name).weak) fwdState += " - fallback art";
+                    // Change art only for our own forwarders (romm3ds TID range)
+                    if (entry.rtid) {
+                        int c = Dialog(target,0,0,320,240,{name,fwdState},{"Change art","Uninstall","Back"}).handle();
+                        if (c==0) {
+                            // picker (banner page only — the icon stays the DS
+                            // icon), then rebuild in place: same TID
+                            if (!ensureCtrBuilder(target)) break;
+                            ensureSgdb();
+                            ArtEntry ae = artStoreGet(name);
+                            if (ae.query.empty()) ae.query = artSanitizeQuery(name);
+                            ArtPieces pieces;
+                            bool bCh = false;
+                            artPickerRun(target, name, entry.title, entry.coverPath, ROMM_SLUG_NDS,
+                                         ae, pieces, false, true, nullptr, &bCh);
+                            if (!bCh) break;
+                            ae.weak = false;
+                            Dialog(target,0,0,320,240,{"Fetching sound...",entry.title},{},0).handle();
+                            std::string gameCwav = fetchGameSound(gRomm, entry.path.generic_string());
+                            Dialog(target,0,0,320,240,{"Rebuilding forwarder...",entry.title},{},0).handle();
+                            ReturnResult* r = gCtr.buildCIA(entry.path.generic_string(), entry.title,
+                                                            entry.rtid, pieces.bannerTex, gameCwav);
+                            if (r->isSuccess()) {
+                                artStorePut(name, ae);
+                                Dialog(target,0,0,320,240,{"Art updated!",entry.title},{"OK"}).handle();
+                            } else Dialog(target,0,0,320,240,{"Rebuild failed",r->message},{"OK"}).handle();
+                            delete r;
+                            while (this->queue.size() > 0) this->queue.pop();
+                            gFwdReady = false; invalidateYanbfCache();
+                            showLoading(target, {"Refreshing..."});
+                            return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                        }
+                        if (c!=1) break;
+                    } else {
+                        // single-pass: uninstall removes the forwarder AND the ROM file
+                        if (Dialog(target,0,0,320,240,{name,fwdState},{"Uninstall","Back"}).handle()!=0) break;
+                    }
                     bool delFwd = true;
                     bool delRom = true;
                     if (Dialog(target,0,0,320,240,{"Uninstall game?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
