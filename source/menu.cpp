@@ -90,11 +90,12 @@ static bool isZipName(const std::string& n) {
     return l.size() > 4 && l.rfind(".zip") == l.size()-4;
 }
 // expected local playable rom path for a server file name
-// (zips extract to <stem>.nds; inner name may differ, best effort)
+// (zips extract to <stem>.<platform ext>; inner name may differ, best effort)
 static std::string rommLocalPath(const std::string& fsName, const std::string& slug) {
     std::string dir = rommDirFor(slug);
     if (!isZipName(fsName)) return dir + fsName;
-    return dir + fsName.substr(0, fsName.size()-4) + ".nds";
+    const char* ext = (slug == ROMM_SLUG_GBA) ? ".gba" : ".nds";
+    return dir + fsName.substr(0, fsName.size()-4) + ext;
 }
 
 RommClient gRomm;
@@ -113,7 +114,9 @@ static std::map<std::string, bool> gCacheOk;                 // slug -> loaded?
 static std::vector<RommRom> gCombined;                       // cross-system search source
 
 static const char* systemName(const std::string& slug) {
-    return slug == ROMM_SLUG_3DS ? "Nintendo 3DS" : "Nintendo DS";
+    if (slug == ROMM_SLUG_3DS) return "Nintendo 3DS";
+    if (slug == ROMM_SLUG_GBA) return "Game Boy Advance";
+    return "Nintendo DS";
 }
 // --- on-SD library cache (fast open + offline search) -----------------------
 static std::string libCachePath(const std::string& slug) {
@@ -839,7 +842,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             bool marked = (rom.platformSlug == ROMM_SLUG_3DS)
                           ? installed3dsHasTitle(rom.titleId)
                           : fileExists(rommLocalPath(rom.fsName, rom.platformSlug));
-            std::string tag = cross ? (std::string("[") + (rom.platformSlug==ROMM_SLUG_3DS?"3DS":"DS") + "] ") : "";
+            std::string tag = cross ? (std::string("[") + (rom.platformSlug==ROMM_SLUG_3DS?"3DS":
+                                       rom.platformSlug==ROMM_SLUG_GBA?"GBA":"DS") + "] ") : "";
             e->display=(marked?"* ":"  ")+tag+rom.name;
             e->action=RommInstall;
             e->rommId=rom.id;
@@ -889,6 +893,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         };
         add("Nintendo DS", OpenPlatform, ROMM_SLUG_NDS);
         add("Nintendo 3DS", OpenPlatform, ROMM_SLUG_3DS);
+        add("Game Boy Advance", OpenPlatform, ROMM_SLUG_GBA);
         add("Search all systems", OpenSearchAll, "");
         add("Refresh from server", RefreshLibraries, "");
         Menu* menu = new Menu(entries);
@@ -930,13 +935,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         showLoading(target, {"Loading all systems..."});
         bool anyNds = ensurePlatformLoaded(ROMM_SLUG_NDS, target);
         bool any3ds = ensurePlatformLoaded(ROMM_SLUG_3DS, target);
-        if (!anyNds && !any3ds) {
+        bool anyGba = ensurePlatformLoaded(ROMM_SLUG_GBA, target);
+        if (!anyNds && !any3ds && !anyGba) {
             Dialog(target,0,0,320,240,{"RomM error",gRomm.lastError},{"OK"}).handle();
             return (prev!=nullptr)?prev:generateMainMenu(nullptr);
         }
         gCombined.clear();
         if (anyNds) gCombined.insert(gCombined.end(), gCache[ROMM_SLUG_NDS].begin(), gCache[ROMM_SLUG_NDS].end());
         if (any3ds) gCombined.insert(gCombined.end(), gCache[ROMM_SLUG_3DS].begin(), gCache[ROMM_SLUG_3DS].end());
+        if (anyGba) gCombined.insert(gCombined.end(), gCache[ROMM_SLUG_GBA].begin(), gCache[ROMM_SLUG_GBA].end());
         return buildRommMenu(prev, std::string(buf), gCombined, "", true);
     }
 
@@ -1308,6 +1315,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 }
                 case RommInstall: {
                     bool is3ds = (entry.platformSlug == ROMM_SLUG_3DS);
+                    bool isGba = (entry.platformSlug == ROMM_SLUG_GBA);
+                    bool isNds = !is3ds && !isGba;
                     rlog.info("install: " + entry.fsName + " slug=" + entry.platformSlug +
                               " fileId=" + std::to_string(entry.fileId) + " installable=" + (entry.installable?"1":"0"));
                     if (is3ds && !entry.installable) {
@@ -1320,14 +1329,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool onSD = fileExists(is3ds ? dest : romPath);
                     bool needDownload = true;
                     if (onSD) {
-                        int c = Dialog(target,0,0,320,240,{is3ds?"Already downloaded:":"Already on SD:",entry.fsName},{is3ds?"Install":"Install fwd","Redownload","Cancel"}).handle();
+                        int c = Dialog(target,0,0,320,240,{is3ds?"Already downloaded:":"Already on SD:",entry.fsName},{isNds?"Install fwd":"Install","Redownload","Cancel"}).handle();
                         if (c==2 || c==-1) break;
                         needDownload = (c==1);
                     } else {
-                        if (Dialog(target,0,0,320,240,{is3ds?"Download + install?":"Download + install forwarder?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                        const char* q = is3ds ? "Download + install?" :
+                                        isGba ? "Download for GBA inject?" :
+                                                "Download + install forwarder?";
+                        if (Dialog(target,0,0,320,240,{q,entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
                     }
-                    if (!is3ds && !ensureCtrBuilder(target)) break;   // forwarder builder (nds only)
+                    if (isNds && !ensureCtrBuilder(target)) break;   // forwarder builder (nds only)
                     rlog.info("install: pre-download needDownload=" + std::string(needDownload?"1":"0") + " dest=" + dest);
                     if (needDownload) {
                         std::error_code ec;
@@ -1357,11 +1369,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Download failed",gRomm.lastError},{"OK"}).handle();
                             break;
                         }
-                        if (!is3ds && isZipName(entry.fsName)) {   // nds zip archives are extracted on-device
+                        if (!is3ds && isZipName(entry.fsName)) {   // nds/gba zip archives are extracted on-device
                             Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28)},{},0).handle();
                             std::string extracted, zerr;
                             u64 lastZDrawn = 0;
-                            bool zok = extractFirstNds(dest, dir, extracted, zerr,
+                            bool zok = extractFirstRom(dest, dir, zipRomExtsFor(entry.platformSlug), extracted, zerr,
                                 [&](unsigned long long done, unsigned long long total) -> bool {
                                     hidScanInput();
                                     if (hidKeysDown() & KEY_B) return false;
@@ -1404,6 +1416,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             remove(dest.c_str());                     // free the SD copy
                         }
                         else Dialog(target,0,0,320,240,{(ierr=="cancelled")?"Install cancelled":"Install failed",ierr},{"OK"}).handle();
+                    } else if (isGba) {
+                        // VC inject build lands here; for now the ROM is on SD, ready
+                        Dialog(target,0,0,320,240,{"Downloaded to SD.","GBA inject build coming soon.",shorten(romPath,36)},{"OK"}).handle();
                     } else {
                         installed = buildForwarderFor(target, romPath, entry.title, entry.coverPath);
                     }

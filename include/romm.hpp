@@ -5,15 +5,20 @@
 #include <functional>
 
 #define ROMM_CONFIG_FILE FORWARDER_DIR+std::string("/romm.json")
-// Multi-platform: NDS installs as a forwarder from roms/nds; 3DS installs the .cia.
+// Multi-platform: NDS installs as a forwarder from roms/nds; 3DS installs the
+// .cia; GBA downloads to roms/gba for the VC inject (build not wired yet).
 #define ROMM_NDS_DIR std::string("sdmc:/roms/nds/")
+#define ROMM_GBA_DIR std::string("sdmc:/roms/gba/")
 #define ROMM_CIA_DIR std::string("sdmc:/cia/")
 #define ROMM_SLUG_NDS "nds"
 #define ROMM_SLUG_3DS "3ds"
+#define ROMM_SLUG_GBA "gba"
 
 // SD download/scan dir for a platform slug
 inline std::string rommDirFor(const std::string& slug) {
-    return (slug == ROMM_SLUG_3DS) ? ROMM_CIA_DIR : ROMM_NDS_DIR;
+    if (slug == ROMM_SLUG_3DS) return ROMM_CIA_DIR;
+    if (slug == ROMM_SLUG_GBA) return ROMM_GBA_DIR;
+    return ROMM_NDS_DIR;
 }
 
 struct RommRom {

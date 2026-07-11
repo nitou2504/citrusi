@@ -5,11 +5,17 @@
 #include "miniz.h"
 #include "helpers.hpp"
 
-static bool ndsExtension(const std::string& lower) {
-    return lower.size() > 4 &&
-           (lower.rfind(".nds") == lower.size()-4 ||
-            lower.rfind(".srl") == lower.size()-4 ||
-            lower.rfind(".ids") == lower.size()-4);
+static bool hasExtension(const std::string& lower, const std::vector<std::string>& exts) {
+    for (const std::string& e : exts)
+        if (lower.size() > e.size() && lower.rfind(e) == lower.size() - e.size())
+            return true;
+    return false;
+}
+
+const std::vector<std::string>& zipRomExtsFor(const std::string& slug) {
+    static const std::vector<std::string> nds = {".nds", ".srl", ".ids"};
+    static const std::vector<std::string> gba = {".gba", ".agb"};
+    return (slug == "gba") ? gba : nds;
 }
 
 struct ExtractCtx {
@@ -33,7 +39,8 @@ static size_t extractCb(void* opaque, mz_uint64 ofs, const void* buf, size_t n) 
     return n;
 }
 
-bool extractFirstNds(const std::string& zipPath, const std::string& destDir,
+bool extractFirstRom(const std::string& zipPath, const std::string& destDir,
+                     const std::vector<std::string>& exts,
                      std::string& outPath, std::string& err,
                      std::function<bool(unsigned long long, unsigned long long)> progress) {
     mz_zip_archive zip;
@@ -48,11 +55,11 @@ bool extractFirstNds(const std::string& zipPath, const std::string& destDir,
     for (mz_uint i = 0; i < n; i++) {
         if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
         if (st.m_is_directory) continue;
-        if (ndsExtension(toLowerCase(std::string(st.m_filename)))) { found = (int)i; break; }
+        if (hasExtension(toLowerCase(std::string(st.m_filename)), exts)) { found = (int)i; break; }
     }
     if (found < 0) {
         mz_zip_reader_end(&zip);
-        err = "no .nds inside zip";
+        err = "no " + (exts.empty() ? std::string("rom") : exts[0]) + " inside zip";
         return false;
     }
     // flatten: strip any directory components from the entry name
