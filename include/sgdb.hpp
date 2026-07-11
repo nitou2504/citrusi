@@ -1,0 +1,41 @@
+#pragma once
+#include <string>
+#include <vector>
+
+// SteamGridDB client over curl+mbedtls (TLS 1.2 — the 3DS sslc tops out at
+// TLS 1.1 and can't reach SGDB's ECDSA-only cert, see docs/GBA-PLAN.md).
+// Key is user-supplied, read from sd, never embedded.
+#define SGDB_ENV_PATH "sdmc:/3ds/romm3ds/sgdb.env"
+
+struct SgdbGame {
+    int id;
+    std::string name;
+};
+
+struct SgdbIcon {
+    int id;
+    int width, height;
+    std::string url;      // cdn2.steamgriddb.com png
+    std::string thumbUrl;
+};
+
+class SgdbClient {
+    private:
+    std::string key;      // Bearer token from sgdb.env
+    bool socReady = false;
+    bool ensureSoc();
+    bool get(const std::string& url, std::string& out);
+    public:
+    std::string lastError;
+
+    // parses STEAMGRIDDB_API_KEY=... from SGDB_ENV_PATH (strips comments/space)
+    bool loadKey();
+    bool hasKey() const { return !key.empty(); }
+
+    // GET /search/autocomplete/{query}
+    bool search(const std::string& query, std::vector<SgdbGame>& out);
+    // GET /icons/game/{id}?mimes=image/png
+    bool icons(int gameId, std::vector<SgdbIcon>& out);
+    // fetch an icon/thumb png into memory (no auth needed for cdn)
+    bool fetchImage(const std::string& url, std::string& out);
+};
