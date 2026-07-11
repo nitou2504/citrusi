@@ -1645,18 +1645,19 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.platformSlug == ROMM_SLUG_GBA) {   // GBA rom on SD +/- installed inject
                         std::string ng = entry.title;
                         if (entry.installed) {
-                            int c = Dialog(target,0,0,320,240,{ng,"GBA inject installed"},{"Uninstall","Delete ROM","Back"}).handle();
-                            if (c==0) {
-                                if (Dialog(target,0,0,320,240,{"Uninstall this inject?",shorten(ng,28)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
-                                Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
-                                AM_DeleteTicket(entry.tid);
-                                if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",shorten(ng,28)},{"OK"}).handle();
-                                else Dialog(target,0,0,320,240,{"Uninstalled.",shorten(ng,28)},{"OK"}).handle();
-                            } else if (c==1) {
-                                if (Dialog(target,0,0,320,240,{"Delete ROM file?","(inject stays installed)"},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                            // single-pass: uninstall removes the inject AND the ROM file
+                            int c = Dialog(target,0,0,320,240,{ng,"GBA inject installed"},{"Uninstall","Back"}).handle();
+                            if (c!=0) break;
+                            if (Dialog(target,0,0,320,240,{"Uninstall inject + delete ROM?",shorten(ng,28)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                            Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
+                            AM_DeleteTicket(entry.tid);
+                            if (R_FAILED(dr)) {
+                                Dialog(target,0,0,320,240,{"Uninstall failed",shorten(ng,28)},{"OK"}).handle();
+                            } else {
                                 std::error_code ec;
                                 std::filesystem::remove(entry.path, ec);
-                            } else break;
+                                Dialog(target,0,0,320,240,{"Uninstalled.",shorten(ng,28)},{"OK"}).handle();
+                            }
                         } else {
                             int c = Dialog(target,0,0,320,240,{ng,"No inject installed."},{"Install inject","Delete ROM","Back"}).handle();
                             if (c==0) {
@@ -1754,11 +1755,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.rtid) fwdState += " romm3ds";
                     if (entry.installed) fwdState += " TWL";
                     if (entry.ytid) fwdState += " YANBF";
-                    int c = Dialog(target,0,0,320,240,{name,fwdState},{"Del all","Del fwd","Del ROM","Back"}).handle();
-                    if (c==3 || c==-1) break;
-                    bool delFwd = (c==0 || c==1);
-                    bool delRom = (c==0 || c==2);
-                    if (Dialog(target,0,0,320,240,{"Really delete?",name,(c==0?"forwarder + ROM file":(c==1?"forwarder only":"ROM file only"))},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                    // single-pass default: Uninstall = forwarder + ROM; Keep ROM = forwarder only
+                    int c = Dialog(target,0,0,320,240,{name,fwdState},{"Uninstall","Keep ROM","Back"}).handle();
+                    if (c==2 || c==-1) break;
+                    bool delFwd = true;
+                    bool delRom = (c==0);
+                    if (Dialog(target,0,0,320,240,{"Really uninstall?",name,(c==0?"forwarder + ROM file":"forwarder only (ROM stays)")},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                         break;
                     bool err=false;
                     if (delFwd && entry.installed && entry.tid!=0) {
