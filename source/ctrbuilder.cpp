@@ -6,6 +6,7 @@
 #include <vector>
 #include <algorithm>
 #include "ctrbuilder.hpp"
+#include "ciainstall.hpp"
 #include "helpers.hpp"
 #include "lz11.hpp"
 #include "logger.hpp"
@@ -547,7 +548,9 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
 
     // --- NCCH header: layout + ids + hashes
     u32 exefsOffB = 0x200 + (u32)exh.size();          // 0xA00
-    u32 romfsOffB = exefsOffB + exefsTotal;           // 0x200-aligned already
+    // 3dstool/official layout aligns RomFS to 0x1000
+    u32 romfsOffB = (exefsOffB + exefsTotal + 0xFFF) & ~0xFFFu;
+    u32 exefsGap = romfsOffB - (exefsOffB + exefsTotal);
     u32 romfsSizeB = align200((u32)rfs.size());
     u32 contentSize = romfsOffB + romfsSizeB;
     wr32(ncch, 0x104, contentSize / 0x200);
@@ -592,6 +595,8 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         conSha.update(*ef[i].data);
         conSha.update(std::string(align200(ef[i].size) - ef[i].size, '\0'));
     }
+    std::string gapPad(exefsGap, '\0');
+    conSha.update(gapPad);
     conSha.update(rfsPadded);
     std::string conHash = conSha.finish();
 
@@ -600,6 +605,10 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     wr64be(tik, 0x1DC, tid);
     std::string tmd = tpl.substr(tmdOff, tmdSize);
     wr64be(tmd, 0x18C, tid);
+    // AM creates the SD save image from the TMD save size; must match the
+    // exheader's demand (192K for GBA VC) or the title dies at launch with
+    // an ErrDisp from the HOME menu.
+    wr32(tmd, 0x19A, (u32)rd64(exh, 0x1C0));
     wr64be(tmd, 0xB04 + 0x8, (u64)contentSize);
     memcpy(&tmd[0xB04 + 0x10], conHash.data(), 0x20);
     std::string chunkHash = sha256((u8*)tmd.data() + 0xB04, 0x30);
@@ -631,57 +640,91 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         AM_DeleteTicket(tid);
     }
 
-    // --- streamed install: never hold ROM/CIA in RAM
-    Handle h = {};
-    Result ret = AM_StartCiaInstall(MEDIATYPE_SD, &h);
-    if (R_FAILED(ret)) return new ReturnResult(ret, "AM_StartCiaInstall failed");
-    u64 fileOff = 0;
-    bool cancelled = false;
-    auto put = [&](const void* d, u32 n) -> bool {
-        u32 done = 0;
-        while (done < n) {
-            u32 written = 0;
-            u32 chunk = (n - done) < 0x40000 ? (n - done) : 0x40000;
-            Result r = FSFILE_Write(h, &written, fileOff, (const u8*)d + done, chunk, FS_WRITE_FLUSH);
-            if (R_FAILED(r) || written == 0) return false;
-            done += written;
-            fileOff += written;
+    // --- assemble the CIA into an SD temp file (incremental — ROM streamed,
+    // never the whole CIA in RAM), then install via the proven installer.
+    char lbuf[192];
+    snprintf(lbuf, sizeof(lbuf),
+             "gba: assemble tid=%016llX rom=%lu save=0x%02X code=%lu exefs=%lu content=%lu total=%llu pre=%lu meta=%lu",
+             tid, romSize, saveType, codeSize, exefsTotal, contentSize, totalBytes,
+             (u32)preamble.size(), metaSize);
+    ctrLogger.info(lbuf);
+
+    std::string ciaPath = romPath + ".cia";
+    std::string tmpPath = ciaPath + ".part";
+    FILE* out = fopen(tmpPath.c_str(), "wb");
+    if (!out) return new ReturnResult(ERROR_PATH, "cannot create CIA on SD");
+    static char iobuf[0x40000];
+    setvbuf(out, iobuf, _IOFBF, sizeof(iobuf));
+
+    const char* stage = "preamble";
+    bool wok = true;
+    auto putN = [&](const void* d, u32 n) -> bool {
+        if (fwrite(d, 1, n, out) != n) {
+            snprintf(lbuf, sizeof(lbuf), "gba: SD write failed stage=%s n=%lu", stage, n);
+            ctrLogger.error(lbuf);
+            return false;
         }
-        if (progress && !progress(fileOff, totalBytes)) { cancelled = true; return false; }
         return true;
     };
-    auto putS = [&](const std::string& s) { return put(s.data(), (u32)s.size()); };
+    auto putS = [&](const std::string& s) { return putN(s.data(), (u32)s.size()); };
 
-    bool ok = putS(preamble) && putS(ncch) && putS(exh) && putS(exefsHdr);
-    if (ok) {   // stream the ROM from SD
+    wok = putS(preamble);
+    stage = "ncch-hdr";  wok = wok && putS(ncch);
+    stage = "exheader";  wok = wok && putS(exh);
+    stage = "exefs-hdr"; wok = wok && putS(exefsHdr);
+    stage = "rom";
+    if (wok) {   // stream the ROM from SD into the CIA
         FILE* f = fopen(romPath.c_str(), "rb");
-        if (!f) ok = false;
+        if (!f) { ctrLogger.error("gba: rom reopen failed for assemble"); wok = false; }
         else {
             static char buf[GBA_CHUNK];
             u32 left = romSize;
-            while (ok && left > 0) {
+            while (wok && left > 0) {
                 u32 want = left < GBA_CHUNK ? left : GBA_CHUNK;
-                if (fread(buf, 1, want, f) != want) { ok = false; break; }
-                ok = put(buf, want);
+                if (fread(buf, 1, want, f) != want) { ctrLogger.error("gba: rom read failed"); wok = false; break; }
+                wok = putN(buf, want);
                 left -= want;
             }
             fclose(f);
         }
     }
-    ok = ok && putS(tail) && putS(codePad);
-    for (int i = 1; ok && i < 4; i++) {
-        ok = putS(*ef[i].data) &&
-             putS(std::string(align200(ef[i].size) - ef[i].size, '\0'));
+    stage = "code-tail"; wok = wok && putS(tail) && putS(codePad);
+    for (int i = 1; wok && i < 4; i++) {
+        stage = ef[i].name;
+        wok = putS(*ef[i].data) &&
+              putS(std::string(align200(ef[i].size) - ef[i].size, '\0'));
     }
-    ok = ok && putS(rfsPadded) && putS(meta);
+    stage = "romfs"; wok = wok && putS(gapPad) && putS(rfsPadded);
+    stage = "meta";  wok = wok && putS(meta);
+    if (fclose(out) != 0) wok = false;
 
-    if (!ok) {
-        AM_CancelCIAInstall(h);
-        return new ReturnResult(cancelled ? ERROR_INSTALL : -1,
-                                cancelled ? "cancelled" : "CIA write failed");
+    if (!wok) {
+        remove(tmpPath.c_str());
+        return new ReturnResult(ERROR_PATH, "CIA assemble failed (SD full?)");
     }
-    ret = AM_FinishCiaInstall(h);
-    if (R_FAILED(ret)) return new ReturnResult(ret, "AM_FinishCiaInstall failed");
+    remove(ciaPath.c_str());
+    if (rename(tmpPath.c_str(), ciaPath.c_str()) != 0) {
+        remove(tmpPath.c_str());
+        return new ReturnResult(ERROR_PATH, "CIA rename failed");
+    }
+    ctrLogger.info("gba: CIA assembled, installing via installCiaFromFile");
+
+    if (titleInstalledOn(MEDIATYPE_SD, tid)) {
+        AM_DeleteTitle(MEDIATYPE_SD, tid);
+        AM_DeleteTicket(tid);
+    }
+    std::string ierr;
+    bool installed = installCiaFromFile(ciaPath, ierr, true, [&](u64 d, u64 t) {
+        return progress ? progress(d, t) : true;
+    });
+    if (!installed) {
+        // keep the CIA on SD for inspection when the install itself failed
+        snprintf(lbuf, sizeof(lbuf), "gba: install failed: %s (kept %s)", ierr.c_str(), ciaPath.c_str());
+        ctrLogger.error(lbuf);
+        return new ReturnResult(ierr == "cancelled" ? ERROR_INSTALL : -1,
+                                ierr == "cancelled" ? "cancelled" : ("install: " + ierr));
+    }
+    remove(ciaPath.c_str());   // free the CIA copy once installed
 
     // ownership file keeps the TID stable across reinstalls
     char cfgName[64];
