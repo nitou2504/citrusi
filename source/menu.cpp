@@ -1051,6 +1051,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (!gCacheOk[ROMM_SLUG_NDS] && gRomm.loadConfig() && gRomm.hasConfig())
             ensurePlatformLoaded(ROMM_SLUG_NDS);
         std::vector<ManagedRom> roms = scanManagedRoms(ROMM_NDS_DIR);
+        // filename -> lib entry index, built once (was a linear scan per rom)
+        std::map<std::string, const RommRom*> libByName;
+        for (auto& cr : gCache[ROMM_SLUG_NDS]) {
+            libByName.emplace(toLowerCase(cr.fsName), &cr);
+            libByName.emplace(toLowerCase(std::filesystem::path(
+                rommLocalPath(cr.fsName, cr.platformSlug)).filename().generic_string()), &cr);
+        }
         for (auto& rom : roms) {
             MenuSelection* e = new MenuSelection();
             // clean name: no extension, no decorations; dot marks "has forwarder"
@@ -1069,16 +1076,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->fwdCia=rom.orphanCia;
             e->sizeBytes=rom.sizeBytes;
             // match against the NDS RomM cache to reuse cover art
-            std::string base = toLowerCase(rom.display);
-            for (auto& cr : gCache[ROMM_SLUG_NDS]) {
-                if (toLowerCase(cr.fsName) == base ||
-                    toLowerCase(std::filesystem::path(rommLocalPath(cr.fsName, cr.platformSlug)).filename().generic_string()) == base) {
-                    e->rommId = cr.id;
-                    e->coverPath = cr.coverPath;
-                    e->coverSmallPath = cr.coverSmallPath;
-                    e->year = cr.year;
-                    break;
-                }
+            auto hit = libByName.find(toLowerCase(rom.display));
+            if (hit != libByName.end()) {
+                const RommRom* cr = hit->second;
+                e->rommId = cr->id;
+                e->coverPath = cr->coverPath;
+                e->coverSmallPath = cr->coverSmallPath;
+                e->year = cr->year;
             }
             entries.push_back(e);
         }
@@ -1502,7 +1506,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         else Dialog(target,0,0,320,240,{(ierr=="cancelled")?"Install cancelled":"Install failed",ierr},{"OK"}).handle();
                     } else {
                         installed = buildForwarderFor(target, romPath, entry.title, entry.coverPath);
-                        if (installed) gFwdReady = false;   // refresh forwarder detection
+                        if (installed) { gFwdReady = false; invalidateManagedRoms(); }   // refresh forwarder detection
                     }
                     if (installed) {
                         Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
@@ -1550,7 +1554,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     std::error_code ec;
                                     std::filesystem::remove(entry.path, ec);
                                     while (this->queue.size() > 0) this->queue.pop();
-                                    gFwdReady = false;
+                                    gFwdReady = false; invalidateManagedRoms();
                                     showLoading(target, {"Refreshing..."});
                                     return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
                                 }
@@ -1580,7 +1584,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 std::error_code ec;
                                 std::filesystem::remove(entry.path, ec);
                                 while (this->queue.size() > 0) this->queue.pop();
-                                gFwdReady = false;
+                                gFwdReady = false; invalidateManagedRoms();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
                             }
