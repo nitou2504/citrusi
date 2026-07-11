@@ -122,6 +122,8 @@ CAs, or `CURLOPT_SSL_VERIFYPEER=0` to match the app's existing
 *Verified 2026-07-11* with the real RomM key under a pinned mbedTLS-2.28
 profile (`--tls-max 1.2 --ciphers ECDHE-ECDSA-AES128-GCM-SHA256`):
 autocomplete search, `/icons/game/{id}`, and cdn2 PNG downloads all succeed.
+**Hardware-verified 2026-07-11** on the New 3DS XL (`sgdb.cpp` smoke build):
+search, icon list, and cdn2 fetch over curl+mbedtls — byte-identical PNG.
 
 **API key: user-supplied, never embedded.** The remaining blocker was only key
 secrecy for public distribution. Delivery: read the key from a dotenv-style
