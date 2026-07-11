@@ -3,6 +3,7 @@
 #include <map>
 #include "librefresh.hpp"
 #include "ciainstall.hpp"
+#include "covercache.hpp"
 #include "logger.hpp"
 
 static Logger lrlog("libref");
@@ -11,39 +12,66 @@ static Thread gThread = nullptr;
 static std::atomic<bool> gBusy(false);   // worker running
 static std::atomic<bool> gDone(false);   // result waiting for take
 static bool gOk = false;                 // worker-only until gDone
+static bool gChanged = false;            // worker-only until gDone
 static std::string gSlug;                // set before spawn, read-only during run
+static std::vector<RommRom> gOld;        // list the UI currently shows
 static std::vector<RommRom> gResult;     // worker-only until gDone
 static RommClient gClient;               // worker-only copy
-static std::map<int, u64> gKnownTids;
+static LibSaveFn gSave = nullptr;
+
+// did the refresh actually change the list? (order-sensitive on purpose)
+static bool differs(const std::vector<RommRom>& a, const std::vector<RommRom>& b) {
+    if (a.size() != b.size()) return true;
+    for (size_t i = 0; i < a.size(); i++) {
+        if (a[i].id != b[i].id || a[i].fsName != b[i].fsName ||
+            a[i].fileId != b[i].fileId || a[i].name != b[i].name ||
+            a[i].sizeBytes != b[i].sizeBytes || a[i].titleId != b[i].titleId ||
+            a[i].coverPath != b[i].coverPath)
+            return true;
+    }
+    return false;
+}
 
 static void worker(void*) {
     u64 t0 = osGetTime();
     std::vector<RommRom> fresh;
-    bool ok = false;
+    bool ok = false, changed = false;
     int pid = gClient.findPlatform(gSlug);
     if (pid >= 0 && gClient.listRoms(pid, fresh, gSlug)) {
         ok = true;
         if (gSlug == ROMM_SLUG_3DS) {
+            std::map<int, u64> known;
+            for (auto& r : gOld) if (r.titleId) known[r.id] = r.titleId;
             for (auto& r : fresh) {
-                auto it = gKnownTids.find(r.id);
-                if (it != gKnownTids.end()) { r.titleId = it->second; continue; }
+                auto it = known.find(r.id);
+                if (it != known.end()) { r.titleId = it->second; continue; }
                 if (!r.installable) continue;
                 std::string hdr;
                 if (gClient.fetchCiaHeader(r, hdr)) r.titleId = ciaBufferTitleId(hdr);
             }
         }
+        changed = differs(gOld, fresh);
+        // heavy SD work stays on the worker: json save + cover-miss cleanup
+        // would otherwise stall the UI thread when the result lands
+        if (changed) {
+            if (gSave) gSave(gSlug, fresh);
+            coverCacheClearMisses();
+        }
         lrlog.info("refresh " + gSlug + ": " + std::to_string(fresh.size()) + " roms, " +
+                   std::string(changed ? "changed" : "unchanged") + ", " +
                    std::to_string((unsigned long long)(osGetTime() - t0)) + "ms");
     } else {
         lrlog.error("refresh " + gSlug + " failed: " + gClient.lastError);
     }
     gResult = std::move(fresh);
+    gOld.clear();
     gOk = ok;
+    gChanged = changed;
     gDone = true;    // gBusy stays true until the result is taken
 }
 
 void libRefreshStart(const RommClient& client, const std::string& slug,
-                     const std::vector<RommRom>& current) {
+                     const std::vector<RommRom>& current, LibSaveFn save) {
     if (gBusy || gDone) return;
     if (gThread) { threadJoin(gThread, U64_MAX); threadFree(gThread); gThread = nullptr; }
     gClient.host = client.host;
@@ -51,9 +79,10 @@ void libRefreshStart(const RommClient& client, const std::string& slug,
     gClient.pass = client.pass;
     gClient.buildAuth();
     gSlug = slug;
-    gKnownTids.clear();
-    for (auto& r : current) if (r.titleId) gKnownTids[r.id] = r.titleId;
+    gOld = current;
+    gSave = save;
     gOk = false;
+    gChanged = false;
     gBusy = true;
     s32 prio = 0x30;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
@@ -66,11 +95,12 @@ bool libRefreshRunning(const std::string& slug) {
     return slug.empty() || slug == gSlug;
 }
 
-bool libRefreshTake(std::string& slug, std::vector<RommRom>& roms, bool& ok) {
+bool libRefreshTake(std::string& slug, std::vector<RommRom>& roms, bool& ok, bool& changed) {
     if (!gDone) return false;
     slug = gSlug;
     roms = std::move(gResult);
     ok = gOk;
+    changed = gChanged;
     gResult.clear();
     gDone = false;
     gBusy = false;

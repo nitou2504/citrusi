@@ -167,18 +167,6 @@ static void invalidateAllCaches() {
     remove(libCachePath(ROMM_SLUG_3DS).c_str());
 }
 
-// did a background refresh actually change the list? (order-sensitive on purpose)
-static bool libDiffers(const std::vector<RommRom>& a, const std::vector<RommRom>& b) {
-    if (a.size() != b.size()) return true;
-    for (size_t i = 0; i < a.size(); i++) {
-        if (a[i].id != b[i].id || a[i].fsName != b[i].fsName ||
-            a[i].fileId != b[i].fileId || a[i].name != b[i].name ||
-            a[i].sizeBytes != b[i].sizeBytes || a[i].titleId != b[i].titleId ||
-            a[i].coverPath != b[i].coverPath)
-            return true;
-    }
-    return false;
-}
 
 // resolve 3ds title ids (for install detection) via a small header fetch, cached in the lib json.
 // runs BEFORE the cover worker starts, so only the main thread touches httpc (no concurrency).
@@ -209,7 +197,7 @@ static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* targ
         gCacheOk[slug] = true;
         rlog.info(" loaded " + std::to_string(gCache[slug].size()) + " roms from SD cache " + slug);
         resolveTitleIds(slug, target);          // fill in any missing tids (older cache)
-        libRefreshStart(gRomm, slug, gCache[slug]);
+        libRefreshStart(gRomm, slug, gCache[slug], saveLibCache);
         // covers wait for the refresh (single httpc user); resumed on take
         if (!libRefreshRunning("")) coverCacheStart(gRomm, gCache[slug]);
         return true;
@@ -1236,23 +1224,19 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     Menu* Menu::handleQueue(Builder* builder, C3D_RenderTarget* target, Config* config) {
         gConfigPtr = config;
-        // collect a finished background library refresh (only between actions)
+        // collect a finished background library refresh (only between actions).
+        // the worker already did the heavy SD work (json save, miss cleanup) —
+        // here it's just a vector swap and, if visible, a menu rebuild.
         if (!this->hasQueue()) {
-            std::string slug; std::vector<RommRom> fresh; bool ok = false;
-            if (libRefreshTake(slug, fresh, ok)) {
-                bool changed = false;
-                if (ok) {
-                    changed = libDiffers(gCache[slug], fresh);
-                    if (changed) {
-                        gCache[slug] = std::move(fresh);
-                        saveLibCache(slug, gCache[slug]);
-                        coverCacheClearMisses();
-                        rlog.info("background refresh applied: " + slug);
-                    }
-                    gCacheOk[slug] = true;
+            std::string slug; std::vector<RommRom> fresh; bool ok = false, changed = false;
+            if (libRefreshTake(slug, fresh, ok, changed)) {
+                if (ok && changed) {
+                    gCache[slug] = std::move(fresh);
+                    rlog.info("background refresh applied: " + slug);
                 }
+                if (ok) gCacheOk[slug] = true;
                 coverCacheStart(gRomm, gCache[slug]);   // covers waited on the refresh
-                if (changed && this->type == MENU_ROMM && !this->crossSystem &&
+                if (ok && changed && this->type == MENU_ROMM && !this->crossSystem &&
                     this->platformSlug == slug)
                     return buildRommMenu(this, this->filter, gCache[slug], slug, false);
             }
