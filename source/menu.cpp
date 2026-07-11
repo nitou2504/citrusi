@@ -1068,11 +1068,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             case MENU_MAIN:
                 return this;
             case MENU_ROMM:
-                if (!this->filter.empty()) { // clear search first
-                    const std::vector<RommRom>& src = this->crossSystem ? gCombined : gCache[this->platformSlug];
-                    return buildRommMenu(this, "", src, this->platformSlug, this->crossSystem);
+                // cross-system search is search-first (no browse-all state): B -> system select
+                if (this->crossSystem)
+                    return generateSystemMenu(this);
+                if (!this->filter.empty()) {           // platform search: clear the filter first
+                    std::string slug = this->platformSlug;
+                    return buildRommMenu(this, "", gCache[slug], slug, false);
                 }
-                return generateSystemMenu(this); // back to system selection
+                return generateSystemMenu(this);       // full platform list -> system select
             case MENU_SYSTEMS:
                 return generateMainMenu(this);
             case MENU_MANAGE:
