@@ -865,7 +865,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 const char* d = nullptr;
                 if (id >= 0 && id <= 5) d = descs[id];
                 else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
-                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Key file: sd:/3ds/romm3ds/sgdb.env (STEAMGRIDDB_API_KEY=...). Press A to re-read it.";
+                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key (saved to sd:/3ds/romm3ds/sgdb.env) or re-read the file.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -1656,13 +1656,40 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
                         case SETTING_SHOW_3DS:     config->show3dsRoms = !config->show3dsRoms; break;
                         case SETTING_ART_NOTIFY:   config->artNotify = !config->artNotify; break;
-                        case SETTING_SGDB_KEY:
+                        case SETTING_SGDB_KEY: {
                             gSgdbKeyTried = false;   // re-read sgdb.env on demand
+                            int c;
                             if (ensureSgdb())
-                                Dialog(target,0,0,320,240,{"SteamGridDB key loaded.","Icons come from SteamGridDB."},{"OK"}).handle();
+                                c = Dialog(target,0,0,320,240,{"SteamGridDB key loaded.",SGDB_ENV_PATH},{"Enter key","OK"},1).handle();
                             else
-                                Dialog(target,0,0,320,240,{"No SteamGridDB key found.","Put STEAMGRIDDB_API_KEY=... in",SGDB_ENV_PATH,"Icons fall back to RomM covers."},{"OK"}).handle();
+                                c = Dialog(target,0,0,320,240,{"No SteamGridDB key found.","Enter it here, or put","STEAMGRIDDB_API_KEY=... in",SGDB_ENV_PATH},{"Enter key","OK"}).handle();
+                            if (c == 0) {            // manual entry -> saved to sgdb.env
+                                SwkbdState kb;
+                                char buf[128] = {0};
+                                swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 100);
+                                swkbdSetHintText(&kb, "SteamGridDB API key");
+                                swkbdSetFeatures(&kb, SWKBD_DEFAULT_QWERTY);
+                                if (swkbdInputText(&kb, buf, sizeof(buf)) == SWKBD_BUTTON_CONFIRM) {
+                                    std::string k = buf;
+                                    size_t b = k.find_first_not_of(" \t\r\n");
+                                    size_t e2 = k.find_last_not_of(" \t\r\n");
+                                    k = (b == std::string::npos) ? "" : k.substr(b, e2 - b + 1);
+                                    if (!k.empty()) {
+                                        std::error_code ec;
+                                        std::filesystem::create_directories("sdmc:/3ds/romm3ds", ec);
+                                        FILE* f = fopen(SGDB_ENV_PATH, "wb");
+                                        if (f) {
+                                            fprintf(f, "STEAMGRIDDB_API_KEY=%s\n", k.c_str());
+                                            fclose(f);
+                                            gSgdbKeyTried = false;
+                                            Dialog(target,0,0,320,240,{ensureSgdb()?"Key saved.":"Key saved but not readable?",SGDB_ENV_PATH},{"OK"}).handle();
+                                        } else
+                                            Dialog(target,0,0,320,240,{"Couldn't write",SGDB_ENV_PATH},{"OK"}).handle();
+                                    }
+                                }
+                            }
                             break;
+                        }
                         case SETTING_TEMPLATE:
                             config->currentTemplate = (config->currentTemplate + 1) % config->templates.size();
                             break;
