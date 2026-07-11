@@ -444,9 +444,16 @@ struct GbaSaveScan {
     }
 };
 
-// binary search gba_db.bin (sorted by first u64 of the SHA1); -1 = not found
+// gba_db.bin: 28-byte entries = SHA1[20] + serial[4] + attr[4], sorted by the
+// first u64 of the SHA1. Load once, reuse for both lookups.
+static const std::string& gbaDb() {
+    static std::string db = readEntireFile(GBA_TPL_DIR + "gba_db.bin");
+    return db;
+}
+
+// exact per-ROM lookup by SHA1 (binary search); -1 = not found
 static int gbaDbSaveType(const u8 sha1[20]) {
-    std::string db = readEntireFile(GBA_TPL_DIR + "gba_db.bin");
+    const std::string& db = gbaDb();
     if (db.size() < 28 || db.size() % 28) return -1;
     u64 key; memcpy(&key, sha1, 8);
     u32 l = 0, r = db.size() / 28;
@@ -461,6 +468,23 @@ static int gbaDbSaveType(const u8 sha1[20]) {
         }
     }
     return -1;
+}
+
+// lookup by 4-char cart serial (linear scan). Translation/hack patches change
+// the ROM bytes (SHA1 misses) but keep the serial, so the untranslated
+// original's save type is recoverable. Only trust it when every entry sharing
+// the serial agrees; -1 on miss or conflict.
+static int gbaDbSaveTypeBySerial(const char serial[4]) {
+    const std::string& db = gbaDb();
+    if (db.size() < 28 || db.size() % 28) return -1;
+    int found = -1;
+    for (size_t o = 0; o + 28 <= db.size(); o += 28) {
+        if (memcmp(db.data() + o + 20, serial, 4) != 0) continue;
+        int t = db[o + 24] & 0xF;
+        if (found < 0) found = t;
+        else if (found != t) return -1;   // ambiguous serial → don't guess
+    }
+    return found;
 }
 
 #define GBA_CHUNK 0x40000
@@ -555,12 +579,19 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         return new ReturnResult(ERROR_PATH, "rom read failed (scan)");
     u8 sha1dig[20];
     romSha1.finish(sha1dig);
+    // detection tiers: exact SHA1 → cart serial (catches translations/hacks
+    // whose original is in the DB) → SDK version-string LUT → none
     int dbType = gbaDbSaveType(sha1dig);
+    const char* srcName = "gba_db(sha1)";
+    if (dbType < 0) {
+        dbType = gbaDbSaveTypeBySerial(gamecode);
+        if (dbType >= 0) srcName = "gba_db(serial)";
+    }
     u8 saveType = (dbType >= 0) ? (u8)dbType : scan.result(romSize);
     {
         char sbuf[96];
         snprintf(sbuf, sizeof(sbuf), "gba: save type 0x%02X (%s)", saveType,
-                 dbType >= 0 ? "gba_db" : (scan.found >= 0 ? gbaSigLut[scan.found].sig : "none"));
+                 dbType >= 0 ? srcName : (scan.found >= 0 ? gbaSigLut[scan.found].sig : "none"));
         ctrLogger.info(sbuf);
     }
     std::string tail = gbaCodeTail(cfg, romSize, saveType);
