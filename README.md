@@ -2,6 +2,15 @@
 
 Browse your self-hosted [RomM](https://github.com/rommapp/romm) NDS library **on the 3DS**, download ROMs to the SD card, and build YANBF-style HOME-menu forwarders that launch each game through nds-bootstrap — no PC in the loop. An hShop-like experience for your own DS collection.
 
+> **Branch `feat/3ds-cia` — 3DS base-game installer.** This variant points at RomM's
+> `3ds` platform instead of `nds` and, instead of building a forwarder, **installs the
+> downloaded `.cia` straight into the title database** (`am:net`, streamed to SD) — an
+> hShop-for-your-own-3DS-library. Only `.cia` entries install; `.3ds` entries prompt you to
+> convert on PC first with [`ready3ds`](../ready3ds). Pair it with `ready3ds all` to fill
+> RomM's 3ds platform with decrypted CIAs. Changed: `ROMM_PLATFORM_SLUG="3ds"`,
+> `ROMM_ROM_DIR="sdmc:/cia/"`, new `source/ciainstall.cpp`, and the `RommInstall` action in
+> `menu.cpp`. Test via the `.3dsx` in the Homebrew Launcher.
+
 ![top screen: list + box-art rail — bottom screen: details card](docs/screens.png)
 
 | Library | Manage | Home |

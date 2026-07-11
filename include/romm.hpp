@@ -5,8 +5,9 @@
 #include <functional>
 
 #define ROMM_CONFIG_FILE FORWARDER_DIR+std::string("/romm.json")
-#define ROMM_ROM_DIR std::string("sdmc:/roms/nds/")
-#define ROMM_PLATFORM_SLUG "nds"
+// 3DS-CIA build: browse RomM's "3ds" platform and install .cia titles on-device.
+#define ROMM_ROM_DIR std::string("sdmc:/cia/")
+#define ROMM_PLATFORM_SLUG "3ds"
 
 struct RommRom {
     int id;

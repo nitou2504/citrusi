@@ -19,6 +19,7 @@ extern "C" {
 #include "manage.hpp"
 #include "zip.hpp"
 #include "ctrbuilder.hpp"
+#include "ciainstall.hpp"
 #include "boxart.hpp"
 #include "cwav.hpp"
 #include "teximg.hpp"
@@ -1107,19 +1108,25 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     return generateSettingsMenu(this, config);
                 }
                 case RommInstall: {
-                    std::string dest = ROMM_ROM_DIR + entry.fsName;   // as downloaded (may be .zip)
-                    std::string romPath = rommLocalPath(entry.fsName); // playable .nds
-                    bool onSD = fileExists(romPath);
+                    // 3DS-CIA build: only .cia titles can be installed on-device.
+                    bool isCia = entry.fsName.size() >= 4 &&
+                                 (entry.fsName.compare(entry.fsName.size()-4, 4, ".cia") == 0 ||
+                                  entry.fsName.compare(entry.fsName.size()-4, 4, ".CIA") == 0);
+                    if (!isCia) {
+                        Dialog(target,0,0,320,240,{"Not a .cia — can't install here.",shorten(entry.fsName,28),"Convert on PC with ready3ds,","then upload the .cia to RomM."},{"OK"}).handle();
+                        break;
+                    }
+                    std::string dest = ROMM_ROM_DIR + entry.fsName;   // sdmc:/cia/<name>.cia
+                    bool onSD = fileExists(dest);
                     bool needDownload = true;
                     if (onSD) {
-                        int c = Dialog(target,0,0,320,240,{"Already on SD:",entry.fsName},{"Install fwd","Redownload","Cancel"}).handle();
+                        int c = Dialog(target,0,0,320,240,{"Already downloaded:",entry.fsName},{"Install","Redownload","Cancel"}).handle();
                         if (c==2 || c==-1) break;
                         needDownload = (c==1);
                     } else {
-                        if (Dialog(target,0,0,320,240,{"Download + install forwarder?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                        if (Dialog(target,0,0,320,240,{"Download + install?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
                     }
-                    if (!ensureCtrBuilder(target)) break;
                     if (needDownload) {
                         std::error_code ec;
                         std::filesystem::create_directories(std::filesystem::path(ROMM_ROM_DIR), ec);
@@ -1147,35 +1154,29 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Download failed",gRomm.lastError},{"OK"}).handle();
                             break;
                         }
-                        if (isZipName(entry.fsName)) {
-                            Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28)},{},0).handle();
-                            std::string extracted, zerr;
-                            u64 lastZDrawn = 0;
-                            bool zok = extractFirstNds(dest, ROMM_ROM_DIR, extracted, zerr,
-                                [&](unsigned long long done, unsigned long long total) -> bool {
-                                    hidScanInput();
-                                    if (hidKeysDown() & KEY_B) return false;
-                                    if (done - lastZDrawn < (2<<20) && done != total) return true;
-                                    lastZDrawn = done;
-                                    int pct = (total>0)?(int)(done*100/total):0;
-                                    Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28),humanSize(done)+" / "+humanSize(total)+" ("+std::to_string(pct)+"%)"},{},0).handle();
-                                    return true;
-                                });
-                            if (!zok) {
-                                remove(dest.c_str());
-                                Dialog(target,0,0,320,240,{(zerr=="cancelled")?"Extract cancelled":"Extract failed",zerr},{"OK"}).handle();
-                                break;
-                            }
-                            remove(dest.c_str());
-                            romPath = extracted;
-                        }
                     }
-                    if (buildForwarderFor(target, romPath, entry.title, entry.coverPath)) {
+                    // stream-install the downloaded .cia into the title database
+                    std::string ierr;
+                    u64 lastI = 0;
+                    bool iok = installCiaFromFile(dest, ierr, config->forceInstall,
+                        [&](unsigned long long done, unsigned long long total) -> bool {
+                            hidScanInput();
+                            if (hidKeysDown() & KEY_B) return false;
+                            if (done - lastI < (4<<20) && done != total) return true;
+                            lastI = done;
+                            int pct = (total>0)?(int)(done*100/total):0;
+                            Dialog(target,0,0,320,240,{"Installing... (B = cancel)",shorten(entry.fsName,28),std::to_string(pct)+"%"},{},0).handle();
+                            return true;
+                        });
+                    if (iok) remove(dest.c_str());   // free the SD copy once installed
+                    if (iok) {
                         Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
                         for (auto e : this->entries) {
                             if (e->action==RommInstall && e->fsName==entry.fsName && e->display.rfind("* ",0)!=0)
                                 e->display="* "+e->display.substr(2);
                         }
+                    } else {
+                        Dialog(target,0,0,320,240,{(ierr=="cancelled")?"Install cancelled":"Install failed",ierr},{"OK"}).handle();
                     }
                     break;
                 }
