@@ -790,9 +790,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
     // builds the RomM list from a cached library, optionally filtered.
     // src = the platform cache (or the combined list for cross-system search).
-    static Menu* buildRommMenu(Menu* prev, const std::string& filter,
+    // filter + slug are taken BY VALUE on purpose: we delete `prev` below, and
+    // callers pass this->filter / this->platformSlug — a reference would dangle.
+    static Menu* buildRommMenu(Menu* prev, std::string filter,
                                const std::vector<RommRom>& src,
-                               const std::string& slug, bool cross) {
+                               std::string slug, bool cross) {
         delete prev;
         std::string flow = toLowerCase(filter);
         bool show3ds = gConfigPtr ? gConfigPtr->show3dsRoms : false;
