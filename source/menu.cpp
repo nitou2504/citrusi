@@ -635,13 +635,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             return;
         }
-        // main menu / SD browser
+        // main menu / systems / SD browser
         drawBottomFrame("A Select    B Back    START Quit");
         if (this->type == MENU_MAIN) {
             drawText(160, 70, 0.5f, 0.9f, COL_SURFACE, COL_TEXT, "romm3ds", C2D_AlignCenter);
             drawText(160, 96, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, VERSION, C2D_AlignCenter);
             if (!gRomm.host.empty())
                 drawText(160, 124, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
+        } else if (this->type == MENU_SYSTEMS) {
+            drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT, "RomM Library", C2D_AlignCenter);
+            drawWrapped(48, 108, 224, 14, 0.45f, COL_TEXT_DIM,
+                        "Pick a system to browse. NDS installs a forwarder; 3DS installs the .cia. "
+                        "Search all systems searches across both.", 4);
+            if (!gRomm.host.empty())
+                drawText(160, 172, 0.5f, 0.42f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
         } else {
             drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT, "SD card install", C2D_AlignCenter);
             drawWrapped(48, 108, 224, 14, 0.45f, COL_TEXT_DIM,
