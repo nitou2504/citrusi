@@ -93,3 +93,40 @@ Jobs:
 ### Non-goals
 - No change to install/delete flows (already interactive).
 - No speculative prefetch of covers beyond what the cover worker does.
+
+## Status (2026-07-11)
+
+Phase 1 landed. Manage→NDS first open went from ~56s to seconds; the 51s was
+`scanForwarderCias` walking the romfs file tables of decrypted *full-game*
+cias in `sd:/cias` before range-checking the tid (fixed: tid checked right
+after the NCCH header, >16MB files skipped, table walk capped).
+
+Phase 2 library part landed (`librefresh.cpp`): SD cache renders instantly,
+worker refetches list + missing 3DS tids, heading shows `~ updating...`,
+worker does the json save + cover-miss cleanup, take is a vector swap.
+
+### Known issue — residual hitch when "updating..." ends
+
+A brief UI freeze remains right as the refresh completes, even on
+`unchanged` runs (worker save skipped, take is trivial). Untested
+hypotheses, in likelihood order:
+
+1. **Worker JSON parse on the app core.** The refresh worker runs on core 0
+   (`threadCreate(..., core -1)`) at prio+4; nlohmann parse of the full rom
+   list is CPU-bound right before completion. In theory main preempts it —
+   verify with timestamps. Fix candidate: move the worker to core 1
+   (`APT_SetAppCpuTimeLimit` + `threadCreate(..., 1)`), like other homebrew
+   does for network workers.
+2. **`coverCacheStart` on take** — rebuilds the job list under the lock the
+   cover worker holds mid-fetch; if the worker is inside a slow fetch the
+   main thread blocks on `LightLock_Lock`.
+3. **Menu rebuild on changed lists** (`buildRommMenu` + `init()` for the
+   whole list on the UI thread). Only when the list actually changed; also
+   resets the selection to the top — preserve selection when addressing.
+
+### Remaining Phase 2 items
+- Manage-NDS snapshot json + background rescan (open instantly even on the
+  first Manage visit of a session).
+- Feed library forwarder markers from the same snapshot so the first library
+  open never pays the manage scan.
+- Make "Refresh from server" non-blocking (reuse the background job).
