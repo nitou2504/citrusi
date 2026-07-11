@@ -3,6 +3,7 @@
 #include <map>
 #include <filesystem>
 #include "artstore.hpp"
+#include "artquery.hpp"
 #include "settings.hpp"
 #include "helpers.hpp"
 #include "json.hpp"
@@ -34,7 +35,7 @@ static void loadStore() {
                 e.bannerId = v["banner"].value("id", 0);
                 e.bannerName = v["banner"].value("name", "");
             }
-            gEntries[k] = e;
+            gEntries[artStripExts(k)] = e;
         }
     } catch (...) {
         artLogger.error("bad art.json, starting fresh");
@@ -70,9 +71,11 @@ static void saveStore() {
     rename(tmp.c_str(), ART_JSON_PATH.c_str());
 }
 
+// entries are keyed by the extension-less stem so the library file name
+// ("game.zip") and the on-SD rom ("game.gba") share one entry
 ArtEntry artStoreGet(const std::string& fsName) {
     loadStore();
-    auto it = gEntries.find(fsName);
+    auto it = gEntries.find(artStripExts(fsName));
     return (it == gEntries.end()) ? ArtEntry() : it->second;
 }
 
@@ -80,13 +83,13 @@ void artStorePut(const std::string& fsName, const ArtEntry& entry) {
     loadStore();
     ArtEntry e = entry;
     e.valid = true;
-    gEntries[fsName] = e;
+    gEntries[artStripExts(fsName)] = e;
     saveStore();
 }
 
 void artStoreRemove(const std::string& fsName) {
     loadStore();
-    if (gEntries.erase(fsName)) saveStore();
+    if (gEntries.erase(artStripExts(fsName))) saveStore();
 }
 
 // FNV-1a 64 over the key -> stable short file name

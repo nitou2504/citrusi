@@ -31,6 +31,9 @@ extern "C" {
 #include "librefresh.hpp"
 #include "logger.hpp"
 #include "json.hpp"
+#include "sgdb.hpp"
+#include "artfetch.hpp"
+#include "artpicker.hpp"
 
 static Logger rlog("romm");
 
@@ -48,9 +51,22 @@ static Logger rlog("romm");
 #define SETTING_SRV_PASS 12
 #define SETTING_SRV_TEST 13
 #define SETTING_SHOW_3DS 7
+#define SETTING_ART_NOTIFY 8
+#define SETTING_SGDB_KEY 9
 
 static CtrBuilder gCtr;
 static bool gCtrReady = false;
+
+SgdbClient gSgdb;
+static bool gSgdbKeyTried = false;
+// loads the SGDB key once per session; false = no key (icons fall back)
+static bool ensureSgdb() {
+    if (!gSgdbKeyTried) {
+        gSgdbKeyTried = true;
+        gSgdb.loadKey();
+    }
+    return gSgdb.hasKey();
+}
 
 static bool ensureCtrBuilder(C3D_RenderTarget* target) {
     if (gCtrReady) return true;
@@ -86,6 +102,79 @@ static bool buildForwarderFor(C3D_RenderTarget* target, const std::string& romPa
         Dialog(target,0,0,320,240,{"Forwarder install failed",r->message,gLang.parseString("format_hex",(u32)r->code)},{"OK"}).handle();
     delete r;
     return ok;
+}
+
+// GBA art (ART-UX-SPEC S1-S4): art.json reuse -> auto resolve -> optional
+// missing-art notify with [Search]->picker / [Use RomM cover]. Never blocks
+// the install; pieces left "" keep the template art. The caller persists
+// entryOut with artStorePut() after a successful install.
+static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
+                                     const std::string& fsName, const std::string& title,
+                                     const std::string& coverPath,
+                                     ArtEntry& entryOut, ArtPieces& piecesOut) {
+    ensureSgdb();
+    ArtEntry ae = artStoreGet(fsName);
+    if (ae.valid) {   // F6: reinstall reuses silently, cache-first
+        showLoading(target, {"Preparing art...", title});
+        if (!artBuildFromEntry(gSgdb, gRomm, fsName, coverPath, ae, piecesOut)) {
+            // a named source vanished: quietly fill the gaps from the cover
+            artFromRommCover(gSgdb, gRomm, coverPath,
+                             piecesOut.icon48.empty(), piecesOut.bannerTex.empty(), piecesOut);
+        }
+        entryOut = ae;
+        return;
+    }
+    showLoading(target, {"Looking up art...", title});
+    artResolveGba(gSgdb, gRomm, fsName, entryOut, piecesOut);
+    bool iconMiss = piecesOut.icon48.empty();
+    bool bannerMiss = piecesOut.bannerTex.empty();
+    if ((iconMiss || bannerMiss) && config->artNotify) {
+        const char* coverBtn = coverPath.empty() ? "Use plain tile" : "Use RomM cover";
+        for (;;) {
+            std::string q = entryOut.query;
+            int c;
+            if (iconMiss && bannerMiss)
+                c = Dialog(target,0,0,320,240,{"Art not found:","icon: no match for \""+q+"\"","banner: not found"},{"Search",coverBtn}).handle();
+            else if (iconMiss)
+                c = Dialog(target,0,0,320,240,{"Art not found:","icon: no match for \""+q+"\""},{"Search",coverBtn}).handle();
+            else
+                c = Dialog(target,0,0,320,240,{"Art not found:","banner: not found"},{"Search",coverBtn}).handle();
+            if (c != 0) break;                      // cover/tile fallback below
+            // S3: correct the name, then the picker for the missing pieces
+            SwkbdState kb;
+            char buf[128] = {0};
+            swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 63);
+            swkbdSetHintText(&kb, "Game name");
+            swkbdSetFeatures(&kb, SWKBD_DEFAULT_QWERTY);
+            swkbdSetInitialText(&kb, q.c_str());
+            if (swkbdInputText(&kb, buf, sizeof(buf)) != SWKBD_BUTTON_CONFIRM || !buf[0])
+                continue;                           // cancelled -> back to the notify
+            entryOut.query = buf;
+            entryOut.sgdbGameId = 0;                // re-resolve for the corrected name
+            artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
+                         entryOut, piecesOut, iconMiss, bannerMiss);
+            break;
+        }
+    }
+    // whatever is still missing falls back to the cover (or stays template)
+    bool fellBack = false;
+    if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty()) {
+        ArtPieces cov;
+        artFromRommCover(gSgdb, gRomm, coverPath,
+                         piecesOut.icon48.empty(), piecesOut.bannerTex.empty(), cov);
+        if (piecesOut.icon48.empty() && !cov.icon48.empty()) {
+            piecesOut.icon48 = cov.icon48;
+            entryOut.iconSource = "romm-cover";
+            fellBack = true;
+        }
+        if (piecesOut.bannerTex.empty() && !cov.bannerTex.empty()) {
+            piecesOut.bannerTex = cov.bannerTex;
+            entryOut.bannerSource = "romm-cover";
+            fellBack = true;
+        }
+    }
+    entryOut.weak = fellBack ||
+                    piecesOut.icon48.empty() || piecesOut.bannerTex.empty();
 }
 
 static bool isZipName(const std::string& n) {
@@ -689,6 +778,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 int id = sel->rommId;
                 const char* d = nullptr;
                 if (id >= 0 && id <= 5) d = descs[id];
+                else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
+                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Key file: sd:/3ds/romm3ds/sgdb.env (STEAMGRIDDB_API_KEY=...). Press A to re-read it.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -837,6 +928,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         add(SETTING_CUSTOM_TITLE, std::string("Ask for custom title: ") + (config->customTitle ? "on" : "off"));
         add(SETTING_FORCE,        std::string("Force install: ") + (config->forceInstall ? "on" : "off"));
         add(SETTING_SHOW_3DS,     std::string("Show 3DS .3ds (non-installable): ") + (config->show3dsRoms ? "on" : "off"));
+        add(SETTING_ART_NOTIFY,   std::string("Art: ") + (config->artNotify ? "notify when missing" : "silent fallback"));
+        add(SETTING_SGDB_KEY,     std::string("SteamGridDB key: ") + (ensureSgdb() ? "found" : "missing"));
         if (config->templates.size() > 1)
             add(SETTING_TEMPLATE, "Template: " + config->templates.at(config->currentTemplate));
         gRomm.loadConfig();
@@ -1474,6 +1567,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         case SETTING_CUSTOM_TITLE: config->customTitle = !config->customTitle; break;
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
                         case SETTING_SHOW_3DS:     config->show3dsRoms = !config->show3dsRoms; break;
+                        case SETTING_ART_NOTIFY:   config->artNotify = !config->artNotify; break;
+                        case SETTING_SGDB_KEY:
+                            gSgdbKeyTried = false;   // re-read sgdb.env on demand
+                            if (ensureSgdb())
+                                Dialog(target,0,0,320,240,{"SteamGridDB key loaded.","Icons come from SteamGridDB."},{"OK"}).handle();
+                            else
+                                Dialog(target,0,0,320,240,{"No SteamGridDB key found.","Put STEAMGRIDDB_API_KEY=... in",SGDB_ENV_PATH,"Icons fall back to RomM covers."},{"OK"}).handle();
+                            break;
                         case SETTING_TEMPLATE:
                             config->currentTemplate = (config->currentTemplate + 1) % config->templates.size();
                             break;
@@ -1512,6 +1613,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             break;
                     }
                     if (!is3ds && !ensureCtrBuilder(target)) break;  // CIA shell template (nds fwd + gba inject)
+                    // GBA art resolves BEFORE the long download — correcting a
+                    // bad name is cheapest here (ART-UX-SPEC S2)
+                    ArtEntry gbaArtEntry;
+                    ArtPieces gbaArt;
+                    if (isGba)
+                        resolveGbaArtInteractive(target, config, entry.fsName, entry.title,
+                                                 entry.coverPath, gbaArtEntry, gbaArt);
                     rlog.info("install: pre-download needDownload=" + std::string(needDownload?"1":"0") + " dest=" + dest);
                     if (needDownload) {
                         std::error_code ec;
@@ -1602,7 +1710,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         Dialog(target,0,0,320,240,{"Building inject...",entry.title},{},0).handle();
                         u64 lastG = 0;
-                        ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid, "", "",
+                        ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid,
+                                                            gbaArt.icon48, gbaArt.bannerTex,
                             [&](u64 done, u64 total) -> bool {
                                 hidScanInput();
                                 if (hidKeysDown() & KEY_B) return false;
@@ -1613,7 +1722,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 return true;
                             });
                         installed = gr->isSuccess();
-                        if (!installed)
+                        if (installed)
+                            artStorePut(entry.fsName, gbaArtEntry);
+                        else
                             Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
                         delete gr;
                     } else {
@@ -1665,9 +1776,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 std::string romBase = entry.path.filename().generic_string();
                                 u64 gtid = gCtr.allocateGbaTID(romBase);
                                 if (gtid == 0) { Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle(); break; }
+                                ArtEntry gbaArtEntry;
+                                ArtPieces gbaArt;
+                                resolveGbaArtInteractive(target, config, romBase, ng,
+                                                         entry.coverPath, gbaArtEntry, gbaArt);
                                 Dialog(target,0,0,320,240,{"Building inject...",ng},{},0).handle();
                                 u64 lastG = 0;
-                                ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid, "", "",
+                                ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
+                                                                    gbaArt.icon48, gbaArt.bannerTex,
                                     [&](u64 done, u64 total) -> bool {
                                         hidScanInput();
                                         if (hidKeysDown() & KEY_B) return false;
@@ -1677,8 +1793,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                         Dialog(target,0,0,320,240,{"Installing... (B = cancel)",ng,std::to_string(pct)+"%"},{},0).handle();
                                         return true;
                                     });
-                                if (gr->isSuccess()) Dialog(target,0,0,320,240,{"Installed!",ng},{"OK"}).handle();
-                                else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message},{"OK"}).handle();
+                                if (gr->isSuccess()) {
+                                    artStorePut(romBase, gbaArtEntry);
+                                    Dialog(target,0,0,320,240,{"Installed!",ng},{"OK"}).handle();
+                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message},{"OK"}).handle();
                                 delete gr;
                             } else if (c==1) {
                                 if (Dialog(target,0,0,320,240,{"Delete ROM file?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;

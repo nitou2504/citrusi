@@ -177,6 +177,7 @@ void Config::save() {
     j["customTitle"] = this->customTitle;
     j["forceInstall"] = this->forceInstall;
     j["show3dsRoms"] = this->show3dsRoms;
+    j["artNotify"] = this->artNotify;
     j["selectedLanguage"] = this->selectedLanguage;
     
     std::ofstream o(FORWARDER_DIR + "/config.json");
@@ -195,5 +196,6 @@ void Config::load() {
     if (j.contains("customTitle")) this->customTitle = j["customTitle"];
     if (j.contains("forceInstall")) this->forceInstall = j["forceInstall"];
     if (j.contains("show3dsRoms")) this->show3dsRoms = j["show3dsRoms"];
+    if (j.contains("artNotify")) this->artNotify = j["artNotify"];
     if (j.contains("selectedLanguage")) this->selectedLanguage = j["selectedLanguage"];
 }

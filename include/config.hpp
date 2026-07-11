@@ -11,6 +11,7 @@ class Config {
     bool customTitle;
     bool forceInstall;
     bool show3dsRoms=false;  // list non-installable 3DS .3ds entries (default: only .cia)
+    bool artNotify=true;     // notify at install when art is missing (off = silent RomM-cover fallback)
     std::vector<std::string> templates;
     unsigned int currentTemplate;
     unsigned long dsiwareCount;

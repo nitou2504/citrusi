@@ -9,7 +9,7 @@ static bool isRomExt(const std::string& e) {
     return false;
 }
 
-static std::string stripKnownExts(const std::string& name) {
+std::string artStripExts(const std::string& name) {
     std::string s = name;
     for (;;) {
         size_t dot = s.rfind('.');
@@ -85,7 +85,7 @@ static std::string flipArticle(const std::string& in) {
 }
 
 std::string artSanitizeQuery(const std::string& fsName) {
-    std::string s = stripKnownExts(fsName);
+    std::string s = artStripExts(fsName);
     s = removeParenthesis(s);
     for (auto& c : s) if (c == '_') c = ' ';
     s = flipArticle(collapseSpaces(s));
@@ -188,7 +188,7 @@ static std::string retroarchSanitize(const std::string& s) {
 
 std::vector<std::string> libretroNameVariants(const std::string& fsName) {
     std::vector<std::string> out;
-    std::string stem = stripKnownExts(fsName);
+    std::string stem = artStripExts(fsName);
     out.push_back(retroarchSanitize(stem));
     // retry variant: drop [..] blocks and (Translated..)-style paren blocks
     std::string retry;

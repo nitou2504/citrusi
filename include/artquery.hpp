@@ -17,6 +17,10 @@ enum ArtConfidence {
 // "The Zelda - X"), collapse whitespace (ES-DE removeParenthesis + extras)
 std::string artSanitizeQuery(const std::string& fsName);
 
+// strip known rom/archive extensions (.zip/.gba/.nds/...) — the shared stem
+// keys art.json so "game.zip" (library) and "game.gba" (SD) agree
+std::string artStripExts(const std::string& name);
+
 // normalize for comparison: lowercase, fold common accents/macrons, & -> and,
 // drop trailing platform tokens ("gba"/"ds"/"nds"), keep alnum only
 std::string artNorm(const std::string& name);

@@ -1,0 +1,385 @@
+#include <3ds.h>
+#include <citro2d.h>
+#include <cstring>
+#include <vector>
+#include "artpicker.hpp"
+#include "artquery.hpp"
+#include "dialog.hpp"
+#include "teximg.hpp"
+#include "helpers.hpp"
+#include "settings.hpp"
+#include "logger.hpp"
+extern "C" {
+#include "graphics.h"
+}
+
+static Logger aplog("artpicker");
+
+extern RommClient gRomm;
+extern SgdbClient gSgdb;
+
+#define LIBRETRO_GBA_LOGOS \
+    "http://thumbnails.libretro.com/Nintendo%20-%20Game%20Boy%20Advance/Named_Logos/"
+
+namespace {
+
+struct Cand {
+    std::string source;      // "sgdb" | "romm-cover" | "libretro"
+    int id = 0;
+    int w = 0, h = 0;        // native dims (0 = unknown)
+    std::string url;         // full-res url
+    std::string thumbUrl;
+    std::string cacheKey;    // full-res cache slot
+    std::string thumbKey;
+    std::string name;        // libretro No-Intro name / short label
+    C2D_Image img = {nullptr, nullptr};
+    int state = 0;           // 0 pending, 1 loaded, 2 failed
+};
+
+void freeCands(std::vector<Cand>& v) {
+    for (auto& c : v)
+        if (c.img.tex) freeTexImage(&c.img);
+    v.clear();
+}
+
+// resolve the query to one SGDB game (best-confidence result)
+int resolveGame(const std::string& query, std::string* gameName, bool* offline) {
+    if (offline) *offline = false;
+    if (!gSgdb.hasKey()) return 0;
+    std::vector<SgdbGame> games;
+    if (!gSgdb.search(query, games)) {
+        if (offline) *offline = true;
+        aplog.error("search failed: " + gSgdb.lastError);
+        return 0;
+    }
+    if (games.empty()) return 0;
+    std::vector<std::string> names;
+    for (auto& g : games) names.push_back(g.name);
+    int best = -1;
+    ArtConfidence conf = artConfidence(query, names, &best);
+    if (conf < ART_MATCH_MEDIUM || best < 0) best = 0;
+    if (gameName) *gameName = games[best].name;
+    return games[best].id;
+}
+
+void buildIconCands(int gameId, const std::string& coverPath,
+                    std::vector<Cand>& out, bool* offline) {
+    freeCands(out);
+    if (!coverPath.empty()) {
+        Cand c;
+        c.source = "romm-cover";
+        c.url = coverPath;
+        c.cacheKey = "cover-" + coverPath;
+        c.thumbKey = c.cacheKey;
+        c.name = "RomM cover";
+        out.push_back(c);
+    }
+    if (gameId && gSgdb.hasKey()) {
+        std::vector<SgdbIcon> icons;
+        if (gSgdb.icons(gameId, icons)) {
+            for (auto& i : icons) {
+                Cand c;
+                c.source = "sgdb";
+                c.id = i.id;
+                c.w = i.width; c.h = i.height;
+                c.url = i.url;
+                c.thumbUrl = i.thumbUrl;
+                c.cacheKey = "sgdb-icon-" + std::to_string(i.id);
+                c.thumbKey = "sgdb-icon-th-" + std::to_string(i.id);
+                out.push_back(c);
+            }
+        } else if (offline) *offline = true;
+    }
+}
+
+// candidate libretro names: fsName-derived variants, plus (after a refine)
+// the corrected query text itself
+void buildBannerCands(int gameId, const std::string& fsName,
+                      const std::string& refineName, const std::string& coverPath,
+                      const std::string& slug, std::vector<Cand>& out, bool* offline) {
+    freeCands(out);
+    if (slug == ROMM_SLUG_GBA) {
+        std::vector<std::string> names = libretroNameVariants(fsName);
+        if (!refineName.empty()) names.insert(names.begin(), refineName);
+        for (const std::string& n : names) {
+            std::string bytes;
+            std::string key = "libretro-gba-" + n;
+            bytes = artCacheRead(key);
+            if (bytes.empty()) {
+                if (!gRomm.fetchUrl(LIBRETRO_GBA_LOGOS + urlEncodePath(n) + ".png", bytes) ||
+                    bytes.empty())
+                    continue;
+                artCacheWrite(key, bytes);
+            }
+            Cand c;
+            c.source = "libretro";
+            c.name = n;
+            c.cacheKey = key;
+            c.thumbKey = key;
+            out.push_back(c);
+            break;   // one logo is enough; variants are the same art
+        }
+    }
+    if (gameId && gSgdb.hasKey()) {
+        std::vector<SgdbAsset> logos;
+        if (gSgdb.logos(gameId, logos)) {
+            for (auto& l : logos) {
+                Cand c;
+                c.source = "sgdb";
+                c.id = l.id;
+                c.w = l.width; c.h = l.height;
+                c.url = l.url;
+                c.thumbUrl = l.thumbUrl;
+                c.cacheKey = "sgdb-logo-" + std::to_string(l.id);
+                c.thumbKey = "sgdb-logo-th-" + std::to_string(l.id);
+                out.push_back(c);
+            }
+        } else if (offline) *offline = true;
+    }
+    if (!coverPath.empty()) {
+        Cand c;
+        c.source = "romm-cover";
+        c.url = coverPath;
+        c.cacheKey = "cover-" + coverPath;
+        c.thumbKey = c.cacheKey;
+        c.name = "RomM cover";
+        out.push_back(c);
+    }
+}
+
+// fetch + decode ONE pending thumb (called once per frame; blocking but short)
+void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW, int maxH) {
+    for (size_t i = first; i < last && i < cands.size(); i++) {
+        Cand& c = cands[i];
+        if (c.state != 0) continue;
+        std::string bytes = artCacheRead(c.thumbKey);
+        if (bytes.empty()) {
+            const std::string& url = c.thumbUrl.empty() ? c.url : c.thumbUrl;
+            bool ok;
+            if (url.rfind("https://", 0) == 0) ok = gSgdb.fetchImage(url, bytes);
+            else ok = gRomm.fetchUrl(url, bytes);
+            if (ok && !bytes.empty()) artCacheWrite(c.thumbKey, bytes);
+        }
+        c.state = (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) ? 1 : 2;
+        return;
+    }
+}
+
+std::string swkbdQuery(const std::string& prefill) {
+    SwkbdState kb;
+    char buf[128] = {0};
+    swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 63);
+    swkbdSetHintText(&kb, "Game name");
+    swkbdSetFeatures(&kb, SWKBD_DEFAULT_QWERTY);
+    if (!prefill.empty()) swkbdSetInitialText(&kb, prefill.c_str());
+    if (swkbdInputText(&kb, buf, sizeof(buf)) != SWKBD_BUTTON_CONFIRM) return "";
+    return std::string(buf);
+}
+
+} // namespace
+
+bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
+                  const std::string& title, const std::string& coverPath,
+                  const std::string& slug, ArtEntry& entry, ArtPieces& pieces,
+                  bool wantIcon, bool wantBanner,
+                  bool* iconChosen, bool* bannerChosen) {
+    if (iconChosen) *iconChosen = false;
+    if (bannerChosen) *bannerChosen = false;
+    if (!wantIcon && !wantBanner) return false;
+
+    std::string query = entry.query.empty() ? artSanitizeQuery(fsName) : entry.query;
+    std::string gameName;
+    bool offline = false;
+    int gameId = entry.sgdbGameId;
+    if (!gameId) gameId = resolveGame(query, &gameName, &offline);
+
+    std::vector<Cand> iconCands, bannerCands;
+    // a caller-corrected name (S3) also gets tried against libretro
+    std::string refineName;
+    if (!entry.query.empty() && entry.query != artSanitizeQuery(fsName))
+        refineName = entry.query;
+    bool iconLoaded = false, bannerLoaded = false;
+
+    int page = wantIcon ? 0 : 1;           // 0 = icon, 1 = banner
+    int cursor = 0, scroll = 0;            // scroll = first visible candidate
+    bool pickedIcon = false, pickedBanner = false;
+    bool anyPicked = false;
+
+    auto ensureCands = [&]() {
+        if (page == 0 && !iconLoaded) {
+            showLoading(target, {"Searching art...", query});
+            buildIconCands(gameId, coverPath, iconCands, &offline);
+            iconLoaded = true;
+        }
+        if (page == 1 && !bannerLoaded) {
+            showLoading(target, {"Searching art...", query});
+            buildBannerCands(gameId, fsName, refineName, coverPath, slug, bannerCands, &offline);
+            bannerLoaded = true;
+        }
+    };
+    auto invalidate = [&]() {
+        freeCands(iconCands);
+        freeCands(bannerCands);
+        iconLoaded = bannerLoaded = false;
+        cursor = scroll = 0;
+    };
+    auto advance = [&]() -> bool {   // to the other page, or done
+        if (page == 0 && wantBanner && !pickedBanner) { page = 1; cursor = scroll = 0; return true; }
+        if (page == 1 && wantIcon && !pickedIcon)     { page = 0; cursor = scroll = 0; return true; }
+        return false;   // nothing left to choose
+    };
+
+    ensureCands();
+
+    while (aptMainLoop()) {
+        std::vector<Cand>& cands = (page == 0) ? iconCands : bannerCands;
+        const int cols = (page == 0) ? 5 : 2;
+        const int rows = (page == 0) ? 3 : 2;
+        const int perPage = cols * rows;
+        const int cellW = (page == 0) ? 48 : 128;
+        const int cellH = (page == 0) ? 48 : 64;
+        const int pitchX = (page == 0) ? 56 : 150;
+        const int pitchY = (page == 0) ? 56 : 76;
+        const int gridX = (320 - (cols - 1) * pitchX - cellW) / 2;
+        const int gridY = 36;
+
+        hidScanInput();
+        u32 kDown = hidKeysDown();
+        int count = (int)cands.size();
+
+        if (kDown & KEY_B) {                       // skip this page
+            if (!advance()) break;
+            ensureCands();
+            continue;
+        }
+        if ((kDown & KEY_Y) && wantIcon && wantBanner) {
+            page = 1 - page;
+            cursor = scroll = 0;
+            ensureCands();
+            continue;
+        }
+        if (kDown & KEY_X) {                       // refine search
+            std::string q = swkbdQuery(query);
+            if (!q.empty()) {
+                query = q;
+                refineName = q;
+                gameId = resolveGame(query, &gameName, &offline);
+                invalidate();
+                ensureCands();
+            }
+            continue;
+        }
+        if (count > 0) {
+            if (kDown & KEY_RIGHT && cursor + 1 < count) cursor++;
+            if (kDown & KEY_LEFT  && cursor > 0) cursor--;
+            if (kDown & KEY_DOWN  && cursor + cols < count) cursor += cols;
+            if (kDown & KEY_UP    && cursor - cols >= 0) cursor -= cols;
+            if (kDown & KEY_R && scroll + perPage < count) { scroll += perPage; cursor = scroll; }
+            if (kDown & KEY_L && scroll > 0) { scroll -= perPage; cursor = scroll; }
+            if (cursor < scroll) scroll = (cursor / perPage) * perPage;
+            if (cursor >= scroll + perPage) scroll = (cursor / perPage) * perPage;
+
+            if (kDown & KEY_A) {                   // use the focused candidate
+                Cand& c = cands[cursor];
+                showLoading(target, {"Fetching art...", title});
+                std::string piece;
+                bool ok = false;
+                if (c.source == "romm-cover") {
+                    ArtPieces cov;
+                    if (artFromRommCover(gSgdb, gRomm, coverPath, page == 0, page == 1, cov)) {
+                        piece = (page == 0) ? cov.icon48 : cov.bannerTex;
+                        ok = !piece.empty();
+                    }
+                } else {
+                    std::string bytes;
+                    if (artGetUrl(gSgdb, gRomm, c.url.empty() ? "" : c.url, c.cacheKey, bytes) ||
+                        !(bytes = artCacheRead(c.cacheKey)).empty()) {
+                        piece = (page == 0) ? artIcon48FromImage(bytes) : artBannerFromImage(bytes);
+                        ok = !piece.empty();
+                    }
+                }
+                if (!ok) {
+                    Dialog(target, 0, 0, 320, 240, {"Couldn't fetch that one.",
+                           offline ? "SteamGridDB unreachable." : "Try another."}, {"OK"}).handle();
+                    continue;
+                }
+                entry.query = query;
+                if (gameId) entry.sgdbGameId = gameId;
+                if (page == 0) {
+                    pieces.icon48 = piece;
+                    entry.iconSource = (c.source == "sgdb") ? "sgdb" : "romm-cover";
+                    entry.iconId = c.id;
+                    pickedIcon = true;
+                    if (iconChosen) *iconChosen = true;
+                } else {
+                    pieces.bannerTex = piece;
+                    entry.bannerSource = c.source;
+                    entry.bannerId = c.id;
+                    entry.bannerName = (c.source == "libretro") ? c.name : "";
+                    pickedBanner = true;
+                    if (bannerChosen) *bannerChosen = true;
+                }
+                anyPicked = true;
+                if (!advance()) break;
+                ensureCands();
+                continue;
+            }
+        }
+
+        // one lazy thumb fetch per frame (visible page only)
+        loadOneThumb(cands, scroll, scroll + perPage, cellW, cellH);
+
+        // ---- draw ----
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        C2D_TargetClear(target, COL_BG);
+        C2D_SceneBegin(target);
+        char head[96];
+        snprintf(head, sizeof(head), "%s %s  %d found  %d/%d",
+                 (page == 0) ? "ICON" : "BANNER",
+                 (wantIcon && wantBanner) ? "(Y swap)" : "",
+                 count, count ? (scroll / perPage) + 1 : 1,
+                 count ? (count + perPage - 1) / perPage : 1);
+        drawText(160, 8, 0, 0.55f, COL_BG, COL_TEXT, head, C2D_AlignCenter);
+
+        for (int i = 0; i < perPage && scroll + i < count; i++) {
+            Cand& c = cands[scroll + i];
+            int cx = gridX + (i % cols) * pitchX;
+            int cy = gridY + (i / cols) * pitchY;
+            C2D_DrawRectSolid(cx, cy, 0, cellW, cellH, COL_SURFACE);
+            if (c.state == 1 && c.img.tex) {
+                float iw = c.img.subtex->width, ih = c.img.subtex->height;
+                C2D_DrawImageAt(c.img, cx + (cellW - iw) / 2, cy + (cellH - ih) / 2, 0);
+            } else if (c.state == 2) {
+                drawText(cx + cellW / 2, cy + cellH / 2 - 7, 0, 0.4f, COL_SURFACE, COL_TEXT_DIM, "x", C2D_AlignCenter);
+            }
+            if (scroll + i == cursor)
+                C2DExtra_DrawRectHollow(cx - 2, cy - 2, 0.1f, cellW + 4, cellH + 4, 2, COL_ACCENT);
+        }
+        if (count == 0) {
+            drawText(160, 100, 0, 0.5f, COL_BG, COL_TEXT_DIM,
+                     offline ? "SteamGridDB unreachable" : "No results", C2D_AlignCenter);
+            drawText(160, 120, 0, 0.45f, COL_BG, COL_TEXT_DIM, "X = search again", C2D_AlignCenter);
+        }
+        // footer: focused candidate info + controls
+        if (count > 0 && cursor < count) {
+            Cand& c = cands[cursor];
+            char info[96];
+            if (c.source == "sgdb" && c.w)
+                snprintf(info, sizeof(info), "SteamGridDB  %dx%d", c.w, c.h);
+            else if (c.source == "libretro")
+                snprintf(info, sizeof(info), "libretro logo");
+            else
+                snprintf(info, sizeof(info), "%s", c.name.empty() ? c.source.c_str() : c.name.c_str());
+            drawText(160, 204, 0, 0.45f, COL_BG, COL_TEXT_DIM, info, C2D_AlignCenter);
+        }
+        if (!gameName.empty() && page == 0)
+            drawText(160, 22, 0, 0.42f, COL_BG, COL_TEXT_DIM, gameName.c_str(), C2D_AlignCenter);
+        drawText(160, 222, 0, 0.45f, COL_BG, COL_TEXT_DIM,
+                 "A use   X search   B skip   L/R pages", C2D_AlignCenter);
+        C3D_FrameEnd(0);
+    }
+
+    freeCands(iconCands);
+    freeCands(bannerCands);
+    return anyPicked;
+}
