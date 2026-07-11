@@ -28,6 +28,7 @@ extern "C" {
 #include "cwav.hpp"
 #include "teximg.hpp"
 #include "covercache.hpp"
+#include "librefresh.hpp"
 #include "logger.hpp"
 #include "json.hpp"
 
@@ -166,6 +167,19 @@ static void invalidateAllCaches() {
     remove(libCachePath(ROMM_SLUG_3DS).c_str());
 }
 
+// did a background refresh actually change the list? (order-sensitive on purpose)
+static bool libDiffers(const std::vector<RommRom>& a, const std::vector<RommRom>& b) {
+    if (a.size() != b.size()) return true;
+    for (size_t i = 0; i < a.size(); i++) {
+        if (a[i].id != b[i].id || a[i].fsName != b[i].fsName ||
+            a[i].fileId != b[i].fileId || a[i].name != b[i].name ||
+            a[i].sizeBytes != b[i].sizeBytes || a[i].titleId != b[i].titleId ||
+            a[i].coverPath != b[i].coverPath)
+            return true;
+    }
+    return false;
+}
+
 // resolve 3ds title ids (for install detection) via a small header fetch, cached in the lib json.
 // runs BEFORE the cover worker starts, so only the main thread touches httpc (no concurrency).
 static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
@@ -189,12 +203,15 @@ static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
 // loads a platform's library into gCache[slug] once; returns false on error (sets gRomm.lastError)
 static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* target = nullptr) {
     if (gCacheOk[slug]) { rlog.info(" cache hit " + slug); return true; }
-    // fast path: on-SD json cache (instant, no network)
+    // fast path: on-SD json cache (instant, no network), then refresh the
+    // list from the server in the background ("updating..." in the heading)
     if (loadLibCache(slug, gCache[slug])) {
         gCacheOk[slug] = true;
         rlog.info(" loaded " + std::to_string(gCache[slug].size()) + " roms from SD cache " + slug);
         resolveTitleIds(slug, target);          // fill in any missing tids (older cache)
-        coverCacheStart(gRomm, gCache[slug]);
+        libRefreshStart(gRomm, slug, gCache[slug]);
+        // covers wait for the refresh (single httpc user); resumed on take
+        if (!libRefreshRunning("")) coverCacheStart(gRomm, gCache[slug]);
         return true;
     }
     rlog.info(" findPlatform " + slug);
@@ -320,6 +337,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (selPtr != lastSel) { lastSel = selPtr; selTick = gTick; }
 
             std::string title = this->heading.empty() ? shorten(this->currentDirectory.generic_string(),30) : shorten(this->heading,34);
+            if (this->type == MENU_ROMM && libRefreshRunning(this->crossSystem ? "" : this->platformSlug))
+                title += "  ~ updating...";
             // flat background + header
             C2D_DrawRectSolid(0, 0, 0, 400, 240, COL_BG);
             drawText(12, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
@@ -1217,6 +1236,27 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     Menu* Menu::handleQueue(Builder* builder, C3D_RenderTarget* target, Config* config) {
         gConfigPtr = config;
+        // collect a finished background library refresh (only between actions)
+        if (!this->hasQueue()) {
+            std::string slug; std::vector<RommRom> fresh; bool ok = false;
+            if (libRefreshTake(slug, fresh, ok)) {
+                bool changed = false;
+                if (ok) {
+                    changed = libDiffers(gCache[slug], fresh);
+                    if (changed) {
+                        gCache[slug] = std::move(fresh);
+                        saveLibCache(slug, gCache[slug]);
+                        coverCacheClearMisses();
+                        rlog.info("background refresh applied: " + slug);
+                    }
+                    gCacheOk[slug] = true;
+                }
+                coverCacheStart(gRomm, gCache[slug]);   // covers waited on the refresh
+                if (changed && this->type == MENU_ROMM && !this->crossSystem &&
+                    this->platformSlug == slug)
+                    return buildRommMenu(this, this->filter, gCache[slug], slug, false);
+            }
+        }
         if (!this->hasQueue())
             return this;
         if (target==nullptr)
