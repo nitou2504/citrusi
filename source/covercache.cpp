@@ -13,7 +13,10 @@
 
 struct CoverJob { int id; std::string url; };
 
-#define COVER_WORKERS 3
+// One worker: libctru httpc's shared session isn't safe for many concurrent
+// contexts (3 fetchers crashed the app). Parallelism must serialize the fetch;
+// keep this at 1 until that's in place.
+#define COVER_WORKERS 1
 
 static Thread gWorkers[COVER_WORKERS] = {nullptr};
 static std::atomic<bool> gRun(false);
@@ -134,9 +137,8 @@ void coverCacheStart(const RommClient& client, const std::vector<RommRom>& roms)
         gRun = true;
         s32 prio = 0x30;
         svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
-        // spread the workers across cores (-2 = any core incl. the extra syscore on n3ds)
         for (int i = 0; i < COVER_WORKERS; i++)
-            gWorkers[i] = threadCreate(workerMain, nullptr, 128 * 1024, prio + 4, -2, false);
+            gWorkers[i] = threadCreate(workerMain, nullptr, 128 * 1024, prio + 4, -1, false);
     }
 }
 
