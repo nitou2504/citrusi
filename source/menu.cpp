@@ -1033,6 +1033,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         }
     }
     Menu* Menu::back() {
+        rlog.info("back: type=" + std::to_string((int)this->type) + " filter='" + this->filter +
+                  "' cross=" + (this->crossSystem?"1":"0"));
         switch (this->type) {
             case MENU_MAIN:
                 return this;
@@ -1215,7 +1217,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     return generateSearchAllMenu(this, target);   // prompts the query itself
                 case RefreshLibraries:
                     while (this->queue.size() > 0) this->queue.pop();
-                    invalidateAllCaches();   // wipe memory + on-SD json caches
+                    invalidateAllCaches();     // wipe memory + on-SD json caches
+                    coverCacheClearMisses();   // retry covers that were missing before
                     Dialog(target,0,0,320,240,{"Library cache cleared.","Will reload from server."},{"OK"}).handle();
                     return generateSystemMenu(this);
                 case OpenManage:
@@ -1293,6 +1296,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             break;
                     }
                     if (!is3ds && !ensureCtrBuilder(target)) break;   // forwarder builder (nds only)
+                    rlog.info("install: pre-download needDownload=" + std::string(needDownload?"1":"0") + " dest=" + dest);
                     if (needDownload) {
                         std::error_code ec;
                         std::filesystem::create_directories(std::filesystem::path(dir), ec);

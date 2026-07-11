@@ -19,4 +19,6 @@ void coverCacheWant(int rommId);
 bool coverCacheLoad(int rommId, C2D_Image* out);
 // true when the cover is known to be unavailable (no art on server)
 bool coverCacheUnavailable(int rommId);
+// forget "no art" misses so covers added later re-fetch (call on library refresh)
+void coverCacheClearMisses();
 void coverCacheStop();

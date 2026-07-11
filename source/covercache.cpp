@@ -178,6 +178,15 @@ bool coverCacheUnavailable(int rommId) {
     return fileExists(missPath(rommId));
 }
 
+void coverCacheClearMisses() {
+    std::error_code ec;
+    int n = 0;
+    for (auto& e : std::filesystem::directory_iterator(RAW_CACHE_DIR, ec)) {
+        if (e.path().extension() == ".none") { remove(e.path().c_str()); n++; }
+    }
+    cclog.info("cleared " + std::to_string(n) + " cover misses");
+}
+
 void coverCacheStop() {
     if (gWorkers[0]) {
         gRun = false;
