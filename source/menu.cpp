@@ -25,6 +25,9 @@ extern "C" {
 #include "cwav.hpp"
 #include "teximg.hpp"
 #include "covercache.hpp"
+#include "logger.hpp"
+
+static Logger rlog("romm");
 
 #define MAX_DSIWARE 40
 
@@ -114,12 +117,17 @@ static void invalidateAllCaches() { gCacheOk.clear(); gCombined.clear(); }
 
 // loads a platform's library into gCache[slug] once; returns false on error (sets gRomm.lastError)
 static bool ensurePlatformLoaded(const std::string& slug) {
-    if (gCacheOk[slug]) return true;
+    if (gCacheOk[slug]) { rlog.info(" cache hit " + slug); return true; }
+    rlog.info(" findPlatform " + slug);
     int pid = gRomm.findPlatform(slug);
-    if (pid < 0) return false;
-    if (!gRomm.listRoms(pid, gCache[slug], slug)) return false;
+    rlog.info(" platform id=" + std::to_string(pid));
+    if (pid < 0) { rlog.error(" findPlatform failed: " + gRomm.lastError); return false; }
+    rlog.info(" listRoms...");
+    if (!gRomm.listRoms(pid, gCache[slug], slug)) { rlog.error(" listRoms failed: " + gRomm.lastError); return false; }
     gCacheOk[slug] = true;
+    rlog.info(" listRoms ok: " + std::to_string(gCache[slug].size()) + " roms; starting cover prefetch");
     coverCacheStart(gRomm, gCache[slug]);   // background art prefetch (async, cached)
+    rlog.info(" cover prefetch started");
     return true;
 }
 
@@ -770,7 +778,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             menu->heading=scope+" - SELECT to search";
         else
             menu->heading="\""+filter+"\" - "+std::to_string(entries.size())+" found";
+        rlog.info(" buildRommMenu: " + std::to_string(entries.size()) + " entries (slug=" + slug + " cross=" + (cross?"1":"0") + ")");
         menu->init();
+        rlog.info(" menu ready");
         return menu;
     }
 
@@ -797,6 +807,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
 
     Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug) {
+        rlog.info("open library slug=" + slug);
         if (!gRomm.hasConfig() && !gRomm.loadConfig()) {
             if (!gRomm.promptConfig()) {
                 return (prev!=nullptr)?prev:generateMainMenu(nullptr);
@@ -1188,6 +1199,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 }
                 case RommInstall: {
                     bool is3ds = (entry.platformSlug == ROMM_SLUG_3DS);
+                    rlog.info("install: " + entry.fsName + " slug=" + entry.platformSlug +
+                              " fileId=" + std::to_string(entry.fileId) + " installable=" + (entry.installable?"1":"0"));
                     if (is3ds && !entry.installable) {
                         Dialog(target,0,0,320,240,{"Not a .cia — can't install here.",shorten(entry.fsName,28),"Convert on PC with ready3ds,","then upload the .cia to RomM."},{"OK"}).handle();
                         break;
@@ -1262,6 +1275,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         // stream-install the downloaded .cia into the title database
                         std::string ierr;
                         u64 lastI = 0;
+                        rlog.info("cia install start: " + dest);
                         installed = installCiaFromFile(dest, ierr, config->forceInstall,
                             [&](unsigned long long done, unsigned long long total) -> bool {
                                 hidScanInput();
@@ -1272,6 +1286,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Installing... (B = cancel)",shorten(entry.fsName,28),std::to_string(pct)+"%"},{},0).handle();
                                 return true;
                             });
+                        rlog.info(std::string("cia install ") + (installed?"OK":("FAILED: " + ierr)));
                         if (installed) remove(dest.c_str());   // free the SD copy once installed
                         else Dialog(target,0,0,320,240,{(ierr=="cancelled")?"Install cancelled":"Install failed",ierr},{"OK"}).handle();
                     } else {

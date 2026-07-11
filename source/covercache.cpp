@@ -8,6 +8,9 @@
 #include "teximg.hpp"
 #include "helpers.hpp"
 #include "settings.hpp"
+#include "logger.hpp"
+
+static Logger cclog("cover");
 
 #define RAW_CACHE_DIR (FORWARDER_DIR + std::string("/cache/"))
 
@@ -133,12 +136,15 @@ void coverCacheStart(const RommClient& client, const std::vector<RommRom>& roms)
         gJobs.push_back(j);
     }
     LightLock_Unlock(&gJobsLock);
+    cclog.info("start: " + std::to_string(gJobs.size()) + " jobs, workers=" + std::to_string(COVER_WORKERS));
     if (!gWorkers[0]) {
         gRun = true;
         s32 prio = 0x30;
         svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
-        for (int i = 0; i < COVER_WORKERS; i++)
+        for (int i = 0; i < COVER_WORKERS; i++) {
             gWorkers[i] = threadCreate(workerMain, nullptr, 128 * 1024, prio + 4, -1, false);
+            if (!gWorkers[i]) cclog.error("threadCreate failed for worker " + std::to_string(i));
+        }
     }
 }
 

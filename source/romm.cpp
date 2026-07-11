@@ -295,6 +295,7 @@ bool RommClient::download(const RommRom& rom, const std::string& destPath,
                       "/content/" + urlEncodePath(rom.fsName);
     if (rom.fileId > 0)   // multi-file: fetch just this file (no zip)
         url += "?file_ids=" + std::to_string(rom.fileId);
+    rommLogger.info("download: " + url);
     httpcContext ctx;
     Result res = httpcOpenContext(&ctx, HTTPC_METHOD_GET, url.c_str(), 1);
     if (R_FAILED(res)) { lastError = "httpcOpenContext failed"; return false; }
