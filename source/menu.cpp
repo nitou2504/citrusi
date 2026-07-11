@@ -1033,6 +1033,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         };
         add("Nintendo DS", ROMM_SLUG_NDS);
         add("Nintendo 3DS", ROMM_SLUG_3DS);
+        add("Game Boy Advance", ROMM_SLUG_GBA);
         Menu* menu = new Menu(entries);
         menu->currentDirectory = std::filesystem::path("/");
         menu->type = MENU_SYSTEMS;   // back -> main
@@ -1063,6 +1064,47 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->coverSmallPath = cr.coverSmallPath;
             e->year = cr.year;
             e->sizeBytes = cr.sizeBytes;
+            entries.push_back(e);
+        }
+      } else if (slug == ROMM_SLUG_GBA) {
+        // GBA: roms on SD + inject install state (AM, deterministic tid)
+        if (!gCacheOk[ROMM_SLUG_GBA] && gRomm.loadConfig() && gRomm.hasConfig())
+            ensurePlatformLoaded(ROMM_SLUG_GBA);
+        installed3dsRefresh();
+        // filename -> lib entry (covers/metadata), keyed by the extracted name
+        std::map<std::string, const RommRom*> libByName;
+        for (auto& cr : gCache[ROMM_SLUG_GBA])
+            libByName.emplace(toLowerCase(std::filesystem::path(
+                rommLocalPath(cr.fsName, cr.platformSlug)).filename().generic_string()), &cr);
+        std::error_code ec;
+        std::vector<std::filesystem::path> paths;
+        for (auto& de : std::filesystem::directory_iterator(ROMM_GBA_DIR, ec)) {
+            std::string ext = toLowerCase(de.path().extension().generic_string());
+            if (ext == ".gba" || ext == ".agb") paths.push_back(de.path());
+        }
+        std::sort(paths.begin(), paths.end());
+        for (auto& p : paths) {
+            std::string fname = p.filename().generic_string();
+            u64 gtid = gbaTidForRom(fname);
+            bool inst = installed3dsHasTitle(gtid);
+            MenuSelection* e = new MenuSelection();
+            std::string clean = p.stem().generic_string();
+            e->display = (inst ? "* " : "  ") + utf8FoldLatin(clean);
+            e->title = utf8FoldLatin(clean);
+            e->action = ManageRom;
+            e->platformSlug = ROMM_SLUG_GBA;
+            e->path = p;
+            e->tid = gtid;
+            e->installed = inst;
+            e->sizeBytes = std::filesystem::file_size(p, ec);
+            auto hit = libByName.find(toLowerCase(fname));
+            if (hit != libByName.end()) {
+                const RommRom* cr = hit->second;
+                e->rommId = cr->id;
+                e->coverPath = cr->coverPath;
+                e->coverSmallPath = cr->coverSmallPath;
+                e->year = cr->year;
+            }
             entries.push_back(e);
         }
       } else {
@@ -1114,7 +1156,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         std::string free = "";
         if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
             free = " - " + humanSize((u64)sd.freeClusters * sd.clusterSize) + " free";
-        menu->heading = std::string(slug==ROMM_SLUG_3DS ? "Manage 3DS" : "Manage NDS") + free;
+        menu->heading = std::string(slug==ROMM_SLUG_3DS ? "Manage 3DS" :
+                                    slug==ROMM_SLUG_GBA ? "Manage GBA" : "Manage NDS") + free;
         menu->init();
         return menu;
     }
@@ -1591,6 +1634,53 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         AM_DeleteTicket(entry.tid);
                         if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",shorten(n3,28)},{"OK"}).handle();
                         else Dialog(target,0,0,320,240,{"Uninstalled.",shorten(n3,28)},{"OK"}).handle();
+                        while (this->queue.size() > 0) this->queue.pop();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                    }
+                    if (entry.platformSlug == ROMM_SLUG_GBA) {   // GBA rom on SD +/- installed inject
+                        std::string ng = entry.title;
+                        if (entry.installed) {
+                            int c = Dialog(target,0,0,320,240,{ng,"GBA inject installed"},{"Uninstall","Delete ROM","Back"}).handle();
+                            if (c==0) {
+                                if (Dialog(target,0,0,320,240,{"Uninstall this inject?",shorten(ng,28)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                                Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
+                                AM_DeleteTicket(entry.tid);
+                                if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",shorten(ng,28)},{"OK"}).handle();
+                                else Dialog(target,0,0,320,240,{"Uninstalled.",shorten(ng,28)},{"OK"}).handle();
+                            } else if (c==1) {
+                                if (Dialog(target,0,0,320,240,{"Delete ROM file?","(inject stays installed)"},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                                std::error_code ec;
+                                std::filesystem::remove(entry.path, ec);
+                            } else break;
+                        } else {
+                            int c = Dialog(target,0,0,320,240,{ng,"No inject installed."},{"Install inject","Delete ROM","Back"}).handle();
+                            if (c==0) {
+                                if (!ensureCtrBuilder(target)) break;
+                                std::string romBase = entry.path.filename().generic_string();
+                                u64 gtid = gCtr.allocateGbaTID(romBase);
+                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle(); break; }
+                                Dialog(target,0,0,320,240,{"Building inject...",shorten(ng,28)},{},0).handle();
+                                u64 lastG = 0;
+                                ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid, "", "",
+                                    [&](u64 done, u64 total) -> bool {
+                                        hidScanInput();
+                                        if (hidKeysDown() & KEY_B) return false;
+                                        if (done - lastG < (2<<20) && done != total) return true;
+                                        lastG = done;
+                                        int pct = (total>0)?(int)(done*100/total):0;
+                                        Dialog(target,0,0,320,240,{"Installing... (B = cancel)",shorten(ng,28),std::to_string(pct)+"%"},{},0).handle();
+                                        return true;
+                                    });
+                                if (gr->isSuccess()) Dialog(target,0,0,320,240,{"Installed!",shorten(ng,28)},{"OK"}).handle();
+                                else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message},{"OK"}).handle();
+                                delete gr;
+                            } else if (c==1) {
+                                if (Dialog(target,0,0,320,240,{"Delete ROM file?",shorten(ng,28)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                                std::error_code ec;
+                                std::filesystem::remove(entry.path, ec);
+                            } else break;
+                        }
                         while (this->queue.size() > 0) this->queue.pop();
                         showLoading(target, {"Refreshing..."});
                         return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
