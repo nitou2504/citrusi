@@ -11,6 +11,7 @@ struct ManagedRom {
     bool installed;       // TWL forwarder present on NAND
     u64 yanbfTid;         // YANBF CTR forwarder title id on SD (0 if none)
     u64 rommTid;          // romm3ds CTR forwarder title id on SD (0 if none)
+    std::string orphanCia; // forwarder .cia for this rom found on SD but not installed
     u64 sizeBytes;
 };
 
@@ -26,7 +27,13 @@ bool twlTitleInstalled(const std::vector<u64>& list, u64 tid);
 std::map<std::string, u64> getYanbfForwarders();
 void invalidateYanbfCache();
 
+// forwarder .cia files found on SD whose title is NOT installed:
+// maps lowercase rom filename -> cia path. filled by getYanbfForwarders().
+std::map<std::string, std::string> getOrphanForwarderCias();
+
+// session-cached; every install/delete/rom-change path must invalidate
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir);
+void invalidateManagedRoms();
 
 // romm3ds CTR forwarders: maps lowercase rom filename -> tid
 // (from sd:/3ds/forwarder/ctr/<tid>.txt bookkeeping, verified against AM)

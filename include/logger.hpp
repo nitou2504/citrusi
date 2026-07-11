@@ -9,9 +9,10 @@ class Logger {
         std::string pluginName;
     public:
         static void log(std::string messageType, std::string msg){
-            std::ofstream file(std::string(LOGPATH) + "/log.txt",std::ios_base::app);
+            // opened once: reopening per line costs an SD file open on every log call
+            static std::ofstream file(std::string(LOGPATH) + "/log.txt",std::ios_base::app);
             file << messageType << ": " << msg << "\n";
-            file.close();
+            file.flush();
         }
         Logger(std::string plugin) {
             this->pluginName=plugin;

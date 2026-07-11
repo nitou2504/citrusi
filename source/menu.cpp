@@ -6,6 +6,8 @@
 #include <sstream>
 #include <fstream>
 #include <map>
+#include <set>
+#include <cctype>
 #include "menu.hpp"
 extern "C" {
 #include "graphics.h"
@@ -26,6 +28,7 @@ extern "C" {
 #include "cwav.hpp"
 #include "teximg.hpp"
 #include "covercache.hpp"
+#include "librefresh.hpp"
 #include "logger.hpp"
 #include "json.hpp"
 
@@ -112,6 +115,11 @@ static u32 gTick = 0;           // global frame counter for marquees
 static std::map<std::string, std::vector<RommRom>> gCache;   // slug -> roms
 static std::map<std::string, bool> gCacheOk;                 // slug -> loaded?
 static std::vector<RommRom> gCombined;                       // cross-system search source
+// normalized names of NDS roms that have ANY forwarder installed (TWL/YANBF/romm3ds)
+static std::set<std::string> gFwdNames;
+static bool gFwdReady = false;
+static void refreshNdsForwarders();
+static bool ndsForwarderInstalled(const std::string& fsName);
 
 static const char* systemName(const std::string& slug) {
     if (slug == ROMM_SLUG_3DS) return "Nintendo 3DS";
@@ -162,6 +170,7 @@ static void invalidateAllCaches() {
     remove(libCachePath(ROMM_SLUG_3DS).c_str());
 }
 
+
 // resolve 3ds title ids (for install detection) via a small header fetch, cached in the lib json.
 // runs BEFORE the cover worker starts, so only the main thread touches httpc (no concurrency).
 static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
@@ -185,12 +194,15 @@ static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
 // loads a platform's library into gCache[slug] once; returns false on error (sets gRomm.lastError)
 static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* target = nullptr) {
     if (gCacheOk[slug]) { rlog.info(" cache hit " + slug); return true; }
-    // fast path: on-SD json cache (instant, no network)
+    // fast path: on-SD json cache (instant, no network), then refresh the
+    // list from the server in the background ("updating..." in the heading)
     if (loadLibCache(slug, gCache[slug])) {
         gCacheOk[slug] = true;
         rlog.info(" loaded " + std::to_string(gCache[slug].size()) + " roms from SD cache " + slug);
         resolveTitleIds(slug, target);          // fill in any missing tids (older cache)
-        coverCacheStart(gRomm, gCache[slug]);
+        libRefreshStart(gRomm, slug, gCache[slug], saveLibCache);
+        // covers wait for the refresh (single httpc user); resumed on take
+        if (!libRefreshRunning("")) coverCacheStart(gRomm, gCache[slug]);
         return true;
     }
     rlog.info(" findPlatform " + slug);
@@ -316,6 +328,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (selPtr != lastSel) { lastSel = selPtr; selTick = gTick; }
 
             std::string title = this->heading.empty() ? shorten(this->currentDirectory.generic_string(),30) : shorten(this->heading,34);
+            if (this->type == MENU_ROMM && libRefreshRunning(this->crossSystem ? "" : this->platformSlug))
+                title += "  ~ updating...";
             // flat background + header
             C2D_DrawRectSolid(0, 0, 0, 400, 240, COL_BG);
             drawText(12, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
@@ -545,7 +559,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             bool onSD = is3ds ? installed3dsHasTitle(sel->titleId)
                       : sel->platformSlug == ROMM_SLUG_GBA
                           ? installed3dsHasTitle(gbaTidForRom(std::filesystem::path(rommLocalPath(sel->fsName, sel->platformSlug)).filename().generic_string()))
-                          : fileExists(rommLocalPath(sel->fsName, sel->platformSlug));
+                          : ndsForwarderInstalled(sel->fsName);
             if (gDescForId != sel->rommId) {
                 wrapLines(sel->summary, CTW, 0.45f, gDescLines);
                 gDescForId = sel->rommId;
@@ -563,7 +577,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (sel->year > 0) { snprintf(chip, sizeof(chip), "%d", sel->year); cxp = drawChip(cxp, y, chip, COL_TEXT_DIM); }
             cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
             if (sel->rating > 0) { snprintf(chip, sizeof(chip), "%.0f/100", sel->rating); cxp = drawChip(cxp, y, chip, COL_TEXT_DIM); }
-            if (onSD) drawChip(cxp, y, is3ds ? "INSTALLED" : "ON SD", COL_ACCENT);
+            if (onSD) drawChip(cxp, y, is3ds ? "INSTALLED" : "FORWARDER", COL_ACCENT);
             y += CHIP_H + 6;
             y = cardDivider(y);
             // genres: 4px pad, dwell then scroll after ~3s
@@ -606,18 +620,31 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 return;
             }
             MenuSelection* sel = *this->selection;
+            bool m3ds = (sel->platformSlug == ROMM_SLUG_3DS);
             float y = CARD_Y + PAD;
             y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
             y += 5;
             float cxp = drawChip(CTX, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
-            if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
-            if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
-            if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
-            if (!sel->rtid && !sel->installed && !sel->ytid) drawChip(cxp, y, "no forwarder", COL_TEXT_DIM);
+            if (m3ds) {
+                cxp = drawChip(cxp, y, "3DS", COL_TEXT_DIM);
+                drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+            } else {
+                if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
+                if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
+                if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
+                if (!sel->rtid && !sel->installed && !sel->ytid)
+                    drawChip(cxp, y, sel->fwdCia.empty() ? "no forwarder detected" : "fwd cia on SD", COL_TEXT_DIM);
+            }
             y += 21;
             y = cardDivider(y) + 5;
             char tid[64];
             u32 lineCol = C2D_Color32(0xC6,0xCF,0xE2,255);
+            if (m3ds) {
+                snprintf(tid, sizeof(tid), "title  %016llX", (unsigned long long)sel->tid);
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
+                drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed 3DS title. Press A to uninstall.", 2);
+                return;
+            }
             if (sel->rtid) {
                 snprintf(tid, sizeof(tid), "romm3ds  %016llX", sel->rtid);
                 y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
@@ -631,7 +658,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
             }
             if (!sel->rtid && !sel->installed && !sel->ytid)
-                drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, "No forwarder on the HOME menu yet. Press A to install one.", 2);
+                drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM,
+                            sel->fwdCia.empty()
+                                ? "No forwarder detected — rom is on the SD card. Press A to install one."
+                                : "No forwarder installed, but its .cia is on the SD card. Press A to install it.", 3);
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
@@ -820,6 +850,33 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
     // builds the RomM list from a cached library, optionally filtered.
     // src = the platform cache (or the combined list for cross-system search).
+    // canonical key: drop extension, region/() tags, punctuation; lowercase alnum only.
+    // makes RomM "Pokemon - X (Spain).zip" match the SD forwarder's "Pokemon X.nds".
+    static std::string normNds(std::string s) {
+        size_t dot = s.find_last_of('.');
+        if (dot != std::string::npos && dot + 5 >= s.size()) s = s.substr(0, dot);
+        std::string o; bool paren = false;
+        for (char c : s) {
+            if (c == '(' || c == '[') paren = true;
+            else if (c == ')' || c == ']') paren = false;
+            else if (!paren && std::isalnum((unsigned char)c)) o += (char)std::tolower((unsigned char)c);
+        }
+        return o;
+    }
+    // build once/session: NDS roms with ANY forwarder on the HOME menu (all 3 types, AM-verified)
+    static void refreshNdsForwarders() {
+        if (gFwdReady) return;
+        gFwdNames.clear();
+        for (auto& m : scanManagedRoms(ROMM_NDS_DIR))
+            if (m.installed || m.yanbfTid || m.rommTid)
+                gFwdNames.insert(normNds(m.display));
+        gFwdReady = true;
+    }
+    // is a forwarder for this NDS rom currently on the HOME menu?
+    static bool ndsForwarderInstalled(const std::string& fsName) {
+        return gFwdNames.count(normNds(fsName)) > 0;
+    }
+
     // filter + slug are taken BY VALUE on purpose: we delete `prev` below, and
     // callers pass this->filter / this->platformSlug — a reference would dangle.
     static Menu* buildRommMenu(Menu* prev, std::string filter,
@@ -828,7 +885,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         delete prev;
         std::string flow = toLowerCase(filter);
         bool show3ds = gConfigPtr ? gConfigPtr->show3dsRoms : false;
-        installed3dsRefresh();   // refresh which 3DS titles are installed on this console
+        installed3dsRefresh();     // 3DS: titles installed on the console
+        refreshNdsForwarders();    // NDS: forwarders on the HOME menu
         std::vector<MenuSelection*> entries;
         for (auto& rom : src) {
             if (!flow.empty() &&
@@ -840,12 +898,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 continue;
             MenuSelection* e = new MenuSelection();
             // marker: 3DS/GBA = title installed on the console (AM, by title id);
-            //         NDS = rom downloaded to SD
+            //         NDS = forwarder on the HOME menu
             bool marked = (rom.platformSlug == ROMM_SLUG_3DS)
                           ? installed3dsHasTitle(rom.titleId)
                           : rom.platformSlug == ROMM_SLUG_GBA
                               ? installed3dsHasTitle(gbaTidForRom(std::filesystem::path(rommLocalPath(rom.fsName, rom.platformSlug)).filename().generic_string()))
-                              : fileExists(rommLocalPath(rom.fsName, rom.platformSlug));
+                              : ndsForwarderInstalled(rom.fsName);
             std::string tag = cross ? (std::string("[") + (rom.platformSlug==ROMM_SLUG_3DS?"3DS":
                                        rom.platformSlug==ROMM_SLUG_GBA?"GBA":"DS") + "] ") : "";
             e->display=(marked?"* ":"  ")+tag+rom.name;
@@ -964,15 +1022,61 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         const std::vector<RommRom>& src = this->crossSystem ? gCombined : gCache[this->platformSlug];
         return buildRommMenu(this, std::string(buf), src, this->platformSlug, this->crossSystem);
     }
-    Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount) {
+    // Manage system-selection screen (NDS / 3DS), mirrors the library flow
+    Menu* generateManageSystemMenu(Menu* prev) {
         delete prev;
-        // prime the RomM library cache (silently) so Manage can show box art
-        // even when the user hasn't opened the Library this session
-        if (!gCacheOk[ROMM_SLUG_NDS] && gRomm.loadConfig() && gRomm.hasConfig()) {
-            ensurePlatformLoaded(ROMM_SLUG_NDS);
-        }
         std::vector<MenuSelection*> entries;
+        auto add = [&](const std::string& label, const std::string& slug){
+            MenuSelection* e = new MenuSelection();
+            e->display = label; e->action = OpenManage; e->platformSlug = slug;
+            entries.push_back(e);
+        };
+        add("Nintendo DS", ROMM_SLUG_NDS);
+        add("Nintendo 3DS", ROMM_SLUG_3DS);
+        Menu* menu = new Menu(entries);
+        menu->currentDirectory = std::filesystem::path("/");
+        menu->type = MENU_SYSTEMS;   // back -> main
+        menu->heading = "Manage Installed";
+        menu->init();
+        return menu;
+    }
+
+    Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug) {
+        (void)dsiwareCount;
+        delete prev;
+        std::vector<MenuSelection*> entries;
+      if (slug == ROMM_SLUG_3DS) {
+        // 3DS: installed titles from your library (uninstall here)
+        if (!gCacheOk[ROMM_SLUG_3DS] && gRomm.loadConfig() && gRomm.hasConfig())
+            ensurePlatformLoaded(ROMM_SLUG_3DS);
+        installed3dsRefresh();
+        for (auto& cr : gCache[ROMM_SLUG_3DS]) {
+            if (cr.titleId == 0 || !installed3dsHasTitle(cr.titleId)) continue;
+            MenuSelection* e = new MenuSelection();
+            e->display = "* " + utf8FoldLatin(cr.name);
+            e->title = utf8FoldLatin(cr.name);
+            e->action = ManageRom;
+            e->platformSlug = ROMM_SLUG_3DS;
+            e->tid = cr.titleId;
+            e->rommId = cr.id;
+            e->coverPath = cr.coverPath;
+            e->coverSmallPath = cr.coverSmallPath;
+            e->year = cr.year;
+            e->sizeBytes = cr.sizeBytes;
+            entries.push_back(e);
+        }
+      } else {
+        // NDS: roms on SD + their forwarder state
+        if (!gCacheOk[ROMM_SLUG_NDS] && gRomm.loadConfig() && gRomm.hasConfig())
+            ensurePlatformLoaded(ROMM_SLUG_NDS);
         std::vector<ManagedRom> roms = scanManagedRoms(ROMM_NDS_DIR);
+        // filename -> lib entry index, built once (was a linear scan per rom)
+        std::map<std::string, const RommRom*> libByName;
+        for (auto& cr : gCache[ROMM_SLUG_NDS]) {
+            libByName.emplace(toLowerCase(cr.fsName), &cr);
+            libByName.emplace(toLowerCase(std::filesystem::path(
+                rommLocalPath(cr.fsName, cr.platformSlug)).filename().generic_string()), &cr);
+        }
         for (auto& rom : roms) {
             MenuSelection* e = new MenuSelection();
             // clean name: no extension, no decorations; dot marks "has forwarder"
@@ -988,29 +1092,29 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->ytid=rom.yanbfTid;
             e->rtid=rom.rommTid;
             e->installed=rom.installed;
+            e->fwdCia=rom.orphanCia;
             e->sizeBytes=rom.sizeBytes;
             // match against the NDS RomM cache to reuse cover art
-            std::string base = toLowerCase(rom.display);
-            for (auto& cr : gCache[ROMM_SLUG_NDS]) {
-                if (toLowerCase(cr.fsName) == base ||
-                    toLowerCase(std::filesystem::path(rommLocalPath(cr.fsName, cr.platformSlug)).filename().generic_string()) == base) {
-                    e->rommId = cr.id;
-                    e->coverPath = cr.coverPath;
-                    e->coverSmallPath = cr.coverSmallPath;
-                    e->year = cr.year;
-                    break;
-                }
+            auto hit = libByName.find(toLowerCase(rom.display));
+            if (hit != libByName.end()) {
+                const RommRom* cr = hit->second;
+                e->rommId = cr->id;
+                e->coverPath = cr->coverPath;
+                e->coverSmallPath = cr->coverSmallPath;
+                e->year = cr->year;
             }
             entries.push_back(e);
         }
+      }
         Menu* menu = new Menu(entries);
         menu->currentDirectory=std::filesystem::path("/");
         menu->type=MENU_MANAGE;
+        menu->platformSlug=slug;
         FS_ArchiveResource sd = {};
         std::string free = "";
         if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
             free = " - " + humanSize((u64)sd.freeClusters * sd.clusterSize) + " free";
-        menu->heading="Manage roms" + free;
+        menu->heading = std::string(slug==ROMM_SLUG_3DS ? "Manage 3DS" : "Manage NDS") + free;
         menu->init();
         return menu;
     }
@@ -1090,6 +1194,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             case MENU_SYSTEMS:
                 return generateMainMenu(this);
             case MENU_MANAGE:
+                return generateManageSystemMenu(this);   // back to NDS/3DS pick
             case MENU_SETTINGS:
                 return generateMainMenu(this);
             case MENU_SERVER:
@@ -1131,6 +1236,23 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     Menu* Menu::handleQueue(Builder* builder, C3D_RenderTarget* target, Config* config) {
         gConfigPtr = config;
+        // collect a finished background library refresh (only between actions).
+        // the worker already did the heavy SD work (json save, miss cleanup) —
+        // here it's just a vector swap and, if visible, a menu rebuild.
+        if (!this->hasQueue()) {
+            std::string slug; std::vector<RommRom> fresh; bool ok = false, changed = false;
+            if (libRefreshTake(slug, fresh, ok, changed)) {
+                if (ok && changed) {
+                    gCache[slug] = std::move(fresh);
+                    rlog.info("background refresh applied: " + slug);
+                }
+                if (ok) gCacheOk[slug] = true;
+                coverCacheStart(gRomm, gCache[slug]);   // covers waited on the refresh
+                if (ok && changed && this->type == MENU_ROMM && !this->crossSystem &&
+                    this->platformSlug == slug)
+                    return buildRommMenu(this, this->filter, gCache[slug], slug, false);
+            }
+        }
         if (!this->hasQueue())
             return this;
         if (target==nullptr)
@@ -1262,12 +1384,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     invalidateAllCaches();     // wipe memory + on-SD json caches
                     coverCacheClearMisses();   // retry covers that were missing before
+                    gFwdReady = false; invalidateYanbfCache();   // re-scan installed forwarders
                     Dialog(target,0,0,320,240,{"Library cache cleared.","Will reload from server."},{"OK"}).handle();
                     return generateSystemMenu(this);
                 case OpenManage:
                     while (this->queue.size() > 0) this->queue.pop();
-                    showLoading(target, {"Scanning installed roms..."});
-                    return generateManageMenu(this,config->dsiwareCount);
+                    if (entry.platformSlug.empty())          // main entry -> system pick
+                        return generateManageSystemMenu(this);
+                    showLoading(target, {std::string("Scanning ")+(entry.platformSlug==ROMM_SLUG_3DS?"3DS":"NDS")+" titles..."});
+                    return generateManageMenu(this,config->dsiwareCount,entry.platformSlug);
                 case EditRommConfig:
                     gRomm.loadConfig();
                     if (gRomm.promptConfig())
@@ -1446,6 +1571,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         delete gr;
                     } else {
                         installed = buildForwarderFor(target, romPath, entry.title, entry.coverPath);
+                        if (installed) { gFwdReady = false; invalidateManagedRoms(); }   // refresh forwarder detection
                     }
                     if (installed) {
                         Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
@@ -1457,11 +1583,56 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     break;
                 }
                 case ManageRom: {
+                    if (entry.platformSlug == ROMM_SLUG_3DS) {   // installed 3DS title -> uninstall
+                        std::string n3 = entry.title;
+                        if (Dialog(target,0,0,320,240,{n3,"Installed 3DS title"},{"Uninstall","Back"}).handle()!=0) break;
+                        if (Dialog(target,0,0,320,240,{"Uninstall this title?",shorten(n3,28)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
+                        AM_DeleteTicket(entry.tid);
+                        if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",shorten(n3,28)},{"OK"}).handle();
+                        else Dialog(target,0,0,320,240,{"Uninstalled.",shorten(n3,28)},{"OK"}).handle();
+                        while (this->queue.size() > 0) this->queue.pop();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                    }
                     std::string name = entry.path.filename().generic_string();
                     bool hasFwd = entry.rtid || entry.installed || entry.ytid;
                     if (!hasFwd) {
+                        if (!entry.fwdCia.empty()) {
+                            // an uninstalled forwarder .cia exists on SD: offer to install it directly
+                            int c = Dialog(target,0,0,320,240,{name,"No forwarder detected.","Forwarder .cia found on SD."},{"Install cia","Build FWD","Delete ROM","Back"}).handle();
+                            if (c==0) {
+                                showLoading(target, {"Installing forwarder..."});
+                                std::string ierr;
+                                bool ok = installCiaFromFile(entry.fwdCia, ierr, true, nullptr);
+                                if (!ok) {
+                                    Dialog(target,0,0,320,240,{"Install failed",shorten(ierr,30)},{"OK"}).handle();
+                                    break;
+                                }
+                                Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
+                                while (this->queue.size() > 0) this->queue.pop();
+                                gFwdReady = false; invalidateYanbfCache();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                            } else if (c==2) {
+                                if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
+                                    std::error_code ec;
+                                    std::filesystem::remove(entry.path, ec);
+                                    while (this->queue.size() > 0) this->queue.pop();
+                                    gFwdReady = false; invalidateManagedRoms();
+                                    showLoading(target, {"Refreshing..."});
+                                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                                }
+                                break;
+                            } else if (c!=1) {
+                                break;
+                            }
+                            // c==1 falls through to the regular build flow below
+                        }
                         // no forwarder yet: offer to build one
-                        int c = Dialog(target,0,0,320,240,{name,"No forwarder installed."},{"Install FWD","Delete ROM","Back"}).handle();
+                        int c = entry.fwdCia.empty()
+                            ? Dialog(target,0,0,320,240,{name,"No forwarder detected."},{"Install FWD","Delete ROM","Back"}).handle()
+                            : 0;
                         if (c==0) {
                             if (config->dsiwareCount >= MAX_DSIWARE) {
                                 Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
@@ -1470,13 +1641,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (buildForwarderFor(target, entry.path.generic_string(), entry.title, entry.coverPath))
                                 Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
                             while (this->queue.size() > 0) this->queue.pop();
-                            return generateManageMenu(this,config->dsiwareCount);
+                            gFwdReady = false; invalidateYanbfCache();
+                            showLoading(target, {"Refreshing..."});
+                            return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
                         } else if (c==1) {
                             if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
                                 std::error_code ec;
                                 std::filesystem::remove(entry.path, ec);
                                 while (this->queue.size() > 0) this->queue.pop();
-                                return generateManageMenu(this,config->dsiwareCount);
+                                gFwdReady = false; invalidateManagedRoms();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
                             }
                         }
                         break;
@@ -1522,7 +1697,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (!err)
                         Dialog(target,0,0,320,240,{"Deleted.",name},{"OK"}).handle();
                     while (this->queue.size() > 0) this->queue.pop();
-                    return generateManageMenu(this,config->dsiwareCount);
+                    gFwdReady = false; invalidateYanbfCache();
+                    showLoading(target, {"Refreshing..."});
+                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
                 }
                 default:
                     break;

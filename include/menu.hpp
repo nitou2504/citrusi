@@ -61,6 +61,7 @@ class MenuSelection {
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;
+        std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
     MenuSelection* setPath(std::filesystem::path p);
@@ -114,7 +115,8 @@ Menu* generateMainMenu(Menu* prev);
 Menu* generateSystemMenu(Menu* prev);
 Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug);
 Menu* generateSearchAllMenu(Menu* prev, C3D_RenderTarget* target);
-Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount);
+Menu* generateManageSystemMenu(Menu* prev);
+Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug);
 Menu* generateSettingsMenu(Menu* prev, Config* config);
 bool sortMenuSelections(MenuSelection* a, MenuSelection* b);
 std::string shorten(std::string s, u16 len);

@@ -19,6 +19,7 @@ extern "C" {
 #include "config.hpp"
 #include "helpers.hpp"
 #include "covercache.hpp"
+#include "librefresh.hpp"
 #include "dialog.hpp"
 namespace fs = std::filesystem;
 
@@ -197,6 +198,7 @@ int main()
 
 	}
 	config->save();
+	libRefreshStop();
 	coverCacheStop();
 	denit();
 	return 0;
