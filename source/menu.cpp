@@ -620,7 +620,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
                 if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
-                if (!sel->rtid && !sel->installed && !sel->ytid) drawChip(cxp, y, "no forwarder", COL_TEXT_DIM);
+                if (!sel->rtid && !sel->installed && !sel->ytid)
+                    drawChip(cxp, y, sel->fwdCia.empty() ? "no forwarder detected" : "fwd cia on SD", COL_TEXT_DIM);
             }
             y += 21;
             y = cardDivider(y) + 5;
@@ -645,7 +646,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
             }
             if (!sel->rtid && !sel->installed && !sel->ytid)
-                drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, "No forwarder on the HOME menu yet. Press A to install one.", 2);
+                drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM,
+                            sel->fwdCia.empty()
+                                ? "No forwarder detected — rom is on the SD card. Press A to install one."
+                                : "No forwarder installed, but its .cia is on the SD card. Press A to install it.", 3);
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
@@ -1062,6 +1066,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->ytid=rom.yanbfTid;
             e->rtid=rom.rommTid;
             e->installed=rom.installed;
+            e->fwdCia=rom.orphanCia;
             e->sizeBytes=rom.sizeBytes;
             // match against the NDS RomM cache to reuse cover art
             std::string base = toLowerCase(rom.display);
@@ -1524,8 +1529,41 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     std::string name = entry.path.filename().generic_string();
                     bool hasFwd = entry.rtid || entry.installed || entry.ytid;
                     if (!hasFwd) {
+                        if (!entry.fwdCia.empty()) {
+                            // an uninstalled forwarder .cia exists on SD: offer to install it directly
+                            int c = Dialog(target,0,0,320,240,{name,"No forwarder detected.","Forwarder .cia found on SD."},{"Install cia","Build FWD","Delete ROM","Back"}).handle();
+                            if (c==0) {
+                                showLoading(target, {"Installing forwarder..."});
+                                std::string ierr;
+                                bool ok = installCiaFromFile(entry.fwdCia, ierr, true, nullptr);
+                                if (!ok) {
+                                    Dialog(target,0,0,320,240,{"Install failed",shorten(ierr,30)},{"OK"}).handle();
+                                    break;
+                                }
+                                Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
+                                while (this->queue.size() > 0) this->queue.pop();
+                                gFwdReady = false; invalidateYanbfCache();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                            } else if (c==2) {
+                                if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
+                                    std::error_code ec;
+                                    std::filesystem::remove(entry.path, ec);
+                                    while (this->queue.size() > 0) this->queue.pop();
+                                    gFwdReady = false;
+                                    showLoading(target, {"Refreshing..."});
+                                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                                }
+                                break;
+                            } else if (c!=1) {
+                                break;
+                            }
+                            // c==1 falls through to the regular build flow below
+                        }
                         // no forwarder yet: offer to build one
-                        int c = Dialog(target,0,0,320,240,{name,"No forwarder installed."},{"Install FWD","Delete ROM","Back"}).handle();
+                        int c = entry.fwdCia.empty()
+                            ? Dialog(target,0,0,320,240,{name,"No forwarder detected."},{"Install FWD","Delete ROM","Back"}).handle()
+                            : 0;
                         if (c==0) {
                             if (config->dsiwareCount >= MAX_DSIWARE) {
                                 Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();

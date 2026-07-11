@@ -61,6 +61,7 @@ class MenuSelection {
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;
+        std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
     MenuSelection* setPath(std::filesystem::path p);
