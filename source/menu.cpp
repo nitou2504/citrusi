@@ -1755,12 +1755,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.rtid) fwdState += " romm3ds";
                     if (entry.installed) fwdState += " TWL";
                     if (entry.ytid) fwdState += " YANBF";
-                    // single-pass default: Uninstall = forwarder + ROM; Keep ROM = forwarder only
-                    int c = Dialog(target,0,0,320,240,{name,fwdState},{"Uninstall","Keep ROM","Back"}).handle();
-                    if (c==2 || c==-1) break;
+                    // single-pass: uninstall removes the forwarder AND the ROM file
+                    if (Dialog(target,0,0,320,240,{name,fwdState},{"Uninstall","Back"}).handle()!=0) break;
                     bool delFwd = true;
-                    bool delRom = (c==0);
-                    if (Dialog(target,0,0,320,240,{"Really uninstall?",name,(c==0?"forwarder + ROM file":"forwarder only (ROM stays)")},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                    bool delRom = true;
+                    if (Dialog(target,0,0,320,240,{"Uninstall forwarder + delete ROM?",shorten(name,30)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                         break;
                     bool err=false;
                     if (delFwd && entry.installed && entry.tid!=0) {
