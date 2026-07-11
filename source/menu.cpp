@@ -608,18 +608,30 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 return;
             }
             MenuSelection* sel = *this->selection;
+            bool m3ds = (sel->platformSlug == ROMM_SLUG_3DS);
             float y = CARD_Y + PAD;
             y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
             y += 5;
             float cxp = drawChip(CTX, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
-            if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
-            if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
-            if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
-            if (!sel->rtid && !sel->installed && !sel->ytid) drawChip(cxp, y, "no forwarder", COL_TEXT_DIM);
+            if (m3ds) {
+                cxp = drawChip(cxp, y, "3DS", COL_TEXT_DIM);
+                drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+            } else {
+                if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
+                if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
+                if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
+                if (!sel->rtid && !sel->installed && !sel->ytid) drawChip(cxp, y, "no forwarder", COL_TEXT_DIM);
+            }
             y += 21;
             y = cardDivider(y) + 5;
             char tid[64];
             u32 lineCol = C2D_Color32(0xC6,0xCF,0xE2,255);
+            if (m3ds) {
+                snprintf(tid, sizeof(tid), "title  %016llX", (unsigned long long)sel->tid);
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
+                drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed 3DS title. Press A to uninstall.", 2);
+                return;
+            }
             if (sel->rtid) {
                 snprintf(tid, sizeof(tid), "romm3ds  %016llX", sel->rtid);
                 y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
@@ -1024,6 +1036,25 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     break;
                 }
             }
+            entries.push_back(e);
+        }
+        // --- 3DS section: installed titles from your library (uninstall here) ---
+        if (!gCacheOk[ROMM_SLUG_3DS] && gRomm.hasConfig())
+            ensurePlatformLoaded(ROMM_SLUG_3DS);
+        installed3dsRefresh();
+        for (auto& cr : gCache[ROMM_SLUG_3DS]) {
+            if (cr.titleId == 0 || !installed3dsHasTitle(cr.titleId)) continue;
+            MenuSelection* e = new MenuSelection();
+            e->display = "* " + utf8FoldLatin(cr.name);
+            e->title = utf8FoldLatin(cr.name);
+            e->action = ManageRom;
+            e->platformSlug = ROMM_SLUG_3DS;
+            e->tid = cr.titleId;
+            e->rommId = cr.id;
+            e->coverPath = cr.coverPath;
+            e->coverSmallPath = cr.coverSmallPath;
+            e->year = cr.year;
+            e->sizeBytes = cr.sizeBytes;
             entries.push_back(e);
         }
         Menu* menu = new Menu(entries);
@@ -1453,6 +1484,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     break;
                 }
                 case ManageRom: {
+                    if (entry.platformSlug == ROMM_SLUG_3DS) {   // installed 3DS title -> uninstall
+                        std::string n3 = entry.title;
+                        if (Dialog(target,0,0,320,240,{n3,"Installed 3DS title"},{"Uninstall","Back"}).handle()!=0) break;
+                        if (Dialog(target,0,0,320,240,{"Uninstall this title?",shorten(n3,28)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
+                        AM_DeleteTicket(entry.tid);
+                        if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",shorten(n3,28)},{"OK"}).handle();
+                        else Dialog(target,0,0,320,240,{"Uninstalled.",shorten(n3,28)},{"OK"}).handle();
+                        while (this->queue.size() > 0) this->queue.pop();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount);
+                    }
                     std::string name = entry.path.filename().generic_string();
                     bool hasFwd = entry.rtid || entry.installed || entry.ytid;
                     if (!hasFwd) {
