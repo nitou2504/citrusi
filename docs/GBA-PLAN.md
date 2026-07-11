@@ -1,8 +1,43 @@
 # GBA support — design & decisions
 
-Status: **planned / not started.** This captures the research and the chosen
-approach for adding GBA HOME-menu entries to romm3ds, so the build can start
-from a settled design. Companion server is the user's existing RomM instance.
+Status: **core shipped, hardware-verified (2026-07-11); art layer next.** The
+on-device VC injector, save-type detection, and full GBA app integration work
+on a New 3DS XL. What remains is the icon/banner art layer (see
+[ART-UX-SPEC.md](ART-UX-SPEC.md) and the progress log below). Companion server
+is the user's existing RomM instance.
+
+## Progress log
+
+Done (on `feat/gba`, verified on hardware):
+- **SGDB TLS transport** — curl+mbedtls (TLS 1.2 ECDHE-ECDSA) reaches
+  SteamGridDB where `httpc`/`sslc` (TLS 1.1) can't. `sgdb.cpp` client (search
+  / icons / image fetch), key from `sd:/3ds/romm3ds/sgdb.env`. Hardware-tested
+  end to end; **not yet wired to any UI** (that's the art layer).
+- **VC inject builder** (`ctrbuilder.cpp buildGbaCIA`) — `.code` = ROM +
+  AGB_FIRM `.CAA` footer; NCCH assembled from vendored vcoven template pieces
+  (`romfs/gba/`, MIT); CIA shell reused from the forwarder template. Assembles
+  to an SD temp file (ROM streamed, never 32 MB in RAM), installs via the
+  proven `installCiaFromFile`. Boots on hardware.
+- **Launch-crash fix** — TMD save-data size must be copied from the exheader
+  (found by diffing a vcoven-built CIA with ctrtool); RomFS aligned to 0x1000.
+- **Save-type detection** — 3 tiers: SHA1 → cart serial → version-string LUT,
+  all from open_agb_firm's `gba_db.bin` (bundled, public). Serial tier catches
+  translations/hacks. Benchmarked on the user's 174-game library: **174/174
+  exact**, zero LUT guesses. Corrects real errors the naive/NSUI heuristic got
+  wrong (EEPROM 4k vs 64k freezes, none→SRAM). Per-game override still TODO
+  for ROMs not in the DB at all.
+- **App integration** — `gba` slug, browse/download to `sd:/roms/gba/`,
+  on-device zip extract (deterministic name), inject+install, library markers
+  by AM install state, a Manage → Game Boy Advance section (install/uninstall),
+  single-pass uninstall (title + ROM). Inherits the cached-first library +
+  background-refresh perf work. Cached tid-ownership lookups fixed the GBA
+  library open lag.
+
+Not started:
+- **Art layer** (icons + banners) for GBA *and* NDS — the whole
+  [ART-UX-SPEC.md](ART-UX-SPEC.md) flow. Injects currently ship the donor
+  template's placeholder icon + a silent banner. This is the next work item;
+  see "Next: art layer" below.
 
 ## TL;DR decision
 
@@ -245,20 +280,39 @@ GET http://<bridge>:PORT/gba-icon?name=<No-Intro name>        (or ?crc= / ?sgdb_
 Alternative if any inject step runs on a PC: bake the SteamGridDB icon straight
 into the SMDH at build time (Option B) — highest fidelity, zero 3DS networking.
 
-## Open questions / next steps
+## Next: art layer (NOT STARTED — the remaining work)
 
-1. Extract the six template pieces from one GBA VC donor CIA; verify a hand-built
-   inject boots on the New 3DS XL.
-2. Prototype the `.code` + `.CAA` builder and the streaming AM install (32 MB
-   worst case).
-3. Wire curl+mbedtls into the app: Makefile link flags (`-lcurl -lmbedtls
-   -lmbedx509 -lmbedcrypto -lz`, portlibs include/lib paths), `sgdb.env` key
-   loading, an HTTPS fetch helper alongside the existing `httpc` one.
-4. Wire GBA into the app: platform pick (`gba` slug), library browse/download to
-   `sd:/roms/gba/`, inject, manage. Decide on a per-game menu to choose
-   inject-now vs skip (HOME-limit awareness). Icon picker UI: list SGDB
-   candidates, thumbnail grid, user choice baked into the SMDH.
-5. Save handling: AGBSAVE / SD `.sav` behaviour to confirm on hardware.
+Everything below is documented in full in [ART-UX-SPEC.md](ART-UX-SPEC.md);
+this is the build-order summary. Goal: replace the placeholder inject icon and
+silent/blank banner with real art, via the shared picker + auto/notify flow.
+
+Build order:
+1. **`sgdb.cpp` → UI glue.** The client works; add: sanitizer (`artquery`),
+   `norm()` confidence scoring, on-disk cache under
+   `sdmc:/3ds/romm3ds/cache/art/`. First consumer: bake the chosen 48×48 into
+   the GBA SMDH (`buildGbaCIA` already accepts an `icon48` arg — currently
+   passed `""`).
+2. **libretro banner fetch** (GBA) over the existing `httpc` — exact No-Intro
+   name, 404-retry with tags stripped. Feeds `buildGbaCIA`'s `bannerTex` arg.
+3. **Auto path + missing-art notify** (screens S1/S2 in the spec): strong SGDB
+   match → silent; weak/none → the one notify dialog with `[Search]` /
+   `[Use RomM cover]`. Wire into `RommInstall`.
+4. **Picker** (screen S4): bottom-screen thumb grid, reuse the covercache
+   async pattern; `X` refine, `Y` icon/banner page. Shared by GBA + NDS.
+5. **`art.json` persistence** + the ⚠ Manage marker; **Change art** in Manage
+   (rebuild in place — GBA re-bakes the CIA, NDS rebuilds the forwarder).
+6. **NDS side**: same picker, but the SMDH icon stays the ROM's own DS icon;
+   only the 256×128 banner is user-choosable. SGDB `logos` category as a new
+   banner source alongside the existing GameTDB chain.
+
+Deferred / open:
+- **Per-game save-type override** — for the rare ROM not in `gba_db.bin` at
+  all (none in the current library). Fits naturally in the same pre-install
+  options surface as the art picker. See the save-type discussion above.
+- **Save handling on hardware** — AGBSAVE / SD `.sav` round-trip behaviour
+  across uninstall/reinstall not yet exercised end to end.
+- **HOME 300-title limit** awareness when batch-injecting many GBA games
+  (each inject is a full title, ROM-sized on SD).
 
 ## References
 

@@ -1,10 +1,12 @@
 # Art & install UX — full spec (GBA + NDS)
 
-Status: **designed / not started.** Companion to [GBA-PLAN.md](GBA-PLAN.md)
-(which holds the transport/TLS research and the GBA VC build plan). This spec
-pins the user-facing flows, every screen's contents, the fallback logic, and
-the persistence model, so implementation can start without UX decisions left
-open.
+Status: **designed / not started — this is the next work item.** The GBA VC
+inject, save-type detection, and app integration are shipped and
+hardware-verified (see [GBA-PLAN.md](GBA-PLAN.md) progress log); the SGDB
+transport client (`sgdb.cpp`) works but is not yet wired to any UI. Injects
+currently ship the donor template's placeholder icon + a silent banner. This
+spec pins the user-facing flows, every screen's contents, the fallback logic,
+and the persistence model. Build order is in GBA-PLAN.md → "Next: art layer".
 
 ## 1. Principles
 
