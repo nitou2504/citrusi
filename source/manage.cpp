@@ -3,6 +3,7 @@
 #include <cstring>
 #include <filesystem>
 #include <algorithm>
+#include <set>
 #include "manage.hpp"
 #include "helpers.hpp"
 #include "ctrbuilder.hpp"
@@ -111,11 +112,21 @@ std::map<std::string, u64> getRommCtrForwarders() {
     std::map<std::string, u64> out;
     std::error_code ec;
     if (!std::filesystem::exists(CTR_CONFIG_DIR, ec)) return out;
+    // installed titles (SD+NAND) so stale config files (deleted forwarders) don't count
+    std::set<u64> installed;
+    FS_MediaType medias[2] = {MEDIATYPE_SD, MEDIATYPE_NAND};
+    for (int m = 0; m < 2; m++) {
+        u32 count = 0;
+        if (R_FAILED(AM_GetTitleCount(medias[m], &count)) || count == 0) continue;
+        std::vector<u64> t(count); u32 rd = 0;
+        if (R_FAILED(AM_GetTitleList(&rd, medias[m], count, t.data()))) continue;
+        for (u32 i = 0; i < rd; i++) installed.insert(t[i]);
+    }
     for (const auto& entry : std::filesystem::directory_iterator(CTR_CONFIG_DIR, ec)) {
         std::string fn = entry.path().filename();
         if (fn.size() != 20 || entry.path().extension() != ".txt") continue; // 16 hex + .txt
         u64 tid = strtoull(fn.substr(0, 16).c_str(), nullptr, 16);
-        if (!tid) continue;
+        if (!tid || !installed.count(tid)) continue;   // skip stale (no longer installed)
         std::string content = readEntireFile(entry.path().generic_string());
         std::string name = basenameLower(content);
         if (!name.empty()) out[name] = tid;

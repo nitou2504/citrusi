@@ -6,6 +6,8 @@
 #include <sstream>
 #include <fstream>
 #include <map>
+#include <set>
+#include <cctype>
 #include "menu.hpp"
 extern "C" {
 #include "graphics.h"
@@ -111,8 +113,9 @@ static u32 gTick = 0;           // global frame counter for marquees
 static std::map<std::string, std::vector<RommRom>> gCache;   // slug -> roms
 static std::map<std::string, bool> gCacheOk;                 // slug -> loaded?
 static std::vector<RommRom> gCombined;                       // cross-system search source
-// installed NDS forwarders (filename -> tid), refreshed per library build
-static std::map<std::string, u64> gYanbfMap, gRommCtrMap;
+// normalized names of NDS roms that have ANY forwarder installed (TWL/YANBF/romm3ds)
+static std::set<std::string> gFwdNames;
+static bool gFwdReady = false;
 static void refreshNdsForwarders();
 static bool ndsForwarderInstalled(const std::string& fsName);
 
@@ -819,16 +822,31 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
     // builds the RomM list from a cached library, optionally filtered.
     // src = the platform cache (or the combined list for cross-system search).
-    // refresh which NDS games have an installed forwarder (YANBF or romm3ds), AM-verified
+    // canonical key: drop extension, region/() tags, punctuation; lowercase alnum only.
+    // makes RomM "Pokemon - X (Spain).zip" match the SD forwarder's "Pokemon X.nds".
+    static std::string normNds(std::string s) {
+        size_t dot = s.find_last_of('.');
+        if (dot != std::string::npos && dot + 5 >= s.size()) s = s.substr(0, dot);
+        std::string o; bool paren = false;
+        for (char c : s) {
+            if (c == '(' || c == '[') paren = true;
+            else if (c == ')' || c == ']') paren = false;
+            else if (!paren && std::isalnum((unsigned char)c)) o += (char)std::tolower((unsigned char)c);
+        }
+        return o;
+    }
+    // build once/session: NDS roms with ANY forwarder on the HOME menu (all 3 types, AM-verified)
     static void refreshNdsForwarders() {
-        gYanbfMap = getYanbfForwarders();
-        gRommCtrMap = getRommCtrForwarders();
+        if (gFwdReady) return;
+        gFwdNames.clear();
+        for (auto& m : scanManagedRoms(ROMM_NDS_DIR))
+            if (m.installed || m.yanbfTid || m.rommTid)
+                gFwdNames.insert(normNds(m.display));
+        gFwdReady = true;
     }
     // is a forwarder for this NDS rom currently on the HOME menu?
     static bool ndsForwarderInstalled(const std::string& fsName) {
-        std::string base = toLowerCase(std::filesystem::path(
-            rommLocalPath(fsName, ROMM_SLUG_NDS)).filename().generic_string());
-        return gYanbfMap.count(base) || gRommCtrMap.count(base);
+        return gFwdNames.count(normNds(fsName)) > 0;
     }
 
     // filter + slug are taken BY VALUE on purpose: we delete `prev` below, and
@@ -1267,6 +1285,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     invalidateAllCaches();     // wipe memory + on-SD json caches
                     coverCacheClearMisses();   // retry covers that were missing before
+                    gFwdReady = false; invalidateYanbfCache();   // re-scan installed forwarders
                     Dialog(target,0,0,320,240,{"Library cache cleared.","Will reload from server."},{"OK"}).handle();
                     return generateSystemMenu(this);
                 case OpenManage:
@@ -1422,6 +1441,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         else Dialog(target,0,0,320,240,{(ierr=="cancelled")?"Install cancelled":"Install failed",ierr},{"OK"}).handle();
                     } else {
                         installed = buildForwarderFor(target, romPath, entry.title, entry.coverPath);
+                        if (installed) gFwdReady = false;   // refresh forwarder detection
                     }
                     if (installed) {
                         Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
