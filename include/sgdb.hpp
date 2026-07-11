@@ -18,6 +18,8 @@ struct SgdbIcon {
     std::string url;      // cdn2.steamgriddb.com png
     std::string thumbUrl;
 };
+// logos share the same shape (id/dims/url/thumb)
+typedef SgdbIcon SgdbAsset;
 
 class SgdbClient {
     private:
@@ -25,6 +27,7 @@ class SgdbClient {
     bool socReady = false;
     bool ensureSoc();
     bool get(const std::string& url, std::string& out);
+    bool assets(const char* category, int gameId, std::vector<SgdbAsset>& out);
     public:
     std::string lastError;
 
@@ -36,6 +39,8 @@ class SgdbClient {
     bool search(const std::string& query, std::vector<SgdbGame>& out);
     // GET /icons/game/{id}?mimes=image/png
     bool icons(int gameId, std::vector<SgdbIcon>& out);
+    // GET /logos/game/{id}?mimes=image/png (wide clear-logos, banner source)
+    bool logos(int gameId, std::vector<SgdbAsset>& out);
     // fetch an icon/thumb png into memory (no auth needed for cdn)
     bool fetchImage(const std::string& url, std::string& out);
 };

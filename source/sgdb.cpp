@@ -106,16 +106,16 @@ bool SgdbClient::search(const std::string& query, std::vector<SgdbGame>& out) {
     return true;
 }
 
-bool SgdbClient::icons(int gameId, std::vector<SgdbIcon>& out) {
+bool SgdbClient::assets(const char* category, int gameId, std::vector<SgdbAsset>& out) {
     out.clear();
     std::string body;
-    if (!get("https://www.steamgriddb.com/api/v2/icons/game/" +
-             std::to_string(gameId) + "?mimes=image/png", body)) return false;
+    if (!get("https://www.steamgriddb.com/api/v2/" + std::string(category) +
+             "/game/" + std::to_string(gameId) + "?mimes=image/png", body)) return false;
     try {
         nlohmann::json j = nlohmann::json::parse(body);
         if (!j.value("success", false)) { lastError = "api error"; return false; }
         for (auto& i : j["data"]) {
-            SgdbIcon ic;
+            SgdbAsset ic;
             ic.id = i["id"].get<int>();
             ic.width = i.value("width", 0);
             ic.height = i.value("height", 0);
@@ -124,10 +124,18 @@ bool SgdbClient::icons(int gameId, std::vector<SgdbIcon>& out) {
             out.push_back(ic);
         }
     } catch (...) {
-        lastError = "bad JSON from icons";
+        lastError = std::string("bad JSON from ") + category;
         return false;
     }
     return true;
+}
+
+bool SgdbClient::icons(int gameId, std::vector<SgdbIcon>& out) {
+    return assets("icons", gameId, out);
+}
+
+bool SgdbClient::logos(int gameId, std::vector<SgdbAsset>& out) {
+    return assets("logos", gameId, out);
 }
 
 bool SgdbClient::fetchImage(const std::string& url, std::string& out) {
