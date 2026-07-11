@@ -8,3 +8,6 @@
 // progress(done,total) may return false to cancel. Returns true on success.
 bool installCiaFromFile(const std::string& path, std::string& err, bool force,
                         std::function<bool(unsigned long long, unsigned long long)> progress);
+
+// Title id of a .cia on disk (0 on failure). Useful to record what was installed.
+unsigned long long ciaFileTitleId(const std::string& path);

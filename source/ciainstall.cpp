@@ -36,6 +36,14 @@ static u64 readCiaTitleId(FILE* f) {
     return t;
 }
 
+unsigned long long ciaFileTitleId(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return 0;
+    u64 tid = readCiaTitleId(f);
+    fclose(f);
+    return tid;
+}
+
 bool installCiaFromFile(const std::string& path, std::string& err, bool force,
                         std::function<bool(unsigned long long, unsigned long long)> progress) {
     struct stat stt;

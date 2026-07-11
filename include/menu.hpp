@@ -16,6 +16,7 @@ enum MenuAction {
     OpenRommLibrary,
     OpenPlatform,
     OpenSearchAll,
+    RefreshLibraries,
     RommInstall,
     OpenManage,
     ManageRom,
