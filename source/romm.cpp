@@ -247,16 +247,36 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out, const std::
                     rom.rating = m["average_rating"].get<float>();
             }
             rom.multiFile = r.value("multi", false) || r.value("has_multiple_files", false);
-            // multi-part roms download as a zip, not a single playable file — skip
-            if (rom.fsName.empty() || rom.multiFile) continue;
             rom.platformSlug = slug;
-            // 3ds installs a .cia; a bare .3ds must be converted on PC first
-            if (slug == ROMM_SLUG_3DS) {
-                std::string low = toLowerCase(rom.fsName);
-                rom.installable = low.size() >= 4 && low.compare(low.size()-4, 4, ".cia") == 0;
-            } else {
-                rom.installable = true;
+            rom.fileId = 0;
+            auto isCiaName = [](const std::string& n) {
+                std::string low = toLowerCase(n);
+                return low.size() >= 4 && low.compare(low.size()-4, 4, ".cia") == 0;
+            };
+            if (!rom.multiFile) {
+                if (rom.fsName.empty()) continue;
+                rom.installable = (slug == ROMM_SLUG_3DS) ? isCiaName(rom.fsName) : true;
+                out.push_back(rom);
+                continue;
             }
+            // multi-file game folder: nds (zip forwarder) unsupported here; 3ds -> pick the base .cia
+            if (slug != ROMM_SLUG_3DS || !r.contains("files") || !r["files"].is_array())
+                continue;
+            bool found = false;
+            for (auto& fj : r["files"]) {
+                std::string fn = fj.value("file_name", "");
+                if (!isCiaName(fn)) continue;
+                bool isBase = !fj.contains("category") || fj["category"].is_null();
+                if (!found || isBase) {
+                    rom.fsName    = fn;
+                    rom.fileId    = fj.value("id", 0);
+                    rom.sizeBytes = fj.value("file_size_bytes", (u64)0);
+                    found = true;
+                    if (isBase) break;   // base cia beats update/dlc
+                }
+            }
+            if (!found) continue;        // no installable .cia in the folder
+            rom.installable = true;
             out.push_back(rom);
         }
     } catch (...) {
@@ -273,6 +293,8 @@ bool RommClient::download(const RommRom& rom, const std::string& destPath,
                           std::function<bool(u64,u64)> progress) {
     std::string url = this->host + "/api/roms/" + std::to_string(rom.id) +
                       "/content/" + urlEncodePath(rom.fsName);
+    if (rom.fileId > 0)   // multi-file: fetch just this file (no zip)
+        url += "?file_ids=" + std::to_string(rom.fileId);
     httpcContext ctx;
     Result res = httpcOpenContext(&ctx, HTTPC_METHOD_GET, url.c_str(), 1);
     if (R_FAILED(res)) { lastError = "httpcOpenContext failed"; return false; }

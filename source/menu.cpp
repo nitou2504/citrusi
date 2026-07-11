@@ -174,6 +174,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         this->action=old->action;
         this->rommId=old->rommId;
         this->fsName=old->fsName;
+        this->fileId=old->fileId;
+        this->platformSlug=old->platformSlug;
+        this->installable=old->installable;
         this->title=old->title;
         this->coverPath=old->coverPath;
         this->coverSmallPath=old->coverSmallPath;
@@ -742,6 +745,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->action=RommInstall;
             e->rommId=rom.id;
             e->fsName=rom.fsName;
+            e->fileId=rom.fileId;
             e->platformSlug=rom.platformSlug;
             e->installable=rom.installable;
             e->title=rom.name;
@@ -1210,6 +1214,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         dlRom.id = entry.rommId;
                         dlRom.name = entry.title;
                         dlRom.fsName = entry.fsName;
+                        dlRom.fileId = entry.fileId;
                         dlRom.sizeBytes = entry.sizeBytes;
                         dlRom.multiFile = false;
                         bool ok = gRomm.download(dlRom, dest,

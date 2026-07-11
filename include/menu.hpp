@@ -43,6 +43,7 @@ class MenuSelection {
         // RomM entries
         int rommId=0;
         std::string fsName;
+        int fileId=0;                // multi-file: specific file id to download
         std::string platformSlug;    // "nds" / "3ds" for RomM entries
         bool installable=true;
         std::string title;

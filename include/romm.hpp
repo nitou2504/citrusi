@@ -19,9 +19,10 @@ inline std::string rommDirFor(const std::string& slug) {
 struct RommRom {
     int id;
     std::string name;    // display name (metadata name or fs_name)
-    std::string fsName;  // file name on the server
+    std::string fsName;  // file name to download (single-file: the rom; multi-file: the chosen .cia)
+    int fileId=0;        // >0 = specific file id within a multi-file rom (download via ?file_ids=)
     std::string platformSlug;   // "nds" / "3ds"
-    bool installable=true;      // 3ds: true only for .cia; nds: always true
+    bool installable=true;      // 3ds: true only when a .cia is available; nds: always true
     std::string coverPath;      // server path of large cover ("" if none)
     std::string coverSmallPath; // server path of small cover ("" if none)
     std::string summary;
