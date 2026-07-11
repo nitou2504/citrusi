@@ -129,12 +129,11 @@ int main()
 	Config* config = new Config();
 	config->dsiwareCount=getDsiWareCount();
 
-	u8 language=0;
-	if (config->selectedLanguage == 12) {
-		CFGU_GetSystemLanguage(&language);
-	} else {
+	// default to English regardless of console language (the language picker
+	// was removed from settings; mixed EN/system-language UI read badly)
+	u8 language = 1;   // "en" in the lang table
+	if (config->selectedLanguage != 12)
 		language = config->selectedLanguage;
-	}
 	gLang.loadStrings(language);
 
 	C3D_RenderTarget* top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
