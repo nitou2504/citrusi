@@ -1545,6 +1545,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28)},{},0).handle();
                             std::string extracted, zerr;
                             u64 lastZDrawn = 0;
+                            // force the predicted name (fsName stem + platform ext) so
+                            // markers/covers/tids all agree — inner zip names are often
+                            // scene releases ("...(#GBA).gba") and would diverge
+                            std::string wantName = std::filesystem::path(romPath).filename().generic_string();
                             bool zok = extractFirstRom(dest, dir, zipRomExtsFor(entry.platformSlug), extracted, zerr,
                                 [&](unsigned long long done, unsigned long long total) -> bool {
                                     hidScanInput();
@@ -1554,7 +1558,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     int pct = (total>0)?(int)(done*100/total):0;
                                     Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",shorten(entry.fsName,28),humanSize(done)+" / "+humanSize(total)+" ("+std::to_string(pct)+"%)"},{},0).handle();
                                     return true;
-                                });
+                                }, wantName);
                             if (!zok) {
                                 remove(dest.c_str());
                                 Dialog(target,0,0,320,240,{(zerr=="cancelled")?"Extract cancelled":"Extract failed",zerr},{"OK"}).handle();

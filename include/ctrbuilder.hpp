@@ -57,3 +57,5 @@ class CtrBuilder {
 
 // tid a GBA ROM base name maps to (read-only); 0 if none free
 u64 gbaTidForRom(const std::string& romBase);
+// drop the in-RAM ownership-file cache (call after installs write new files)
+void ctrTidCacheInvalidate();

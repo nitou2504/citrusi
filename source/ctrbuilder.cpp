@@ -1,8 +1,10 @@
 #include <3ds.h>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <filesystem>
+#include <map>
 #include <vector>
 #include <algorithm>
 #include "ctrbuilder.hpp"
@@ -63,14 +65,31 @@ static u32 fnv1a(const std::string& s) {
     return h;
 }
 
-static bool ctrTidTaken(u64 tid, const std::string& forPath) {
-    char name[64];
-    snprintf(name, sizeof(name), "%s%016llX.txt", CTR_CONFIG_DIR.c_str(), tid);
-    if (fileExists(name)) {
-        std::string cur = readEntireFile(name);
-        return cur.find(forPath) == std::string::npos; // taken by another rom
+// ownership files (<TID>.txt in CTR_CONFIG_DIR) cached in RAM: tid lookups
+// happen per library row (175+ per menu build) and a fileExists each was the
+// dominant cost of opening the GBA library.
+static std::map<u64, std::string>* gTidOwners = nullptr;
+static void loadTidOwners() {
+    if (gTidOwners) return;
+    gTidOwners = new std::map<u64, std::string>();
+    std::error_code ec;
+    for (auto& de : std::filesystem::directory_iterator(CTR_CONFIG_DIR, ec)) {
+        std::string name = de.path().filename().generic_string();
+        if (name.size() != 20 || name.compare(16, 4, ".txt") != 0) continue;
+        u64 tid = strtoull(name.substr(0, 16).c_str(), nullptr, 16);
+        if (tid) (*gTidOwners)[tid] = readEntireFile(de.path().generic_string());
     }
-    return false;
+}
+void ctrTidCacheInvalidate() {
+    delete gTidOwners;
+    gTidOwners = nullptr;
+}
+
+static bool ctrTidTaken(u64 tid, const std::string& forPath) {
+    loadTidOwners();
+    auto it = gTidOwners->find(tid);
+    if (it == gTidOwners->end()) return false;
+    return it->second.find(forPath) == std::string::npos; // taken by another rom
 }
 
 u64 CtrBuilder::allocateTIDIn(u32 base, u32 count, const std::string& fsName) {
@@ -367,6 +386,7 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     std::ofstream o(cfg);
     o << launchPath;
     o.close();
+    ctrTidCacheInvalidate();
 
     return new ReturnResult(ERROR_SUCCESS, "");
 }
@@ -832,6 +852,7 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     std::ofstream o(cfgName);
     o << romPath;
     o.close();
+    ctrTidCacheInvalidate();
 
     ctrLogger.info("gba: installed tid ok");
     return new ReturnResult(ERROR_SUCCESS, "");

@@ -42,7 +42,8 @@ static size_t extractCb(void* opaque, mz_uint64 ofs, const void* buf, size_t n) 
 bool extractFirstRom(const std::string& zipPath, const std::string& destDir,
                      const std::vector<std::string>& exts,
                      std::string& outPath, std::string& err,
-                     std::function<bool(unsigned long long, unsigned long long)> progress) {
+                     std::function<bool(unsigned long long, unsigned long long)> progress,
+                     const std::string& forceName) {
     mz_zip_archive zip;
     memset(&zip, 0, sizeof(zip));
     if (!mz_zip_reader_init_file(&zip, zipPath.c_str(), 0)) {
@@ -66,6 +67,7 @@ bool extractFirstRom(const std::string& zipPath, const std::string& destDir,
     std::string name(st.m_filename);
     size_t slash = name.find_last_of("/\\");
     if (slash != std::string::npos) name = name.substr(slash + 1);
+    if (!forceName.empty()) name = forceName;
     outPath = destDir + name;
     std::string tmp = outPath + ".part";
 
