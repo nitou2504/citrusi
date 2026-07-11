@@ -21,6 +21,7 @@ struct RommRom {
     std::string name;    // display name (metadata name or fs_name)
     std::string fsName;  // file name to download (single-file: the rom; multi-file: the chosen .cia)
     int fileId=0;        // >0 = specific file id within a multi-file rom (download via ?file_ids=)
+    u64 titleId=0;       // 3ds: resolved from the cia's TMD (0 = not resolved) for install detection
     std::string platformSlug;   // "nds" / "3ds"
     bool installable=true;      // 3ds: true only when a .cia is available; nds: always true
     std::string coverPath;      // server path of large cover ("" if none)
@@ -61,6 +62,8 @@ class RommClient {
     // return false from it to cancel (sets lastError="cancelled")
     bool download(const RommRom& rom, const std::string& destPath,
                   std::function<bool(u64,u64)> progress);
+    // fetches just the first 16KB of a rom's .cia (header+TMD) into `out`, for title-id resolution
+    bool fetchCiaHeader(const RommRom& rom, std::string& out);
     // GET into memory. Server-relative paths (starting '/') get the host prefix
     // + Basic auth; absolute http(s) URLs are fetched WITHOUT credentials.
     bool fetchUrl(const std::string& url, std::string& out);

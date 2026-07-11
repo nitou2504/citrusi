@@ -361,3 +361,31 @@ bool RommClient::download(const RommRom& rom, const std::string& destPath,
     }
     return true;
 }
+
+bool RommClient::fetchCiaHeader(const RommRom& rom, std::string& out) {
+    std::string url = this->host + "/api/roms/" + std::to_string(rom.id) +
+                      "/content/" + urlEncodePath(rom.fsName);
+    if (rom.fileId > 0)
+        url += "?file_ids=" + std::to_string(rom.fileId);
+    httpcContext ctx;
+    if (R_FAILED(httpcOpenContext(&ctx, HTTPC_METHOD_GET, url.c_str(), 1))) return false;
+    httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
+    httpcAddRequestHeaderField(&ctx, "User-Agent", "romm3ds/0.1");
+    if (!this->authHeader.empty())
+        httpcAddRequestHeaderField(&ctx, "Authorization", this->authHeader.c_str());
+    httpcAddRequestHeaderField(&ctx, "Range", "bytes=0-16383");   // just the header+TMD
+    if (R_FAILED(httpcBeginRequest(&ctx))) { httpcCloseContext(&ctx); return false; }
+    u32 status = 0;
+    httpcGetResponseStatusCode(&ctx, &status);
+    if (status != 200 && status != 206) { httpcCloseContext(&ctx); return false; }
+    out.clear();
+    u8 buf[0x1000];
+    while (out.size() < 0x4000) {
+        u32 rd = 0;
+        Result r = httpcDownloadData(&ctx, buf, sizeof(buf), &rd);
+        if (rd) out.append((char*)buf, rd);
+        if (r != (Result)HTTPC_RESULTCODE_DOWNLOADPENDING) break;  // finished or error
+    }
+    httpcCloseContext(&ctx);
+    return out.size() >= 0x200;
+}

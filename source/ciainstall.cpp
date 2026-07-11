@@ -44,6 +44,32 @@ unsigned long long ciaFileTitleId(const std::string& path) {
     return tid;
 }
 
+unsigned long long ciaBufferTitleId(const std::string& b) {
+    if (b.size() < 0x20) return 0;
+    auto rd32 = [&](size_t o) -> u32 {
+        return (u32)(u8)b[o] | ((u32)(u8)b[o+1] << 8) | ((u32)(u8)b[o+2] << 16) | ((u32)(u8)b[o+3] << 24);
+    };
+    u32 headerSize = rd32(0x00), certSize = rd32(0x08), tikSize = rd32(0x0C);
+    auto al = [](u64 v) -> u64 { return (v + 63) & ~((u64)63); };
+    u64 certOff = al(headerSize);
+    u64 tikOff  = al(certOff + certSize);
+    u64 tmdOff  = al(tikOff + tikSize);
+    if (tmdOff + 4 > b.size()) return 0;
+    u32 sigType = ((u32)(u8)b[tmdOff] << 24) | ((u32)(u8)b[tmdOff+1] << 16) |
+                  ((u32)(u8)b[tmdOff+2] << 8) | (u8)b[tmdOff+3];
+    u32 sigSize;
+    switch (sigType) {
+        case 0x00010000: case 0x00010003: sigSize = 0x200 + 0x3C; break;
+        case 0x00010001: case 0x00010004: sigSize = 0x100 + 0x3C; break;
+        default:                          sigSize = 0x3C  + 0x40; break;
+    }
+    u64 h = tmdOff + 4 + sigSize;
+    if (h + 0x4C + 8 > b.size()) return 0;
+    u64 tid = 0;
+    for (int i = 0; i < 8; i++) tid = (tid << 8) | (u8)b[h + 0x4C + i];
+    return tid;
+}
+
 bool installCiaFromFile(const std::string& path, std::string& err, bool force,
                         std::function<bool(unsigned long long, unsigned long long)> progress) {
     struct stat stt;

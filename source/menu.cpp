@@ -125,7 +125,8 @@ static void saveLibCache(const std::string& slug, const std::vector<RommRom>& ro
         arr.push_back({{"id",r.id},{"name",r.name},{"fsName",r.fsName},{"fileId",r.fileId},
                        {"slug",r.platformSlug},{"inst",r.installable},{"cov",r.coverPath},
                        {"covS",r.coverSmallPath},{"sum",r.summary},{"gen",r.genres},
-                       {"yr",r.year},{"rt",r.rating},{"sz",(uint64_t)r.sizeBytes},{"multi",r.multiFile}});
+                       {"yr",r.year},{"rt",r.rating},{"sz",(uint64_t)r.sizeBytes},{"multi",r.multiFile},
+                       {"tid",(uint64_t)r.titleId}});
     std::ofstream o(libCachePath(slug));
     o << arr.dump();
 }
@@ -145,6 +146,7 @@ static bool loadLibCache(const std::string& slug, std::vector<RommRom>& out) {
             r.summary = j.value("sum",std::string()); r.genres = j.value("gen",std::string());
             r.year = j.value("yr",0); r.rating = j.value("rt",0.0f);
             r.sizeBytes = j.value("sz",(uint64_t)0); r.multiFile = j.value("multi",false);
+            r.titleId = j.value("tid",(uint64_t)0);
             out.push_back(r);
         }
         return true;
@@ -157,13 +159,34 @@ static void invalidateAllCaches() {
     remove(libCachePath(ROMM_SLUG_3DS).c_str());
 }
 
+// resolve 3ds title ids (for install detection) via a small header fetch, cached in the lib json.
+// runs BEFORE the cover worker starts, so only the main thread touches httpc (no concurrency).
+static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
+    if (slug != ROMM_SLUG_3DS) return;
+    auto& roms = gCache[slug];
+    int need = 0;
+    for (auto& r : roms) if (r.installable && r.titleId == 0) need++;
+    if (need == 0) return;
+    int done = 0, ok = 0;
+    for (auto& r : roms) {
+        if (!r.installable || r.titleId != 0) continue;
+        done++;
+        if (target) showLoading(target, {"Reading title ids...", std::to_string(done)+"/"+std::to_string(need)});
+        std::string hdr;
+        if (gRomm.fetchCiaHeader(r, hdr)) { r.titleId = ciaBufferTitleId(hdr); if (r.titleId) ok++; }
+    }
+    rlog.info(" resolved title ids " + std::to_string(ok) + "/" + std::to_string(need));
+    if (ok) saveLibCache(slug, roms);
+}
+
 // loads a platform's library into gCache[slug] once; returns false on error (sets gRomm.lastError)
-static bool ensurePlatformLoaded(const std::string& slug) {
+static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* target = nullptr) {
     if (gCacheOk[slug]) { rlog.info(" cache hit " + slug); return true; }
     // fast path: on-SD json cache (instant, no network)
     if (loadLibCache(slug, gCache[slug])) {
         gCacheOk[slug] = true;
         rlog.info(" loaded " + std::to_string(gCache[slug].size()) + " roms from SD cache " + slug);
+        resolveTitleIds(slug, target);          // fill in any missing tids (older cache)
         coverCacheStart(gRomm, gCache[slug]);
         return true;
     }
@@ -174,9 +197,10 @@ static bool ensurePlatformLoaded(const std::string& slug) {
     rlog.info(" listRoms...");
     if (!gRomm.listRoms(pid, gCache[slug], slug)) { rlog.error(" listRoms failed: " + gRomm.lastError); return false; }
     gCacheOk[slug] = true;
-    rlog.info(" listRoms ok: " + std::to_string(gCache[slug].size()) + " roms; caching + prefetch");
+    rlog.info(" listRoms ok: " + std::to_string(gCache[slug].size()) + " roms");
+    resolveTitleIds(slug, target);              // resolve tids BEFORE covers (no concurrent httpc)
     saveLibCache(slug, gCache[slug]);
-    coverCacheStart(gRomm, gCache[slug]);   // background art prefetch (async, cached)
+    coverCacheStart(gRomm, gCache[slug]);       // background art prefetch (async, cached)
     rlog.info(" cover prefetch started");
     return true;
 }
@@ -233,6 +257,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         this->rommId=old->rommId;
         this->fsName=old->fsName;
         this->fileId=old->fileId;
+        this->titleId=old->titleId;
         this->platformSlug=old->platformSlug;
         this->installable=old->installable;
         this->title=old->title;
@@ -514,7 +539,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             MenuSelection* sel = *this->selection;
             bool is3ds = (sel->platformSlug == ROMM_SLUG_3DS);
-            bool onSD = is3ds ? installed3dsIs(sel->rommId)
+            bool onSD = is3ds ? installed3dsHasTitle(sel->titleId)
                               : fileExists(rommLocalPath(sel->fsName, sel->platformSlug));
             if (gDescForId != sel->rommId) {
                 wrapLines(sel->summary, CTW, 0.45f, gDescLines);
@@ -809,9 +834,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (rom.platformSlug == ROMM_SLUG_3DS && !rom.installable && !show3ds)
                 continue;
             MenuSelection* e = new MenuSelection();
-            // marker: 3DS = installed on the console (AM); NDS = downloaded to SD
+            // marker: 3DS = title installed on the console (AM, by resolved title id);
+            //         NDS = rom downloaded to SD
             bool marked = (rom.platformSlug == ROMM_SLUG_3DS)
-                          ? installed3dsIs(rom.id)
+                          ? installed3dsHasTitle(rom.titleId)
                           : fileExists(rommLocalPath(rom.fsName, rom.platformSlug));
             std::string tag = cross ? (std::string("[") + (rom.platformSlug==ROMM_SLUG_3DS?"3DS":"DS") + "] ") : "";
             e->display=(marked?"* ":"  ")+tag+rom.name;
@@ -819,6 +845,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->rommId=rom.id;
             e->fsName=rom.fsName;
             e->fileId=rom.fileId;
+            e->titleId=rom.titleId;
             e->platformSlug=rom.platformSlug;
             e->installable=rom.installable;
             e->title=rom.name;
@@ -881,7 +908,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         }
         showLoading(target, {"Connecting to RomM...", gRomm.host});
         showLoading(target, {std::string("Loading ")+systemName(slug)+" library..."});
-        if (!ensurePlatformLoaded(slug)) {
+        if (!ensurePlatformLoaded(slug, target)) {
             Dialog(target,0,0,320,240,{"RomM error",gRomm.lastError},{"OK"}).handle();
             return (prev!=nullptr)?prev:generateMainMenu(nullptr);
         }
@@ -901,8 +928,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (swkbdInputText(&kb, buf, sizeof(buf)) != SWKBD_BUTTON_CONFIRM)
             return generateSystemMenu(prev);   // cancelled -> back to system pick
         showLoading(target, {"Loading all systems..."});
-        bool anyNds = ensurePlatformLoaded(ROMM_SLUG_NDS);
-        bool any3ds = ensurePlatformLoaded(ROMM_SLUG_3DS);
+        bool anyNds = ensurePlatformLoaded(ROMM_SLUG_NDS, target);
+        bool any3ds = ensurePlatformLoaded(ROMM_SLUG_3DS, target);
         if (!anyNds && !any3ds) {
             Dialog(target,0,0,320,240,{"RomM error",gRomm.lastError},{"OK"}).handle();
             return (prev!=nullptr)?prev:generateMainMenu(nullptr);

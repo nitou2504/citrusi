@@ -11,3 +11,6 @@ bool installCiaFromFile(const std::string& path, std::string& err, bool force,
 
 // Title id of a .cia on disk (0 on failure). Useful to record what was installed.
 unsigned long long ciaFileTitleId(const std::string& path);
+
+// Title id parsed from an in-memory .cia header buffer (>=~16KB), 0 on failure.
+unsigned long long ciaBufferTitleId(const std::string& buf);
