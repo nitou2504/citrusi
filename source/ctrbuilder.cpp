@@ -72,14 +72,22 @@ static bool ctrTidTaken(u64 tid, const std::string& forPath) {
     return false;
 }
 
-u64 CtrBuilder::allocateTID(const std::string& fsName) {
-    u32 uid = CTR_UID_BASE + (fnv1a(fsName) % CTR_UID_COUNT);
-    for (u32 tries = 0; tries < CTR_UID_COUNT; tries++) {
+u64 CtrBuilder::allocateTIDIn(u32 base, u32 count, const std::string& fsName) {
+    u32 uid = base + (fnv1a(fsName) % count);
+    for (u32 tries = 0; tries < count; tries++) {
         u64 tid = 0x0004000000000000ULL | ((u64)uid << 8);
         if (!ctrTidTaken(tid, fsName)) return tid;
-        uid = CTR_UID_BASE + ((uid - CTR_UID_BASE + 1) % CTR_UID_COUNT);
+        uid = base + ((uid - base + 1) % count);
     }
     return 0;
+}
+
+u64 CtrBuilder::allocateTID(const std::string& fsName) {
+    return allocateTIDIn(CTR_UID_BASE, CTR_UID_COUNT, fsName);
+}
+
+u64 CtrBuilder::allocateGbaTID(const std::string& fsName) {
+    return allocateTIDIn(GBA_UID_BASE, GBA_UID_COUNT, fsName);
 }
 
 // ---- SMDH --------------------------------------------------------------
@@ -346,5 +354,342 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     o << launchPath;
     o.close();
 
+    return new ReturnResult(ERROR_SUCCESS, "");
+}
+
+// ---- GBA VC inject (vcoven layout, assembled in-memory + streamed) -------
+
+#include "mbedtls/sha256.h"
+
+struct StreamSha {
+    mbedtls_sha256_context c;
+    StreamSha() { mbedtls_sha256_init(&c); mbedtls_sha256_starts_ret(&c, 0); }
+    void update(const void* d, size_t n) { mbedtls_sha256_update_ret(&c, (const u8*)d, n); }
+    void update(const std::string& s) { update(s.data(), s.size()); }
+    std::string finish() {
+        u8 h[32];
+        mbedtls_sha256_finish_ret(&c, h);
+        mbedtls_sha256_free(&c);
+        return std::string((char*)h, 32);
+    }
+};
+
+// AGB_FIRM footer save type ids
+#define GBA_SAVE_NONE      0xFF
+#define GBA_SAVE_EEPROM_64 0x02
+#define GBA_SAVE_FLASH_512 0x04
+#define GBA_SAVE_FLASH_1M  0x0A
+#define GBA_SAVE_SRAM_256  0x0E
+
+// scan pass state: which save signature strings appear in the ROM
+struct GbaSaveScan {
+    bool flash1m=false, flash512=false, eeprom=false, sram=false;
+    void feed(const char* buf, size_t n) {
+        auto has = [&](const char* sig) {
+            return memmem(buf, n, sig, strlen(sig)) != nullptr;
+        };
+        if (!flash1m  && has("FLASH1M_V"))  flash1m = true;
+        if (!flash512 && (has("FLASH512_V") || has("FLASH_V"))) flash512 = true;
+        if (!eeprom   && has("EEPROM_V"))   eeprom = true;
+        if (!sram     && (has("SRAM_V") || has("SRAM_F_V"))) sram = true;
+    }
+    u8 result() const {
+        if (flash1m)  return GBA_SAVE_FLASH_1M;
+        if (flash512) return GBA_SAVE_FLASH_512;
+        if (eeprom)   return GBA_SAVE_EEPROM_64;
+        if (sram)     return GBA_SAVE_SRAM_256;
+        return GBA_SAVE_NONE;
+    }
+};
+
+#define GBA_CHUNK 0x40000
+#define GBA_SIG_OVERLAP 16
+
+// streams the ROM once: save-signature scan + optional sha over [rom][tail]
+static bool gbaRomPass(const std::string& romPath, u32 romSize, GbaSaveScan* scan,
+                       StreamSha* sha, const std::string& tail) {
+    FILE* f = fopen(romPath.c_str(), "rb");
+    if (!f) return false;
+    static char buf[GBA_CHUNK + GBA_SIG_OVERLAP];
+    size_t carry = 0;
+    u32 left = romSize;
+    while (left > 0) {
+        u32 want = left < GBA_CHUNK ? left : GBA_CHUNK;
+        size_t n = fread(buf + carry, 1, want, f);
+        if (n != want) { fclose(f); return false; }
+        if (scan) scan->feed(buf, carry + n);
+        if (sha) sha->update(buf + carry, n);
+        // keep the last bytes so signatures across chunk borders still match
+        if (scan) {
+            size_t keep = (carry + n) < GBA_SIG_OVERLAP ? (carry + n) : GBA_SIG_OVERLAP;
+            memmove(buf, buf + carry + n - keep, keep);
+            carry = keep;
+        }
+        left -= want;
+    }
+    fclose(f);
+    if (sha && !tail.empty()) sha->update(tail);
+    return true;
+}
+
+// .code tail after the ROM: [config 0x324][12 pad][2x16 descriptors][.CAA 0x10]
+static std::string gbaCodeTail(const std::string& cfgTpl, u32 romSize, u8 saveType) {
+    std::string cfg = cfgTpl;                    // 0x324
+    wr32(cfg, 0x004, romSize);
+    wr32(cfg, 0x008, saveType);
+    std::string tail = cfg + std::string(12, '\0');
+    char sec[32];
+    u32 s0[4] = {0, 0, romSize, 0};              // type 0: ROM
+    u32 s1[4] = {1, romSize, 0x324, 0};          // type 1: config
+    memcpy(sec, s0, 16); memcpy(sec + 16, s1, 16);
+    tail.append(sec, 32);
+    char caa[16];
+    u32 secOff = romSize + 0x324 + 12;
+    memcpy(caa, ".CAA", 4);
+    u32 v1 = 1, vN = 2 << 4;
+    memcpy(caa + 4, &v1, 4); memcpy(caa + 8, &secOff, 4); memcpy(caa + 12, &vN, 4);
+    tail.append(caa, 16);
+    return tail;
+}
+
+ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::string& title,
+                                      u64 tid, const std::string& icon48,
+                                      const std::string& bannerTex,
+                                      std::function<bool(u64,u64)> progress) {
+    if (!parsed) return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "template not loaded");
+
+    // --- template pieces (small, from romfs)
+    std::string ncch  = readEntireFile(GBA_TPL_DIR + "ncchheader.bin");
+    std::string exh   = readEntireFile(GBA_TPL_DIR + "exheader.bin");
+    std::string icn   = readEntireFile(GBA_TPL_DIR + "icon.icn");
+    std::string logo  = readEntireFile(GBA_TPL_DIR + "logo.darc.lz");
+    std::string rfs   = readEntireFile(GBA_TPL_DIR + "romfs.bin");
+    std::string cfg   = readEntireFile(GBA_TPL_DIR + "config_block.bin");
+    std::string bnrT  = readEntireFile(GBA_TPL_DIR + "template.bnr");
+    if (ncch.size() != 0x200 || exh.size() != 0x800 || cfg.size() != 0x324 ||
+        icn.size() < 0x36C0 || logo.empty() || rfs.empty() || bnrT.empty())
+        return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "gba template missing/bad");
+
+    // --- ROM info
+    FILE* rf = fopen(romPath.c_str(), "rb");
+    if (!rf) return new ReturnResult(ERROR_PATH, "rom not found");
+    fseek(rf, 0, SEEK_END);
+    u32 romSize = (u32)ftell(rf);
+    char gamecode[5] = {0};
+    fseek(rf, 0xAC, SEEK_SET);
+    fread(gamecode, 1, 4, rf);
+    fclose(rf);
+    for (int i = 0; i < 4; i++)
+        if (gamecode[i] < 0x20 || gamecode[i] > 0x7E) { strcpy(gamecode, "HMBW"); break; }
+    if (romSize < 0xC0 || romSize > 32*1024*1024)
+        return new ReturnResult(ERROR_PATH, "bad rom size");
+    std::string productCode = std::string("CTR-N-") + gamecode;
+
+    // --- pass 1: save-type scan + .code hash (tail depends on the scan, and
+    // only trails the ROM, so one pass covers both)
+    ctrLogger.info("gba: scan+hash pass, rom " + std::to_string(romSize));
+    GbaSaveScan scan;
+    if (!gbaRomPass(romPath, romSize, &scan, nullptr, ""))
+        return new ReturnResult(ERROR_PATH, "rom read failed (scan)");
+    u8 saveType = scan.result();
+    std::string tail = gbaCodeTail(cfg, romSize, saveType);
+    u32 codeSize = romSize + (u32)tail.size();
+    StreamSha codeSha;
+    if (!gbaRomPass(romPath, romSize, nullptr, &codeSha, tail))
+        return new ReturnResult(ERROR_PATH, "rom read failed (hash)");
+    std::string codeHash = codeSha.finish();
+    ctrLogger.info("gba: save type " + std::to_string(saveType));
+
+    // --- SMDH: titles in all 16 slots + optional icon art
+    std::string smdh = icn;
+    {
+        std::string shortT = title.substr(0, 0x3F);
+        for (u32 lang = 0; lang < 16; lang++) {
+            u32 o = 0x8 + lang * 0x200;
+            memset(&smdh[o], 0, 0x200);
+            utf16Write(smdh, o,         shortT, 0x40);
+            utf16Write(smdh, o + 0x80,  title.substr(0, 0x7F), 0x80);
+            utf16Write(smdh, o + 0x180, "romm3ds", 0x40);
+        }
+        if (icon48.size() == 48*48*2) {
+            static u16 lin24[24*24];
+            const u16* l48 = (const u16*)icon48.data();
+            for (u32 y = 0; y < 24; y++)
+                for (u32 x = 0; x < 24; x++)
+                    lin24[y*24+x] = l48[(y*2)*48 + (x*2)];
+            tileIcon(lin24, (u16*)&smdh[0x2040], 24);
+            tileIcon(l48,   (u16*)&smdh[0x24C0], 48);
+        }
+    }
+
+    // --- banner (reuse the CBMD patcher; template sound is silent)
+    std::string banner = buildBanner(bnrT, bannerTex, "");
+
+    // --- ExeFS header: .code, banner, icon, logo (official VC order; logo
+    // is required or AGB_FIRM refuses to boot)
+    struct { const char* name; u32 size; std::string hash; const std::string* data; } ef[4] = {
+        {".code", codeSize,          codeHash,                                nullptr},
+        {"banner", (u32)banner.size(), sha256((u8*)banner.data(), banner.size()), &banner},
+        {"icon",   (u32)smdh.size(),   sha256((u8*)smdh.data(),   smdh.size()),   &smdh},
+        {"logo",   (u32)logo.size(),   sha256((u8*)logo.data(),   logo.size()),   &logo},
+    };
+    std::string exefsHdr(0x200, '\0');
+    u32 off = 0;
+    for (int i = 0; i < 4; i++) {
+        memcpy(&exefsHdr[i*16], ef[i].name, strlen(ef[i].name));
+        wr32(exefsHdr, i*16 + 8, off);
+        wr32(exefsHdr, i*16 + 12, ef[i].size);
+        memcpy(&exefsHdr[0x200 - (i+1)*0x20], ef[i].hash.data(), 0x20);
+        off += align200(ef[i].size);
+    }
+    u32 exefsDataSize = off;
+    u32 exefsTotal = 0x200 + exefsDataSize;
+
+    // --- NCCH header: layout + ids + hashes
+    u32 exefsOffB = 0x200 + (u32)exh.size();          // 0xA00
+    u32 romfsOffB = exefsOffB + exefsTotal;           // 0x200-aligned already
+    u32 romfsSizeB = align200((u32)rfs.size());
+    u32 contentSize = romfsOffB + romfsSizeB;
+    wr32(ncch, 0x104, contentSize / 0x200);
+    wr64(ncch, 0x108, tid);                            // partition id
+    wr64(ncch, 0x118, tid);                            // program id
+    memset(&ncch[0x150], 0, 0x10);
+    memcpy(&ncch[0x150], productCode.c_str(), productCode.size() < 0x10 ? productCode.size() : 0x10);
+    ncch[0x18F] |= 0x04;                               // NoCrypto
+    wr32(ncch, 0x1A0, exefsOffB / 0x200);
+    wr32(ncch, 0x1A4, exefsTotal / 0x200);
+    wr32(ncch, 0x1A8, 1);                              // exefs hash region: header
+    wr32(ncch, 0x1B0, romfsOffB / 0x200);
+    wr32(ncch, 0x1B4, romfsSizeB / 0x200);
+    u32 rfsHashMu = rd32(ncch, 0x1B8);                 // keep template's region
+    if (!rfsHashMu || rfsHashMu * 0x200 > romfsSizeB) { rfsHashMu = 1; wr32(ncch, 0x1B8, rfsHashMu); }
+
+    // exheader: app-title tag (must be non-empty) + title ids. The signed
+    // AccessDesc at 0x400 stays untouched (vcoven: CFW tolerates the mismatch).
+    memset(&exh[0], 0, 8);
+    memcpy(&exh[0], gamecode, 4);
+    wr64(exh, 0x1C8, tid);                             // SCI jump id
+    wr64(exh, 0x200, tid);                             // ACI program id
+
+    std::string exhHash = sha256((u8*)exh.data(), 0x400);
+    memcpy(&ncch[0x160], exhHash.data(), 0x20);
+    std::string efsHash = sha256((u8*)exefsHdr.data(), 0x200);
+    memcpy(&ncch[0x1C0], efsHash.data(), 0x20);
+    std::string rfsPadded = rfs + std::string(romfsSizeB - rfs.size(), '\0');
+    std::string rfsHash = sha256((u8*)rfsPadded.data(), rfsHashMu * 0x200);
+    memcpy(&ncch[0x1E0], rfsHash.data(), 0x20);
+
+    // --- pass 2: content hash for the TMD (AM verifies it at finish)
+    StreamSha conSha;
+    conSha.update(ncch);
+    conSha.update(exh);
+    conSha.update(exefsHdr);
+    if (!gbaRomPass(romPath, romSize, nullptr, &conSha, tail))
+        return new ReturnResult(ERROR_PATH, "rom read failed (content hash)");
+    std::string codePad(align200(codeSize) - codeSize, '\0');
+    conSha.update(codePad);
+    for (int i = 1; i < 4; i++) {
+        conSha.update(*ef[i].data);
+        conSha.update(std::string(align200(ef[i].size) - ef[i].size, '\0'));
+    }
+    conSha.update(rfsPadded);
+    std::string conHash = conSha.finish();
+
+    // --- ticket + TMD from the forwarder template shell
+    std::string tik = tpl.substr(tikOff, tikSize);
+    wr64be(tik, 0x1DC, tid);
+    std::string tmd = tpl.substr(tmdOff, tmdSize);
+    wr64be(tmd, 0x18C, tid);
+    wr64be(tmd, 0xB04 + 0x8, (u64)contentSize);
+    memcpy(&tmd[0xB04 + 0x10], conHash.data(), 0x20);
+    std::string chunkHash = sha256((u8*)tmd.data() + 0xB04, 0x30);
+    memcpy(&tmd[0x204 + 0x4], chunkHash.data(), 0x20);
+    std::string infoHash = sha256((u8*)tmd.data() + 0x204, 0x900);
+    memcpy(&tmd[0x1E4], infoHash.data(), 0x20);
+
+    // --- meta (smdh copy at meta+0x400)
+    std::string meta = tpl.substr(metaOff, metaSize);
+    if (metaSize >= 0x400 + 0x36C0)
+        meta.replace(0x400, 0x36C0, smdh.substr(0, 0x36C0));
+
+    // --- CIA header
+    std::string hdr = tpl.substr(0, rd32(tpl, 0x00));
+    wr64(hdr, 0x18, (u64)contentSize);
+    std::string preamble = aligned(hdr, 0x40) + aligned(tpl.substr(certOff, certSize), 0x40) +
+                           aligned(tik, 0x40) + aligned(tmd, 0x40);
+    u64 totalBytes = preamble.size() + contentSize + meta.size();
+
+    // --- space check + stale title cleanup
+    FS_ArchiveResource sd = {};
+    if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD))) {
+        u64 freeBytes = (u64)sd.freeClusters * sd.clusterSize;
+        if (freeBytes < totalBytes)
+            return new ReturnResult(ERROR_NOT_ENOUGH_SPACE, "SD full");
+    }
+    if (titleInstalledOn(MEDIATYPE_SD, tid)) {
+        AM_DeleteTitle(MEDIATYPE_SD, tid);
+        AM_DeleteTicket(tid);
+    }
+
+    // --- streamed install: never hold ROM/CIA in RAM
+    Handle h = {};
+    Result ret = AM_StartCiaInstall(MEDIATYPE_SD, &h);
+    if (R_FAILED(ret)) return new ReturnResult(ret, "AM_StartCiaInstall failed");
+    u64 fileOff = 0;
+    bool cancelled = false;
+    auto put = [&](const void* d, u32 n) -> bool {
+        u32 done = 0;
+        while (done < n) {
+            u32 written = 0;
+            u32 chunk = (n - done) < 0x40000 ? (n - done) : 0x40000;
+            Result r = FSFILE_Write(h, &written, fileOff, (const u8*)d + done, chunk, FS_WRITE_FLUSH);
+            if (R_FAILED(r) || written == 0) return false;
+            done += written;
+            fileOff += written;
+        }
+        if (progress && !progress(fileOff, totalBytes)) { cancelled = true; return false; }
+        return true;
+    };
+    auto putS = [&](const std::string& s) { return put(s.data(), (u32)s.size()); };
+
+    bool ok = putS(preamble) && putS(ncch) && putS(exh) && putS(exefsHdr);
+    if (ok) {   // stream the ROM from SD
+        FILE* f = fopen(romPath.c_str(), "rb");
+        if (!f) ok = false;
+        else {
+            static char buf[GBA_CHUNK];
+            u32 left = romSize;
+            while (ok && left > 0) {
+                u32 want = left < GBA_CHUNK ? left : GBA_CHUNK;
+                if (fread(buf, 1, want, f) != want) { ok = false; break; }
+                ok = put(buf, want);
+                left -= want;
+            }
+            fclose(f);
+        }
+    }
+    ok = ok && putS(tail) && putS(codePad);
+    for (int i = 1; ok && i < 4; i++) {
+        ok = putS(*ef[i].data) &&
+             putS(std::string(align200(ef[i].size) - ef[i].size, '\0'));
+    }
+    ok = ok && putS(rfsPadded) && putS(meta);
+
+    if (!ok) {
+        AM_CancelCIAInstall(h);
+        return new ReturnResult(cancelled ? ERROR_INSTALL : -1,
+                                cancelled ? "cancelled" : "CIA write failed");
+    }
+    ret = AM_FinishCiaInstall(h);
+    if (R_FAILED(ret)) return new ReturnResult(ret, "AM_FinishCiaInstall failed");
+
+    // ownership file keeps the TID stable across reinstalls
+    char cfgName[64];
+    snprintf(cfgName, sizeof(cfgName), "%s%016llX.txt", CTR_CONFIG_DIR.c_str(), tid);
+    std::ofstream o(cfgName);
+    o << romPath;
+    o.close();
+
+    ctrLogger.info("gba: installed tid ok");
     return new ReturnResult(ERROR_SUCCESS, "");
 }

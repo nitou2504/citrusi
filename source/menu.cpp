@@ -1339,7 +1339,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (Dialog(target,0,0,320,240,{q,entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
                     }
-                    if (isNds && !ensureCtrBuilder(target)) break;   // forwarder builder (nds only)
+                    if (!is3ds && !ensureCtrBuilder(target)) break;  // CIA shell template (nds fwd + gba inject)
                     rlog.info("install: pre-download needDownload=" + std::string(needDownload?"1":"0") + " dest=" + dest);
                     if (needDownload) {
                         std::error_code ec;
@@ -1417,8 +1417,29 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         else Dialog(target,0,0,320,240,{(ierr=="cancelled")?"Install cancelled":"Install failed",ierr},{"OK"}).handle();
                     } else if (isGba) {
-                        // VC inject build lands here; for now the ROM is on SD, ready
-                        Dialog(target,0,0,320,240,{"Downloaded to SD.","GBA inject build coming soon.",shorten(romPath,36)},{"OK"}).handle();
+                        // VC inject: ROM baked into a native AGB_FIRM title
+                        std::string romBase = std::filesystem::path(romPath).filename().generic_string();
+                        u64 gtid = gCtr.allocateGbaTID(romBase);
+                        if (gtid == 0) {
+                            Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle();
+                            break;
+                        }
+                        Dialog(target,0,0,320,240,{"Building inject...",shorten(entry.title,28)},{},0).handle();
+                        u64 lastG = 0;
+                        ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid, "", "",
+                            [&](u64 done, u64 total) -> bool {
+                                hidScanInput();
+                                if (hidKeysDown() & KEY_B) return false;
+                                if (done - lastG < (2<<20) && done != total) return true;
+                                lastG = done;
+                                int pct = (total>0)?(int)(done*100/total):0;
+                                Dialog(target,0,0,320,240,{"Installing... (B = cancel)",shorten(entry.title,28),std::to_string(pct)+"%"},{},0).handle();
+                                return true;
+                            });
+                        installed = gr->isSuccess();
+                        if (!installed)
+                            Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
+                        delete gr;
                     } else {
                         installed = buildForwarderFor(target, romPath, entry.title, entry.coverPath);
                     }
