@@ -375,40 +375,87 @@ struct StreamSha {
     }
 };
 
-// AGB_FIRM footer save type ids
-#define GBA_SAVE_NONE      0xFF
-#define GBA_SAVE_EEPROM_64 0x02
-#define GBA_SAVE_FLASH_512 0x04
-#define GBA_SAVE_FLASH_1M  0x0A
-#define GBA_SAVE_SRAM_256  0x0E
+// Save-type detection ported from open_agb_firm (profi200): primary source is
+// gba_db.bin (SHA1-keyed, 28-byte entries), fallback is the SDK version-string
+// LUT. Types are the AGB_FIRM footer ids 0x0-0xF (lgy_common.h).
+#define GBA_SAVE_NONE 0xFF   // config-block value for "no save"
 
-// scan pass state: which save signature strings appear in the ROM
+#include "mbedtls/sha1.h"
+
+struct StreamSha1 {
+    mbedtls_sha1_context c;
+    StreamSha1() { mbedtls_sha1_init(&c); mbedtls_sha1_starts_ret(&c); }
+    void update(const void* d, size_t n) { mbedtls_sha1_update_ret(&c, (const u8*)d, n); }
+    void finish(u8 out[20]) { mbedtls_sha1_finish_ret(&c, out); mbedtls_sha1_free(&c); }
+};
+
+static const struct { const char* sig; u8 type; } gbaSigLut[] = {
+    // EEPROM — size is not knowable from the signature; per-version defaults
+    // from open_agb_firm (common sizes for popular games / ROM hacks)
+    {"EEPROM_V111", 0x0}, {"EEPROM_V120", 0x0}, {"EEPROM_V121", 0x2},
+    {"EEPROM_V122", 0x0}, {"EEPROM_V124", 0x2}, {"EEPROM_V125", 0x0},
+    {"EEPROM_V126", 0x0},
+    // FLASH 512k — assume Panasonic with RTC
+    {"FLASH_V120", 0x8}, {"FLASH_V121", 0x8}, {"FLASH_V123", 0x8},
+    {"FLASH_V124", 0x8}, {"FLASH_V125", 0x8}, {"FLASH_V126", 0x8},
+    {"FLASH512_V130", 0x8}, {"FLASH512_V131", 0x8}, {"FLASH512_V133", 0x8},
+    // FLASH 1M — assume Macronix with RTC
+    {"FLASH1M_V102", 0xA}, {"FLASH1M_V103", 0xA},
+    // FRAM & SRAM
+    {"SRAM_F_V100", 0xE}, {"SRAM_F_V102", 0xE}, {"SRAM_F_V103", 0xE},
+    {"SRAM_V110", 0xE}, {"SRAM_V111", 0xE}, {"SRAM_V112", 0xE},
+    {"SRAM_V113", 0xE},
+};
+#define GBA_SIG_COUNT (sizeof(gbaSigLut)/sizeof(gbaSigLut[0]))
+
+// scan pass state: earliest versioned save signature in ROM order wins
 struct GbaSaveScan {
-    bool flash1m=false, flash512=false, eeprom=false, sram=false;
+    int found = -1;
     void feed(const char* buf, size_t n) {
-        auto has = [&](const char* sig) {
-            return memmem(buf, n, sig, strlen(sig)) != nullptr;
-        };
-        if (!flash1m  && has("FLASH1M_V"))  flash1m = true;
-        if (!flash512 && (has("FLASH512_V") || has("FLASH_V"))) flash512 = true;
-        if (!eeprom   && has("EEPROM_V"))   eeprom = true;
-        if (!sram     && (has("SRAM_V") || has("SRAM_F_V"))) sram = true;
+        if (found >= 0) return;
+        size_t best = (size_t)-1;
+        for (u32 i = 0; i < GBA_SIG_COUNT; i++) {
+            const void* p = memmem(buf, n, gbaSigLut[i].sig, strlen(gbaSigLut[i].sig));
+            if (p && (size_t)((const char*)p - buf) < best) {
+                best = (const char*)p - buf;
+                found = (int)i;
+            }
+        }
     }
-    u8 result() const {
-        if (flash1m)  return GBA_SAVE_FLASH_1M;
-        if (flash512) return GBA_SAVE_FLASH_512;
-        if (eeprom)   return GBA_SAVE_EEPROM_64;
-        if (sram)     return GBA_SAVE_SRAM_256;
-        return GBA_SAVE_NONE;
+    u8 result(u32 romSize) const {
+        if (found < 0) return GBA_SAVE_NONE;
+        u8 t = gbaSigLut[found].type;
+        // ROMs over 16 MiB need the "_2" EEPROM variants (save in upper 0x100)
+        if ((t == 0x0 || t == 0x2) && romSize > 0x1000000) t++;
+        return t;
     }
 };
+
+// binary search gba_db.bin (sorted by first u64 of the SHA1); -1 = not found
+static int gbaDbSaveType(const u8 sha1[20]) {
+    std::string db = readEntireFile(GBA_TPL_DIR + "gba_db.bin");
+    if (db.size() < 28 || db.size() % 28) return -1;
+    u64 key; memcpy(&key, sha1, 8);
+    u32 l = 0, r = db.size() / 28;
+    while (l < r) {
+        u32 m = l + (r - l) / 2;
+        u64 k; memcpy(&k, db.data() + m*28, 8);
+        if (key > k) l = m + 1;
+        else if (key < k) r = m;
+        else {
+            u32 attr; memcpy(&attr, db.data() + m*28 + 24, 4);
+            return (int)(attr & 0xF);
+        }
+    }
+    return -1;
+}
 
 #define GBA_CHUNK 0x40000
 #define GBA_SIG_OVERLAP 16
 
-// streams the ROM once: save-signature scan + optional sha over [rom][tail]
+// streams the ROM once: save-signature scan + optional hashes over [rom][tail]
 static bool gbaRomPass(const std::string& romPath, u32 romSize, GbaSaveScan* scan,
-                       StreamSha* sha, const std::string& tail) {
+                       StreamSha* sha, const std::string& tail, StreamSha1* sha1 = nullptr) {
     FILE* f = fopen(romPath.c_str(), "rb");
     if (!f) return false;
     static char buf[GBA_CHUNK + GBA_SIG_OVERLAP];
@@ -420,6 +467,7 @@ static bool gbaRomPass(const std::string& romPath, u32 romSize, GbaSaveScan* sca
         if (n != want) { fclose(f); return false; }
         if (scan) scan->feed(buf, carry + n);
         if (sha) sha->update(buf + carry, n);
+        if (sha1) sha1->update(buf + carry, n);
         // keep the last bytes so signatures across chunk borders still match
         if (scan) {
             size_t keep = (carry + n) < GBA_SIG_OVERLAP ? (carry + n) : GBA_SIG_OVERLAP;
@@ -486,20 +534,28 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         return new ReturnResult(ERROR_PATH, "bad rom size");
     std::string productCode = std::string("CTR-N-") + gamecode;
 
-    // --- pass 1: save-type scan + .code hash (tail depends on the scan, and
-    // only trails the ROM, so one pass covers both)
-    ctrLogger.info("gba: scan+hash pass, rom " + std::to_string(romSize));
+    // --- pass 1: SHA1 (for the save DB) + signature scan in one read
+    ctrLogger.info("gba: scan+sha1 pass, rom " + std::to_string(romSize));
     GbaSaveScan scan;
-    if (!gbaRomPass(romPath, romSize, &scan, nullptr, ""))
+    StreamSha1 romSha1;
+    if (!gbaRomPass(romPath, romSize, &scan, nullptr, "", &romSha1))
         return new ReturnResult(ERROR_PATH, "rom read failed (scan)");
-    u8 saveType = scan.result();
+    u8 sha1dig[20];
+    romSha1.finish(sha1dig);
+    int dbType = gbaDbSaveType(sha1dig);
+    u8 saveType = (dbType >= 0) ? (u8)dbType : scan.result(romSize);
+    {
+        char sbuf[96];
+        snprintf(sbuf, sizeof(sbuf), "gba: save type 0x%02X (%s)", saveType,
+                 dbType >= 0 ? "gba_db" : (scan.found >= 0 ? gbaSigLut[scan.found].sig : "none"));
+        ctrLogger.info(sbuf);
+    }
     std::string tail = gbaCodeTail(cfg, romSize, saveType);
     u32 codeSize = romSize + (u32)tail.size();
     StreamSha codeSha;
     if (!gbaRomPass(romPath, romSize, nullptr, &codeSha, tail))
         return new ReturnResult(ERROR_PATH, "rom read failed (hash)");
     std::string codeHash = codeSha.finish();
-    ctrLogger.info("gba: save type " + std::to_string(saveType));
 
     // --- SMDH: titles in all 16 slots + optional icon art
     std::string smdh = icn;
