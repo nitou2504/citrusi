@@ -84,37 +84,149 @@ Keying: all sources key by the **No-Intro ROM filename**, which equals the RomM
 
 ### Banner (256×128) — decided
 **libretro `Named_Logos`** — wide transparent clear-logo (~512×154), letterboxed
-onto 256×128. HTTP, keyless, on-device fetchable.
+onto 256×128. HTTP, keyless, on-device fetchable. *(Verified 2026-07-11: plain
+`http://` serves `200 OK image/png`, no HTTPS redirect — existing `httpc` path
+works unchanged.)*
 ```
 http://thumbnails.libretro.com/Nintendo%20-%20Game%20Boy%20Advance/Named_Logos/<No-Intro name>.png
 ```
 
-### HOME icon (48×48) — decided source, needs a bridge
+### HOME icon (48×48) — decided source, fetched directly on-device
 The nice square icons (like Cocoon/iiSU) come from **SteamGridDB's `icons`
-category** — purpose-made square launcher icons, native 48×48, transparent PNG.
-iiSU uses exactly this.
+category** — purpose-made square launcher icons, transparent PNG. iiSU uses
+exactly this.
 ```
-GET https://www.steamgriddb.com/api/v2/icons/game/{id}?dimensions=48x48&mimes=image/png   (Bearer key)
+GET https://www.steamgriddb.com/api/v2/icons/game/{id}?mimes=image/png   (Bearer key)
      resolve name -> id via /search/autocomplete/{name}
+     icon files served from https://cdn2.steamgriddb.com/icon/<hash>.png
 ```
-**Blocker:** SteamGridDB (HTTPS + secret Bearer) and ScreenScraper (HTTPS + dev
-creds) can't be fetched from the 3DS — its TLS is obsolete and we can't embed a
-secret. RomM does **not** store square icons (only box covers; its SteamGridDB
-integration pulls grids/capsules, never `/icons`). libretro has no icon folder.
-No keyless-HTTP square-icon source exists.
+Reality check on sizes: native 48×48 is rare. A 6-title GBA sample (Advance
+Wars, Pokémon Emerald, Metroid Fusion, Mother 3, Golden Sun, WarioWare) all had
+PNG icons, but dims range 16×16–1024×1024. So: keep `mimes=image/png` (the
+category also holds `.ico` files), pick the smallest candidate ≥48px, downscale
+to 48×48 on device.
 
-**Chosen delivery — a small RomM-sidecar icon bridge** (see below). Fallback
-tiers when SteamGridDB misses: ScreenScraper `support-2D` (GBA cartridge-label
-scan) → libretro `Named_Logos` composited on a GBA-cartridge tile → RomM cover.
+**TLS: solved — software TLS, not `sslc`.** The 3DS `sslc` sysmodule tops out
+at **TLS 1.1** with RSA-key-exchange suites and was never updated, while
+SteamGridDB (Cloudflare) presents an **ECDSA-only** edge cert and requires
+TLS ≥1.2 with ECDHE-ECDSA — so `httpc`/`sslc` can never handshake, and no
+installed certificate fixes a protocol gap. The fix is to skip `sslc` entirely
+and link **`3ds-curl` + `3ds-mbedtls`** (mbedTLS 2.28 = TLS 1.2 + ECDHE-ECDSA,
+runs over plain `soc:u` sockets). Both portlibs ship **preinstalled** in the
+`devkitpro/devkitarm` docker image we already build with — only Makefile link
+flags needed. Precedent: Universal-Updater/3hs reach GitHub (also TLS 1.2
+ECDHE-only) this way. Cert verification: bundle the GTS/ISRG roots as pinned
+CAs, or `CURLOPT_SSL_VERIFYPEER=0` to match the app's existing
+`SSLCOPT_DisableVerify` posture.
 
-Rejected: cropping box art for the icon (user dislikes it). GBA box art is square
-(512×512) so it *works* as a last-ditch fallback, but it's not the goal.
+*Verified 2026-07-11* with the real RomM key under a pinned mbedTLS-2.28
+profile (`--tls-max 1.2 --ciphers ECDHE-ECDSA-AES128-GCM-SHA256`):
+autocomplete search, `/icons/game/{id}`, and cdn2 PNG downloads all succeed.
+
+**API key: user-supplied, never embedded.** The remaining blocker was only key
+secrecy for public distribution. Delivery: read the key from a dotenv-style
+file on SD (e.g. `sd:/3ds/romm3ds/sgdb.env`, `STEAMGRIDDB_API_KEY=...`) at
+startup, with a swkbd prompt as fallback/first-run setup — same pattern as the
+RomM host config. The user copies the key from their RomM compose file (RomM
+does **not** expose `/icons` through its own API — only box covers — so going
+through RomM instead is not an option).
+
+Fallback tiers when SteamGridDB misses: RomM cover letterboxed onto a tile
+(never cropped) → plain tile. ScreenScraper `support-2D` dropped for now (needs
+dev creds on SD; revisit via the bridge alternative if ever wanted).
+
+Rejected: cropping box art for the icon (user dislikes it). The RomM-cover
+fallback letterboxes the full box onto the tile instead — recognizable, not
+cropped — and is explicitly a "until I bother fixing it" state, marked ⚠ in
+Manage.
 
 ### Sound — decided
 No per-game GBA jingle library exists (unlike YANBF for NDS). Use one bundled
 **silent/generic** banner WAV for all.
 
-## Icon bridge (server-side, sits next to RomM)
+## Install UX & art picking (decided)
+
+Full screen-by-screen spec: [ART-UX-SPEC.md](ART-UX-SPEC.md) (flows, screen
+contents, persistence schema, implementation map). Summary below.
+
+Guiding lesson from iiSU/Cocoon: nobody misses choice when defaults are good —
+so choice lives NEXT TO the install path, never in it. Install stays one tap.
+Verified on the real library (2026-07-11 batch test): ~85% of GBA and the
+tested NDS titles auto-match SGDB strongly (→ ~90% after the normalization
+fixes below); libretro GBA logos hit 11/11 exact No-Intro names.
+
+### Name handling (verified against ES-DE source)
+- **SGDB search query** — sanitize the fs_name stem exactly like ES-DE's
+  scraper (`StringUtil::removeParenthesis`): iteratively erase `(...)`/`[...]`
+  blocks, `_`→space, trim; plus our extras: flip the No-Intro article
+  ("Legend of Zelda, The - X" → "The Legend of Zelda - X"), collapse spaces.
+- **libretro banner URL** — the EXACT No-Intro stem, parens included (never
+  sanitized). On 404, retry once with `(Translated)`/`[...]` tags stripped
+  (verified: fixes "Mother 3 (Japan) (Translated)", "F-Zero - Climax [T-En]").
+- **Match confidence** — normalize both sides (lowercase, alnum only, fold
+  accents/macrons ō→o é→e, map &↔and, drop trailing platform tokens like
+  "GBA"): exact = strong (auto-pick), prefix/contains = medium, else weak.
+
+### The three entrances
+```
+TIER 1 · default (~90%): A → "Download + install?" → Yes → Installed!
+        Strong match → SGDB icon + libretro banner, zero extra prompts.
+TIER 2 · missing-art notify (bad names): see below — one dialog, only when
+        icon and/or banner genuinely not found.
+TIER 3 · Manage → game → "Change art": picker for taste fixes any time
+        after install (rebuild in place, same TID → HOME position kept).
+```
+
+### Missing-art notify (at install, right after Yes, before the download)
+Icon and banner failures report together in ONE dialog; install is never
+blocked and never ends artless:
+```
+┌──────────────────────────────┐
+│ Art not found:               │
+│  icon:   no match for "..."  │   (lines shown only for the pieces
+│  banner: not found           │    that actually failed)
+│ [Search]   [Use RomM cover]  │
+└──────────────────────────────┘
+```
+- **[Use RomM cover]** — build the missing pieces from the RomM box cover
+  (600×900 portrait, IGDB): icon = cover letterboxed onto a 48×48 tile,
+  banner = cover height-fit centered on 256×128 (same look as today's
+  GameTDB NDS banners). Works even for badly named files because RomM's
+  match is by rom id, not filename — the library has 2992/~all covers.
+  Entry gets a ⚠ marker in Manage for later fixing.
+- **[Search]** — swkbd prefilled with the sanitized name; one corrected name
+  re-queries SGDB *and* libretro. Then the picker grid (icon), then banner
+  candidates (auto-skipped for pieces already found).
+- Settings toggle: "notify when art missing: on (default) / off (silent
+  RomM-cover fallback)".
+
+### Picker (one shared component, three entrances)
+Bottom-screen grid (~5×3 thumbs, L/R pages), lazily downloaded via the
+covercache async pattern, disk-cached under `sdmc:/3ds/romm3ds/cache/sgdb/`.
+Controls: D-pad move, A use, B back/skip, X refine search (swkbd), Y switch
+art page (icon ↔ banner) / source tab. Footer shows dims + count.
+- GBA icon sources: SGDB icons → RomM cover tile.
+- GBA banner sources: libretro logo → SGDB logos → RomM cover → tile.
+- NDS icon: the ROM's own DS icon is the permanent default (always exists,
+  RomM/network never involved); SGDB icons offered as optional override.
+- NDS banner sources: SD assets/GameTDB (existing chain) → SGDB logos →
+  RomM cover → DS-icon stamp. (libretro Named_Logos is empty for NDS —
+  verified, even Mario Kart DS 404s — excluded.)
+
+### Persistence
+`art.json` next to the TID files in the forwarder config dir, keyed by
+fs_name: chosen SGDB game id + icon/banner ids (or "romm-cover"/"stamp"
+markers). Reinstalls reuse it silently; ⚠ in Manage = fallback art in use.
+"Change art" rebuilds only the CIA/forwarder — ROM untouched, ~20s.
+
+## Alternative: icon bridge (server-side, sits next to RomM) — demoted
+
+Superseded by the direct curl+mbedtls path above for personal use. Keep in the
+back pocket only if: (a) public release where users shouldn't need their own
+SGDB key, (b) ScreenScraper fallback (its dev creds shouldn't live on SD
+either), or (c) server-side caching/normalization becomes worth a container.
+Note the icon-picker goal never required direct TLS — a bridge could serve
+candidate lists as JSON + proxied images over plain HTTP too.
 
 ~100-line microservice on g3 alongside the RomM Docker stack. Holds the
 SteamGridDB key (RomM already has one — `STEAMGRIDDB_API_ENABLED: true`), serves
@@ -122,14 +234,11 @@ the 3DS plain HTTP:
 ```
 GET http://<bridge>:PORT/gba-icon?name=<No-Intro name>        (or ?crc= / ?sgdb_id=)
   1. resolve name -> SGDB id            (/search/autocomplete, Bearer, server-side)
-  2. GET /icons/game/{id}?dimensions=48x48,64x64,128x128&mimes=image/png -> pick best
+  2. GET /icons/game/{id}?mimes=image/png -> pick best size
   3. fallback: ScreenScraper jeuInfos systemeid=12 + crc -> media=support-2D
   4. normalize -> pad/fit to 48x48 PNG (flatten onto a tile if transparent)
   5. cache on disk (key by id/hash); serve image/png over HTTP
 ```
-This mirrors how the app already fetches RomM covers, and how iiSU gets its home
-icons — just moved server-side to satisfy the 3DS transport limits. It's a clean,
-self-contained first deliverable, buildable/testable independent of the 3DS.
 
 Alternative if any inject step runs on a PC: bake the SteamGridDB icon straight
 into the SMDH at build time (Option B) — highest fidelity, zero 3DS networking.
@@ -140,10 +249,13 @@ into the SMDH at build time (Option B) — highest fidelity, zero 3DS networking
    inject boots on the New 3DS XL.
 2. Prototype the `.code` + `.CAA` builder and the streaming AM install (32 MB
    worst case).
-3. Build the icon bridge (standalone; RomM sidecar container).
+3. Wire curl+mbedtls into the app: Makefile link flags (`-lcurl -lmbedtls
+   -lmbedx509 -lmbedcrypto -lz`, portlibs include/lib paths), `sgdb.env` key
+   loading, an HTTPS fetch helper alongside the existing `httpc` one.
 4. Wire GBA into the app: platform pick (`gba` slug), library browse/download to
    `sd:/roms/gba/`, inject, manage. Decide on a per-game menu to choose
-   inject-now vs skip (HOME-limit awareness).
+   inject-now vs skip (HOME-limit awareness). Icon picker UI: list SGDB
+   candidates, thumbnail grid, user choice baked into the SMDH.
 5. Save handling: AGBSAVE / SD `.sav` behaviour to confirm on hardware.
 
 ## References
