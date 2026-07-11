@@ -1,10 +1,10 @@
 # GBA support — design & decisions
 
-Status: **core shipped, hardware-verified (2026-07-11); art layer next.** The
-on-device VC injector, save-type detection, and full GBA app integration work
-on a New 3DS XL. What remains is the icon/banner art layer (see
-[ART-UX-SPEC.md](ART-UX-SPEC.md) and the progress log below). Companion server
-is the user's existing RomM instance.
+Status: **core shipped + art layer built (2026-07-11); art layer pending
+hardware test.** The on-device VC injector, save-type detection, and full GBA
+app integration work on a New 3DS XL. The icon/banner art layer
+([ART-UX-SPEC.md](ART-UX-SPEC.md)) is implemented for GBA and NDS — needs an
+on-hardware pass. Companion server is the user's existing RomM instance.
 
 ## Progress log
 
@@ -33,11 +33,23 @@ Done (on `feat/gba`, verified on hardware):
   background-refresh perf work. Cached tid-ownership lookups fixed the GBA
   library open lag.
 
-Not started:
-- **Art layer** (icons + banners) for GBA *and* NDS — the whole
-  [ART-UX-SPEC.md](ART-UX-SPEC.md) flow. Injects currently ship the donor
-  template's placeholder icon + a silent banner. This is the next work item;
-  see "Next: art layer" below.
+Built, pending hardware test:
+- **Art layer** (icons + banners) for GBA *and* NDS — the
+  [ART-UX-SPEC.md](ART-UX-SPEC.md) flow, built 2026-07-11 (untested on
+  hardware). New modules: `artquery.cpp` (sanitizer/norm/confidence),
+  `artfetch.cpp` (icon48/bannerTex renderers + tiered fetch), `artstore.cpp`
+  (art.json + raw image cache under `sd:/3ds/romm3ds/cache/art/`),
+  `artpicker.cpp` (S4 thumb grid). Wiring: GBA install auto-resolve before
+  the download + missing-art notify + `+ Art` confirm option; NDS forwarder
+  banner chain extended (SGDB logo on strong match → notify → RomM cover →
+  DS-icon stamp); Manage `Change art` rebuilds in place (same TID) for GBA
+  injects and romm3ds NDS forwarders, `[!]` list marker while fallback art
+  is in use; Settings: art-notify toggle + SGDB key status. Deviations from
+  the spec: art.json keys by extension-less stem (so `game.zip` ↔ `game.gba`
+  share an entry), `[!]` instead of ⚠ (font safety), NDS notify happens at
+  build time (after download — the GameTDB chain needs the ROM's gamecode),
+  GameTDB isn't offered as a picker candidate (the RomM cover candidate is
+  the same box art).
 
 ## TL;DR decision
 
@@ -280,13 +292,14 @@ GET http://<bridge>:PORT/gba-icon?name=<No-Intro name>        (or ?crc= / ?sgdb_
 Alternative if any inject step runs on a PC: bake the SteamGridDB icon straight
 into the SMDH at build time (Option B) — highest fidelity, zero 3DS networking.
 
-## Next: art layer (NOT STARTED — the remaining work)
+## Art layer (BUILT 2026-07-11 — pending hardware test)
 
 Everything below is documented in full in [ART-UX-SPEC.md](ART-UX-SPEC.md);
-this is the build-order summary. Goal: replace the placeholder inject icon and
-silent/blank banner with real art, via the shared picker + auto/notify flow.
+this was the build-order summary. All six steps are implemented (see the
+progress log above for the module map and spec deviations); what remains is
+the on-hardware pass over the flows.
 
-Build order:
+Build order (all done):
 1. **`sgdb.cpp` → UI glue.** The client works; add: sanitizer (`artquery`),
    `norm()` confidence scoring, on-disk cache under
    `sdmc:/3ds/romm3ds/cache/art/`. First consumer: bake the chosen 48×48 into

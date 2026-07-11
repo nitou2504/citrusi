@@ -1,12 +1,12 @@
 # Art & install UX — full spec (GBA + NDS)
 
-Status: **designed / not started — this is the next work item.** The GBA VC
-inject, save-type detection, and app integration are shipped and
-hardware-verified (see [GBA-PLAN.md](GBA-PLAN.md) progress log); the SGDB
-transport client (`sgdb.cpp`) works but is not yet wired to any UI. Injects
-currently ship the donor template's placeholder icon + a silent banner. This
-spec pins the user-facing flows, every screen's contents, the fallback logic,
-and the persistence model. Build order is in GBA-PLAN.md → "Next: art layer".
+Status: **implemented (2026-07-11) — pending hardware test.** All flows below
+are built on `feat/gba` (`artquery` / `artfetch` / `artstore` / `artpicker` +
+menu wiring; see the [GBA-PLAN.md](GBA-PLAN.md) progress log for the module
+map). Implementation deviations: art.json keys by extension-less stem, the
+Manage marker renders as `[!]` (font safety), the NDS notify runs at build
+time (after download — the GameTDB chain needs the ROM on SD), and GameTDB
+isn't repeated as a picker candidate (the RomM cover shows the same box).
 
 ## 1. Principles
 
