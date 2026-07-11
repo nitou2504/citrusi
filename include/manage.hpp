@@ -31,7 +31,9 @@ void invalidateYanbfCache();
 // maps lowercase rom filename -> cia path. filled by getYanbfForwarders().
 std::map<std::string, std::string> getOrphanForwarderCias();
 
+// session-cached; every install/delete/rom-change path must invalidate
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir);
+void invalidateManagedRoms();
 
 // romm3ds CTR forwarders: maps lowercase rom filename -> tid
 // (from sd:/3ds/forwarder/ctr/<tid>.txt bookkeeping, verified against AM)

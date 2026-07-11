@@ -4,13 +4,60 @@
 #include <cerrno>
 #include <filesystem>
 #include <algorithm>
+#include <fstream>
 #include <set>
 #include "manage.hpp"
 #include "helpers.hpp"
 #include "ctrbuilder.hpp"
+#include "settings.hpp"
 #include "logger.hpp"
+#include "json.hpp"
 
 static Logger mlog("manage");
+
+// persistent computeForwarderTID cache: reading every .nds header on each
+// scan costs an SD open+seeks per rom. keyed by "filename|size" (a rom's
+// header never changes in place).
+#define NDSTID_CACHE_FILE (FORWARDER_DIR + std::string("/ndstids.json"))
+static std::map<std::string, u64> gTidCache;
+static bool gTidCacheLoaded = false;
+static bool gTidCacheDirty = false;
+
+static void loadTidCache() {
+    if (gTidCacheLoaded) return;
+    gTidCacheLoaded = true;
+    std::ifstream in(NDSTID_CACHE_FILE);
+    if (!in.good()) return;
+    try {
+        nlohmann::json j; in >> j;
+        for (auto it = j.begin(); it != j.end(); ++it)
+            gTidCache[it.key()] = strtoull(it.value().get<std::string>().c_str(), nullptr, 16);
+    } catch (...) { gTidCache.clear(); }
+}
+
+static void saveTidCache() {
+    if (!gTidCacheDirty) return;
+    gTidCacheDirty = false;
+    nlohmann::json j;
+    char buf[24];
+    for (auto& kv : gTidCache) {
+        snprintf(buf, sizeof(buf), "%016llX", (unsigned long long)kv.second);
+        j[kv.first] = std::string(buf);
+    }
+    std::ofstream o(NDSTID_CACHE_FILE);
+    o << j.dump();
+}
+
+static u64 cachedForwarderTID(const std::string& ndsPath, const std::string& filename, u64 size) {
+    loadTidCache();
+    std::string key = filename + "|" + std::to_string(size);
+    auto it = gTidCache.find(key);
+    if (it != gTidCache.end()) return it->second;
+    u64 tid = computeForwarderTID(ndsPath);
+    gTidCache[key] = tid;
+    gTidCacheDirty = true;
+    return tid;
+}
 
 u64 computeForwarderTID(const std::string& ndsPath) {
     FILE* f = fopen(ndsPath.c_str(), "rb");
@@ -79,27 +126,17 @@ static bool gYanbfCached = false;
 static std::map<std::string, u64> gYanbfCache;
 static std::map<std::string, std::string> gYanbfOrphans;
 
-void invalidateYanbfCache() { gYanbfCached = false; }
+void invalidateManagedRoms();   // defined below; yanbf changes imply a stale scan
+void invalidateYanbfCache() { gYanbfCached = false; invalidateManagedRoms(); }
 
 std::map<std::string, std::string> getOrphanForwarderCias() {
     if (!gYanbfCached) getYanbfForwarders();
     return gYanbfOrphans;
 }
 
-// FS refuses to open another title's RomFS from userland (0xD9004676,
-// "command not allowed"), even with a full-access exheader. probe whether the
-// ExeFS icon is readable — if it ever is, an SMDH-name fallback becomes viable.
-static Result probeExefsIcon(u64 tid) {
-    u32 archPathData[4] = {(u32)tid, (u32)(tid >> 32), MEDIATYPE_SD, 0};
-    u32 filePathData[5] = {0, 0, 2, 0x6E6F6369 /*'icon'*/, 0};
-    FS_Path archPath = {PATH_BINARY, sizeof(archPathData), archPathData};
-    FS_Path filePath = {PATH_BINARY, sizeof(filePathData), filePathData};
-    Handle fd = 0;
-    Result rc = FSUSER_OpenFileDirectly(&fd, ARCHIVE_SAVEDATA_AND_CONTENT,
-                                        archPath, filePath, FS_OPEN_READ, 0);
-    if (R_SUCCEEDED(rc)) svcCloseHandle(fd);
-    return rc;
-}
+// note: another title's ExeFS icon IS readable from userland (verified,
+// FSUSER_OpenFileDirectly filePath {0,0,2,'icon',0} → rc 0) — only RomFS is
+// blocked. an SMDH-name fallback is viable if the cia scan ever isn't enough.
 
 static bool readAt(FILE* f, long off, void* buf, size_t n) {
     return fseek(f, off, SEEK_SET) == 0 && fread(buf, 1, n, f) == n;
@@ -218,22 +255,22 @@ std::map<std::string, u64> getYanbfForwarders() {
     if (R_FAILED(AM_GetTitleList(&read, MEDIATYPE_SD, count, titles.data()))) return out;
     std::set<u64> unresolved;
     std::set<u64> allSd(titles.begin(), titles.begin() + read);
+    bool mountDenied = false;   // FS denies the mount system-wide, not per title
     for (u32 i = 0; i < read; i++) {
         u64 tid = titles[i];
         if ((tid >> 32) != 0x00040000ULL) continue;
         u32 low = (u32)(tid & 0xFFFFFFFF);
         if (low < 0x0FF40000 || low > 0x0FF7FFFF) continue;
         // YANBF forwarder: romfs holds path.txt with the rom path.
-        // FS denies this from userland (0xD9004676) on stock+Luma; kept in
-        // case some setup allows it, real work happens in the cia fallback.
+        // FS denies this from userland (0xD9004676) on stock+Luma; probe once,
+        // then skip the rest — real work happens in the cia fallback.
+        if (mountDenied) { unresolved.insert(tid); continue; }
         Result mrc = romfsMountFromTitle(tid, MEDIATYPE_SD, "yfwd");
         if (R_FAILED(mrc)) {
-            if (unresolved.empty()) {
-                char b[80];
-                snprintf(b, sizeof(b), "yanbf mount %08lX rc=%08lX icon-probe rc=%08lX",
-                         low, (unsigned long)mrc, (unsigned long)probeExefsIcon(tid));
-                mlog.info(b);
-            }
+            char b[64];
+            snprintf(b, sizeof(b), "yanbf mount %08lX rc=%08lX", low, (unsigned long)mrc);
+            mlog.info(b);
+            mountDenied = true;
             unresolved.insert(tid);
             continue;
         }
@@ -283,7 +320,16 @@ std::map<std::string, u64> getRommCtrForwarders() {
     return out;
 }
 
+// session cache: the scan result only changes when a forwarder or rom is
+// added/removed, and every mutation path invalidates it.
+static bool gManagedCached = false;
+static std::vector<ManagedRom> gManagedCache;
+
+void invalidateManagedRoms() { gManagedCached = false; }
+
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
+    if (gManagedCached) return gManagedCache;
+    u64 t0 = osGetTime();
     std::vector<ManagedRom> out;
     std::error_code ec;
     if (!std::filesystem::exists(romDir, ec)) return out;
@@ -291,30 +337,7 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
     std::map<std::string, u64> yanbf = getYanbfForwarders();
     std::map<std::string, std::string> orphans = getOrphanForwarderCias();
     std::map<std::string, u64> rommCtr = getRommCtrForwarders();
-    mlog.info("scan: twl(NAND)=" + std::to_string(installed.size()) +
-              " yanbf=" + std::to_string(yanbf.size()) +
-              " rommCtr=" + std::to_string(rommCtr.size()));
-    // dump every installed title that could be a forwarder, so we can see the real scheme
-    {
-        FS_MediaType M[2] = {MEDIATYPE_SD, MEDIATYPE_NAND};
-        const char* MN[2] = {"SD", "NAND"};
-        for (int m = 0; m < 2; m++) {
-            u32 c = 0; if (R_FAILED(AM_GetTitleCount(M[m], &c)) || !c) continue;
-            std::vector<u64> t(c); u32 rd = 0;
-            if (R_FAILED(AM_GetTitleList(&rd, M[m], c, t.data()))) continue;
-            for (u32 i = 0; i < rd; i++) {
-                u32 hi = (u32)(t[i] >> 32), low = (u32)(t[i] & 0xFFFFFFFF);
-                bool twl  = (hi == 0x00048004 || hi == 0x00048005);
-                bool yan  = (hi == 0x00040000 && low >= 0x0FF40000 && low <= 0x0FF7FFFF);
-                bool ctr  = (hi == 0x00040000 && low < 0x0FF40000 && (low >> 8) != 0);
-                if (twl || yan || ctr) {
-                    char b[48]; snprintf(b, sizeof(b), "%s %016llX %s", MN[m], (unsigned long long)t[i],
-                                         twl?"TWL":yan?"YANBF":"CTR");
-                    mlog.info(b);
-                }
-            }
-        }
-    }
+    u64 t1 = osGetTime();
     for (const auto& entry : std::filesystem::directory_iterator(romDir, ec)) {
         if (entry.is_directory()) continue;
         std::string filename = entry.path().filename();
@@ -324,7 +347,7 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         r.path = entry.path().generic_string();
         r.display = filename;
         r.sizeBytes = fileSize(r.path);
-        r.tid = computeForwarderTID(r.path);
+        r.tid = cachedForwarderTID(r.path, filename, r.sizeBytes);
         r.installed = r.tid != 0 && twlTitleInstalled(installed, r.tid);
         auto y = yanbf.find(toLowerCase(filename));
         r.yanbfTid = (y != yanbf.end()) ? y->second : 0;
@@ -332,18 +355,19 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         r.rommTid = (rc != rommCtr.end()) ? rc->second : 0;
         auto o = orphans.find(toLowerCase(filename));
         r.orphanCia = (o != orphans.end()) ? o->second : "";
-        {
-            char b[128];
-            snprintf(b, sizeof(b), "rom twl=%016llX inst=%d y=%d c=%d '%s'",
-                     (unsigned long long)r.tid, r.installed?1:0, r.yanbfTid?1:0, r.rommTid?1:0,
-                     r.display.substr(0, 44).c_str());
-            mlog.info(b);
-        }
         out.push_back(r);
     }
+    saveTidCache();
     std::sort(out.begin(), out.end(), [](const ManagedRom& a, const ManagedRom& b) {
         return toLowerCase(a.display) < toLowerCase(b.display);
     });
+    char b[128];
+    snprintf(b, sizeof(b), "scan: twl(NAND)=%d yanbf=%d rommCtr=%d roms=%d fwd=%llums roms=%llums",
+             (int)installed.size(), (int)yanbf.size(), (int)rommCtr.size(), (int)out.size(),
+             (unsigned long long)(t1 - t0), (unsigned long long)(osGetTime() - t1));
+    mlog.info(b);
+    gManagedCache = out;
+    gManagedCached = true;
     return out;
 }
 
