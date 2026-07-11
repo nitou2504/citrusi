@@ -111,6 +111,10 @@ static u32 gTick = 0;           // global frame counter for marquees
 static std::map<std::string, std::vector<RommRom>> gCache;   // slug -> roms
 static std::map<std::string, bool> gCacheOk;                 // slug -> loaded?
 static std::vector<RommRom> gCombined;                       // cross-system search source
+// installed NDS forwarders (filename -> tid), refreshed per library build
+static std::map<std::string, u64> gYanbfMap, gRommCtrMap;
+static void refreshNdsForwarders();
+static bool ndsForwarderInstalled(const std::string& fsName);
 
 static const char* systemName(const std::string& slug) {
     return slug == ROMM_SLUG_3DS ? "Nintendo 3DS" : "Nintendo DS";
@@ -540,7 +544,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             MenuSelection* sel = *this->selection;
             bool is3ds = (sel->platformSlug == ROMM_SLUG_3DS);
             bool onSD = is3ds ? installed3dsHasTitle(sel->titleId)
-                              : fileExists(rommLocalPath(sel->fsName, sel->platformSlug));
+                              : ndsForwarderInstalled(sel->fsName);
             if (gDescForId != sel->rommId) {
                 wrapLines(sel->summary, CTW, 0.45f, gDescLines);
                 gDescForId = sel->rommId;
@@ -558,7 +562,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (sel->year > 0) { snprintf(chip, sizeof(chip), "%d", sel->year); cxp = drawChip(cxp, y, chip, COL_TEXT_DIM); }
             cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
             if (sel->rating > 0) { snprintf(chip, sizeof(chip), "%.0f/100", sel->rating); cxp = drawChip(cxp, y, chip, COL_TEXT_DIM); }
-            if (onSD) drawChip(cxp, y, is3ds ? "INSTALLED" : "ON SD", COL_ACCENT);
+            if (onSD) drawChip(cxp, y, is3ds ? "INSTALLED" : "FORWARDER", COL_ACCENT);
             y += CHIP_H + 6;
             y = cardDivider(y);
             // genres: 4px pad, dwell then scroll after ~3s
@@ -815,6 +819,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
     // builds the RomM list from a cached library, optionally filtered.
     // src = the platform cache (or the combined list for cross-system search).
+    // refresh which NDS games have an installed forwarder (YANBF or romm3ds), AM-verified
+    static void refreshNdsForwarders() {
+        gYanbfMap = getYanbfForwarders();
+        gRommCtrMap = getRommCtrForwarders();
+    }
+    // is a forwarder for this NDS rom currently on the HOME menu?
+    static bool ndsForwarderInstalled(const std::string& fsName) {
+        std::string base = toLowerCase(std::filesystem::path(
+            rommLocalPath(fsName, ROMM_SLUG_NDS)).filename().generic_string());
+        return gYanbfMap.count(base) || gRommCtrMap.count(base);
+    }
+
     // filter + slug are taken BY VALUE on purpose: we delete `prev` below, and
     // callers pass this->filter / this->platformSlug — a reference would dangle.
     static Menu* buildRommMenu(Menu* prev, std::string filter,
@@ -823,7 +839,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         delete prev;
         std::string flow = toLowerCase(filter);
         bool show3ds = gConfigPtr ? gConfigPtr->show3dsRoms : false;
-        installed3dsRefresh();   // refresh which 3DS titles are installed on this console
+        installed3dsRefresh();     // 3DS: titles installed on the console
+        refreshNdsForwarders();    // NDS: forwarders on the HOME menu
         std::vector<MenuSelection*> entries;
         for (auto& rom : src) {
             if (!flow.empty() &&
@@ -834,11 +851,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (rom.platformSlug == ROMM_SLUG_3DS && !rom.installable && !show3ds)
                 continue;
             MenuSelection* e = new MenuSelection();
-            // marker: 3DS = title installed on the console (AM, by resolved title id);
-            //         NDS = rom downloaded to SD
+            // marker: 3DS = title installed on the console; NDS = forwarder on the HOME menu
             bool marked = (rom.platformSlug == ROMM_SLUG_3DS)
                           ? installed3dsHasTitle(rom.titleId)
-                          : fileExists(rommLocalPath(rom.fsName, rom.platformSlug));
+                          : ndsForwarderInstalled(rom.fsName);
             std::string tag = cross ? (std::string("[") + (rom.platformSlug==ROMM_SLUG_3DS?"3DS":"DS") + "] ") : "";
             e->display=(marked?"* ":"  ")+tag+rom.name;
             e->action=RommInstall;
