@@ -107,14 +107,17 @@ static bool buildForwarderFor(C3D_RenderTarget* target, const std::string& romPa
 // GBA art (ART-UX-SPEC S1-S4): art.json reuse -> auto resolve -> optional
 // missing-art notify with [Search]->picker / [Use RomM cover]. Never blocks
 // the install; pieces left "" keep the template art. The caller persists
-// entryOut with artStorePut() after a successful install.
+// entryOut with artStorePut() after a successful install/rebuild.
+// forcePicker = the user asked to choose ("+ Art" / Manage "Change art"):
+// skip the notify and open the picker directly, preloaded from art.json.
 static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
                                      const std::string& fsName, const std::string& title,
                                      const std::string& coverPath,
-                                     ArtEntry& entryOut, ArtPieces& piecesOut) {
+                                     ArtEntry& entryOut, ArtPieces& piecesOut,
+                                     bool forcePicker = false) {
     ensureSgdb();
     ArtEntry ae = artStoreGet(fsName);
-    if (ae.valid) {   // F6: reinstall reuses silently, cache-first
+    if (ae.valid && !forcePicker) {   // F6: reinstall reuses silently, cache-first
         showLoading(target, {"Preparing art...", title});
         if (!artBuildFromEntry(gSgdb, gRomm, fsName, coverPath, ae, piecesOut)) {
             // a named source vanished: quietly fill the gaps from the cover
@@ -124,11 +127,30 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
         entryOut = ae;
         return;
     }
+    if (ae.valid) {   // Change art: picker preloaded from the persisted entry
+        entryOut = ae;
+        bool iCh = false, bCh = false;
+        artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
+                     entryOut, piecesOut, true, true, &iCh, &bCh);
+        // pages the user skipped keep their stored art
+        if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty()) {
+            ArtPieces re;
+            artBuildFromEntry(gSgdb, gRomm, fsName, coverPath, entryOut, re);
+            if (piecesOut.icon48.empty()) piecesOut.icon48 = re.icon48;
+            if (piecesOut.bannerTex.empty()) piecesOut.bannerTex = re.bannerTex;
+        }
+        if (iCh || bCh) entryOut.weak = false;   // the user picked -> ⚠ cleared
+        return;
+    }
     showLoading(target, {"Looking up art...", title});
     artResolveGba(gSgdb, gRomm, fsName, entryOut, piecesOut);
+    if (forcePicker) {
+        artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
+                     entryOut, piecesOut, true, true);
+    }
     bool iconMiss = piecesOut.icon48.empty();
     bool bannerMiss = piecesOut.bannerTex.empty();
-    if ((iconMiss || bannerMiss) && config->artNotify) {
+    if ((iconMiss || bannerMiss) && config->artNotify && !forcePicker) {
         const char* coverBtn = coverPath.empty() ? "Use plain tile" : "Use RomM cover";
         for (;;) {
             std::string q = entryOut.query;
@@ -1182,7 +1204,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             bool inst = installed3dsHasTitle(gtid);
             MenuSelection* e = new MenuSelection();
             std::string clean = p.stem().generic_string();
-            e->display = (inst ? "* " : "  ") + utf8FoldLatin(clean);
+            bool weakArt = inst && artStoreGet(fname).weak;   // ⚠: fallback art in use
+            e->display = (inst ? "* " : "  ") + std::string(weakArt ? "[!] " : "") + utf8FoldLatin(clean);
             e->title = utf8FoldLatin(clean);
             e->action = ManageRom;
             e->platformSlug = ROMM_SLUG_GBA;
@@ -1601,13 +1624,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     std::string romPath = rommLocalPath(entry.fsName, entry.platformSlug); // playable file
                     bool onSD = fileExists(is3ds ? dest : romPath);
                     bool needDownload = true;
+                    bool gbaPickArt = false;    // S1 "+ Art": pick before installing
                     if (onSD) {
                         int c = Dialog(target,0,0,320,240,{is3ds?"Already downloaded:":"Already on SD:",entry.fsName},{isNds?"Install fwd":"Install","Redownload","Cancel"}).handle();
                         if (c==2 || c==-1) break;
                         needDownload = (c==1);
+                    } else if (isGba) {
+                        int c = Dialog(target,0,0,320,240,{"Download for GBA inject?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),"+ Art",gLang.getString("menu_no")}).handle();
+                        if (c==2 || c==-1) break;
+                        gbaPickArt = (c==1);
                     } else {
                         const char* q = is3ds ? "Download + install?" :
-                                        isGba ? "Download for GBA inject?" :
                                                 "Download + install forwarder?";
                         if (Dialog(target,0,0,320,240,{q,entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
@@ -1619,7 +1646,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     ArtPieces gbaArt;
                     if (isGba)
                         resolveGbaArtInteractive(target, config, entry.fsName, entry.title,
-                                                 entry.coverPath, gbaArtEntry, gbaArt);
+                                                 entry.coverPath, gbaArtEntry, gbaArt, gbaPickArt);
                     rlog.info("install: pre-download needDownload=" + std::string(needDownload?"1":"0") + " dest=" + dest);
                     if (needDownload) {
                         std::error_code ec;
@@ -1756,9 +1783,44 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.platformSlug == ROMM_SLUG_GBA) {   // GBA rom on SD +/- installed inject
                         std::string ng = entry.title;
                         if (entry.installed) {
+                            std::string romBase = entry.path.filename().generic_string();
+                            bool weakArt = artStoreGet(romBase).weak;
+                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"GBA inject installed - fallback art":"GBA inject installed"},{"Change art","Uninstall","Back"}).handle();
+                            if (c==0) {
+                                // rebuild in place: same TID keeps the HOME
+                                // position and save data, only the art changes
+                                if (!ensureCtrBuilder(target)) break;
+                                ArtEntry ae;
+                                ArtPieces pieces;
+                                resolveGbaArtInteractive(target, config, romBase, ng,
+                                                         entry.coverPath, ae, pieces, true);
+                                if (pieces.icon48.empty() && pieces.bannerTex.empty()) break;
+                                u64 gtid = gCtr.allocateGbaTID(romBase);
+                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle(); break; }
+                                Dialog(target,0,0,320,240,{"Rebuilding inject...",ng},{},0).handle();
+                                u64 lastG = 0;
+                                ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
+                                                                    pieces.icon48, pieces.bannerTex,
+                                    [&](u64 done, u64 total) -> bool {
+                                        hidScanInput();
+                                        if (hidKeysDown() & KEY_B) return false;
+                                        if (done - lastG < (2<<20) && done != total) return true;
+                                        lastG = done;
+                                        int pct = (total>0)?(int)(done*100/total):0;
+                                        Dialog(target,0,0,320,240,{"Installing... (B = cancel)",ng,std::to_string(pct)+"%"},{},0).handle();
+                                        return true;
+                                    });
+                                if (gr->isSuccess()) {
+                                    artStorePut(romBase, ae);
+                                    Dialog(target,0,0,320,240,{"Art updated!",ng},{"OK"}).handle();
+                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Rebuild failed",gr->message},{"OK"}).handle();
+                                delete gr;
+                                while (this->queue.size() > 0) this->queue.pop();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                            }
+                            if (c!=1) break;
                             // single-pass: uninstall removes the inject AND the ROM file
-                            int c = Dialog(target,0,0,320,240,{ng,"GBA inject installed"},{"Uninstall","Back"}).handle();
-                            if (c!=0) break;
                             if (Dialog(target,0,0,320,240,{"Uninstall game?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                             Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
                             AM_DeleteTicket(entry.tid);
