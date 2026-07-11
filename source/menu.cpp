@@ -1466,12 +1466,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (buildForwarderFor(target, entry.path.generic_string(), entry.title, entry.coverPath))
                                 Dialog(target,0,0,320,240,{"Installed!",shorten(entry.title,28)},{"OK"}).handle();
                             while (this->queue.size() > 0) this->queue.pop();
+                            gFwdReady = false; invalidateYanbfCache();
+                            showLoading(target, {"Refreshing..."});
                             return generateManageMenu(this,config->dsiwareCount);
                         } else if (c==1) {
                             if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
                                 std::error_code ec;
                                 std::filesystem::remove(entry.path, ec);
                                 while (this->queue.size() > 0) this->queue.pop();
+                                gFwdReady = false;
+                                showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount);
                             }
                         }
@@ -1518,6 +1522,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (!err)
                         Dialog(target,0,0,320,240,{"Deleted.",name},{"OK"}).handle();
                     while (this->queue.size() > 0) this->queue.pop();
+                    gFwdReady = false; invalidateYanbfCache();
+                    showLoading(target, {"Refreshing..."});
                     return generateManageMenu(this,config->dsiwareCount);
                 }
                 default:

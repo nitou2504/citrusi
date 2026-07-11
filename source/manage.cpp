@@ -7,6 +7,9 @@
 #include "manage.hpp"
 #include "helpers.hpp"
 #include "ctrbuilder.hpp"
+#include "logger.hpp"
+
+static Logger mlog("manage");
 
 u64 computeForwarderTID(const std::string& ndsPath) {
     FILE* f = fopen(ndsPath.c_str(), "rb");
@@ -141,6 +144,30 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
     std::vector<u64> installed = getInstalledTwlTitles();
     std::map<std::string, u64> yanbf = getYanbfForwarders();
     std::map<std::string, u64> rommCtr = getRommCtrForwarders();
+    mlog.info("scan: twl(NAND)=" + std::to_string(installed.size()) +
+              " yanbf=" + std::to_string(yanbf.size()) +
+              " rommCtr=" + std::to_string(rommCtr.size()));
+    // dump every installed title that could be a forwarder, so we can see the real scheme
+    {
+        FS_MediaType M[2] = {MEDIATYPE_SD, MEDIATYPE_NAND};
+        const char* MN[2] = {"SD", "NAND"};
+        for (int m = 0; m < 2; m++) {
+            u32 c = 0; if (R_FAILED(AM_GetTitleCount(M[m], &c)) || !c) continue;
+            std::vector<u64> t(c); u32 rd = 0;
+            if (R_FAILED(AM_GetTitleList(&rd, M[m], c, t.data()))) continue;
+            for (u32 i = 0; i < rd; i++) {
+                u32 hi = (u32)(t[i] >> 32), low = (u32)(t[i] & 0xFFFFFFFF);
+                bool twl  = (hi == 0x00048004 || hi == 0x00048005);
+                bool yan  = (hi == 0x00040000 && low >= 0x0FF40000 && low <= 0x0FF7FFFF);
+                bool ctr  = (hi == 0x00040000 && low < 0x0FF40000 && (low >> 8) != 0);
+                if (twl || yan || ctr) {
+                    char b[48]; snprintf(b, sizeof(b), "%s %016llX %s", MN[m], (unsigned long long)t[i],
+                                         twl?"TWL":yan?"YANBF":"CTR");
+                    mlog.info(b);
+                }
+            }
+        }
+    }
     for (const auto& entry : std::filesystem::directory_iterator(romDir, ec)) {
         if (entry.is_directory()) continue;
         std::string filename = entry.path().filename();
@@ -156,6 +183,13 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         r.yanbfTid = (y != yanbf.end()) ? y->second : 0;
         auto rc = rommCtr.find(toLowerCase(filename));
         r.rommTid = (rc != rommCtr.end()) ? rc->second : 0;
+        {
+            char b[128];
+            snprintf(b, sizeof(b), "rom twl=%016llX inst=%d y=%d c=%d '%s'",
+                     (unsigned long long)r.tid, r.installed?1:0, r.yanbfTid?1:0, r.rommTid?1:0,
+                     r.display.substr(0, 44).c_str());
+            mlog.info(b);
+        }
         out.push_back(r);
     }
     std::sort(out.begin(), out.end(), [](const ManagedRom& a, const ManagedRom& b) {
