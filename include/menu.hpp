@@ -14,6 +14,8 @@ enum MenuAction {
     Install,
     Install_All,
     OpenRommLibrary,
+    OpenPlatform,
+    OpenSearchAll,
     RommInstall,
     OpenManage,
     ManageRom,
@@ -27,6 +29,7 @@ enum MenuType {
     MENU_MAIN,
     MENU_SD,
     MENU_ROMM,
+    MENU_SYSTEMS,
     MENU_MANAGE,
     MENU_SETTINGS,
     MENU_SERVER
@@ -40,6 +43,8 @@ class MenuSelection {
         // RomM entries
         int rommId=0;
         std::string fsName;
+        std::string platformSlug;    // "nds" / "3ds" for RomM entries
+        bool installable=true;
         std::string title;
         std::string coverPath;
         std::string coverSmallPath;
@@ -70,6 +75,8 @@ class Menu {
         MenuType type=MENU_SD;
         std::string heading;
         std::string filter; // active search query (RomM view)
+        std::string platformSlug; // active platform (RomM view); "" = cross-system search
+        bool crossSystem=false;   // RomM view spanning all systems
         Menu(std::vector<MenuSelection*> entries);
         Menu();
         ~Menu();
@@ -101,7 +108,9 @@ class Menu {
 };
 Menu* generateMenu(std::filesystem::path path, Menu* prev);
 Menu* generateMainMenu(Menu* prev);
-Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target);
+Menu* generateSystemMenu(Menu* prev);
+Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug);
+Menu* generateSearchAllMenu(Menu* prev, C3D_RenderTarget* target);
 Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount);
 Menu* generateSettingsMenu(Menu* prev, Config* config);
 bool sortMenuSelections(MenuSelection* a, MenuSelection* b);

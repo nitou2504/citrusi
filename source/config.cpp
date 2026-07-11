@@ -176,6 +176,7 @@ void Config::save() {
     j["randomTID"] = this->randomTID;
     j["customTitle"] = this->customTitle;
     j["forceInstall"] = this->forceInstall;
+    j["show3dsRoms"] = this->show3dsRoms;
     j["selectedLanguage"] = this->selectedLanguage;
     
     std::ofstream o(FORWARDER_DIR + "/config.json");
@@ -193,5 +194,6 @@ void Config::load() {
     if (j.contains("randomTID")) this->randomTID = j["randomTID"];
     if (j.contains("customTitle")) this->customTitle = j["customTitle"];
     if (j.contains("forceInstall")) this->forceInstall = j["forceInstall"];
+    if (j.contains("show3dsRoms")) this->show3dsRoms = j["show3dsRoms"];
     if (j.contains("selectedLanguage")) this->selectedLanguage = j["selectedLanguage"];
 }

@@ -13,13 +13,21 @@
 
 struct CoverJob { int id; std::string url; };
 
-static Thread gWorker = nullptr;
+#define COVER_WORKERS 3
+
+static Thread gWorkers[COVER_WORKERS] = {nullptr};
 static std::atomic<bool> gRun(false);
 static std::atomic<int> gWantId(-1);
 static LightLock gJobsLock;
 static std::vector<CoverJob> gJobs;         // guarded by gJobsLock
+static std::vector<int> gClaimed;           // ids currently being fetched, guarded by gJobsLock
 static RommClient gWorkerClient;            // worker-only after start
 static std::atomic<bool> gStarted(false);
+
+static bool isClaimed(int id) {
+    for (int c : gClaimed) if (c == id) return true;
+    return false;
+}
 
 static std::string rawPath(int id) {
     char p[96];
@@ -72,24 +80,32 @@ static void workerMain(void*) {
         CoverJob job = {-1, ""};
         int want = gWantId.exchange(-1);
         LightLock_Lock(&gJobsLock);
-        if (want >= 0) {
+        // priority request first (if not already done/claimed)
+        if (want >= 0 && !isClaimed(want) &&
+            !fileExists(rawPath(want)) && !fileExists(missPath(want))) {
             for (auto& j : gJobs)
                 if (j.id == want) { job = j; break; }
         }
+        // otherwise the next unclaimed, undone job
         if (job.id < 0) {
-            for (auto it = gJobs.begin(); it != gJobs.end(); ++it) {
-                if (!fileExists(rawPath(it->id)) && !fileExists(missPath(it->id))) {
-                    job = *it;
+            for (auto& j : gJobs) {
+                if (!isClaimed(j.id) && !fileExists(rawPath(j.id)) && !fileExists(missPath(j.id))) {
+                    job = j;
                     break;
                 }
             }
         }
+        if (job.id >= 0) gClaimed.push_back(job.id);   // claim so peers skip it
         LightLock_Unlock(&gJobsLock);
         if (job.id < 0) {
-            svcSleepThread(200 * 1000 * 1000LL); // idle: 200ms
+            svcSleepThread(150 * 1000 * 1000LL); // idle: 150ms
             continue;
         }
         processJob(job);
+        LightLock_Lock(&gJobsLock);
+        for (auto it = gClaimed.begin(); it != gClaimed.end(); ++it)
+            if (*it == job.id) { gClaimed.erase(it); break; }
+        LightLock_Unlock(&gJobsLock);
     }
 }
 
@@ -106,6 +122,7 @@ void coverCacheStart(const RommClient& client, const std::vector<RommRom>& roms)
     gWorkerClient.pass = client.pass;
     gWorkerClient.buildAuth();
     gJobs.clear();
+    gClaimed.clear();
     for (auto& r : roms) {
         CoverJob j;
         j.id = r.id;
@@ -113,11 +130,13 @@ void coverCacheStart(const RommClient& client, const std::vector<RommRom>& roms)
         gJobs.push_back(j);
     }
     LightLock_Unlock(&gJobsLock);
-    if (!gWorker) {
+    if (!gWorkers[0]) {
         gRun = true;
         s32 prio = 0x30;
         svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
-        gWorker = threadCreate(workerMain, nullptr, 128 * 1024, prio + 4, -1, false);
+        // spread the workers across cores (-2 = any core incl. the extra syscore on n3ds)
+        for (int i = 0; i < COVER_WORKERS; i++)
+            gWorkers[i] = threadCreate(workerMain, nullptr, 128 * 1024, prio + 4, -2, false);
     }
 }
 
@@ -152,10 +171,13 @@ bool coverCacheUnavailable(int rommId) {
 }
 
 void coverCacheStop() {
-    if (gWorker) {
+    if (gWorkers[0]) {
         gRun = false;
-        threadJoin(gWorker, U64_MAX);
-        threadFree(gWorker);
-        gWorker = nullptr;
+        for (int i = 0; i < COVER_WORKERS; i++) {
+            if (!gWorkers[i]) continue;
+            threadJoin(gWorkers[i], U64_MAX);
+            threadFree(gWorkers[i]);
+            gWorkers[i] = nullptr;
+        }
     }
 }

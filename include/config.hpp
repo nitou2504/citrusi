@@ -10,6 +10,7 @@ class Config {
     bool randomTID;
     bool customTitle;
     bool forceInstall;
+    bool show3dsRoms=false;  // list non-installable 3DS .3ds entries (default: only .cia)
     std::vector<std::string> templates;
     unsigned int currentTemplate;
     unsigned long dsiwareCount;

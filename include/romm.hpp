@@ -5,14 +5,23 @@
 #include <functional>
 
 #define ROMM_CONFIG_FILE FORWARDER_DIR+std::string("/romm.json")
-// 3DS-CIA build: browse RomM's "3ds" platform and install .cia titles on-device.
-#define ROMM_ROM_DIR std::string("sdmc:/cia/")
-#define ROMM_PLATFORM_SLUG "3ds"
+// Multi-platform: NDS installs as a forwarder from roms/nds; 3DS installs the .cia.
+#define ROMM_NDS_DIR std::string("sdmc:/roms/nds/")
+#define ROMM_CIA_DIR std::string("sdmc:/cia/")
+#define ROMM_SLUG_NDS "nds"
+#define ROMM_SLUG_3DS "3ds"
+
+// SD download/scan dir for a platform slug
+inline std::string rommDirFor(const std::string& slug) {
+    return (slug == ROMM_SLUG_3DS) ? ROMM_CIA_DIR : ROMM_NDS_DIR;
+}
 
 struct RommRom {
     int id;
     std::string name;    // display name (metadata name or fs_name)
     std::string fsName;  // file name on the server
+    std::string platformSlug;   // "nds" / "3ds"
+    bool installable=true;      // 3ds: true only for .cia; nds: always true
     std::string coverPath;      // server path of large cover ("" if none)
     std::string coverSmallPath; // server path of small cover ("" if none)
     std::string summary;
@@ -42,9 +51,11 @@ class RommClient {
     bool hasConfig();
     void buildAuth();
 
-    // returns platform id for ROMM_PLATFORM_SLUG or -1
-    int findNdsPlatform();
-    bool listRoms(int platformId, std::vector<RommRom>& out);
+    // returns platform id for a slug (e.g. "nds", "3ds") or -1
+    int findPlatform(const std::string& slug);
+    int findNdsPlatform() { return findPlatform(ROMM_SLUG_NDS); } // back-compat
+    // lists roms; tags each with platformSlug + installable
+    bool listRoms(int platformId, std::vector<RommRom>& out, const std::string& slug = "");
     // downloads to destPath; progress(downloaded,total) called between chunks,
     // return false from it to cancel (sets lastError="cancelled")
     bool download(const RommRom& rom, const std::string& destPath,

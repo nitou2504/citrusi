@@ -179,7 +179,7 @@ Result RommClient::get(const std::string& url, std::string& out, u32* statusOut)
     return 0;
 }
 
-int RommClient::findNdsPlatform() {
+int RommClient::findPlatform(const std::string& slug) {
     std::string body;
     u32 status = 0;
     if (R_FAILED(get(this->host + "/api/platforms", body, &status))) {
@@ -189,17 +189,17 @@ int RommClient::findNdsPlatform() {
     try {
         nlohmann::json j = nlohmann::json::parse(body);
         for (auto& p : j) {
-            if (p.contains("slug") && p["slug"] == ROMM_PLATFORM_SLUG)
+            if (p.contains("slug") && p["slug"] == slug)
                 return p["id"].get<int>();
         }
-        lastError = "no 'nds' platform on server";
+        lastError = "no '" + slug + "' platform on server";
     } catch (...) {
         lastError = "bad JSON from /api/platforms";
     }
     return -1;
 }
 
-bool RommClient::listRoms(int platformId, std::vector<RommRom>& out) {
+bool RommClient::listRoms(int platformId, std::vector<RommRom>& out, const std::string& slug) {
     out.clear();
     char q[128];
     snprintf(q, sizeof(q), "/api/roms?platform_id=%d&limit=10000&with_char_index=false", platformId);
@@ -247,8 +247,16 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out) {
                     rom.rating = m["average_rating"].get<float>();
             }
             rom.multiFile = r.value("multi", false) || r.value("has_multiple_files", false);
-            // multi-part roms download as a zip, not a playable .nds — skip
+            // multi-part roms download as a zip, not a single playable file — skip
             if (rom.fsName.empty() || rom.multiFile) continue;
+            rom.platformSlug = slug;
+            // 3ds installs a .cia; a bare .3ds must be converted on PC first
+            if (slug == ROMM_SLUG_3DS) {
+                std::string low = toLowerCase(rom.fsName);
+                rom.installable = low.size() >= 4 && low.compare(low.size()-4, 4, ".cia") == 0;
+            } else {
+                rom.installable = true;
+            }
             out.push_back(rom);
         }
     } catch (...) {
