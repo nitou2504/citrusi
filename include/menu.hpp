@@ -122,6 +122,8 @@ class Menu {
         // START: queue a batch for the marked rows. Returns false when there
         // is nothing to batch here, so the caller quits the app instead.
         bool startBatch();
+        // Install-from-SD: X shows/hides files that are already installed
+        Menu* toggleShowInstalled();
         Menu* back();
         Menu* handleQueue(Builder* builder, C3D_RenderTarget* target=nullptr, Config* config =nullptr);
         bool hasQueue();

@@ -181,7 +181,10 @@ int main()
 
 			else if(kDown & KEY_A) menu->action();
 
-			else if(kDown & KEY_X) menu->scrollDesc(1);
+			else if(kDown & KEY_X) {
+				if (menu->type == MENU_LOCAL) menu = menu->toggleShowInstalled();
+				else menu->scrollDesc(1);
+			}
 
 			else if(kDown & KEY_L) menu->scrollDesc(-1); // desc scroll up (Y toggles selection)
 

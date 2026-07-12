@@ -1387,8 +1387,22 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // and .gba (sd:/roms/gba) — each row tagged with its system and marked
     // "* " when already installed. No RomM needed; if a platform library is
     // already cached, its title/cover is reused to drive the art pipeline.
+    // Install-from-SD lists the three rom dirs, which also hold everything
+    // downloaded from RomM — so installed files are hidden by default and X
+    // reveals them (needed for Reinstall / Change art).
+    static bool gLocalShowInstalled = false;
+
+    Menu* generateLocalMenu(Menu* prev);   // fwd: the toggle rebuilds the list
+
+    Menu* Menu::toggleShowInstalled() {
+        if (this->type != MENU_LOCAL) return this;
+        gLocalShowInstalled = !gLocalShowInstalled;
+        return generateLocalMenu(this);
+    }
+
     Menu* generateLocalMenu(Menu* prev) {
         delete prev;
+        CoverCachePause coverPause;   // the scan owns the SD while it runs
         installed3dsRefresh();    // AM installed set: GBA inject + .cia detection
         refreshNdsForwarders();   // NDS forwarder detection
         // optional metadata reuse: filename -> cached library entry, per slug,
@@ -1446,6 +1460,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     inst = ndsForwarderInstalled(fname);
                 }
                 e->installed = inst;
+                if (inst && !gLocalShowInstalled) { delete e; continue; }
                 e->display = (inst ? "* " : "  ") + std::string("[") + s.tag + "] " + utf8FoldLatin(stem);
                 entries.push_back(e);
             }
@@ -1466,7 +1481,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         std::string free = "";
         if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
             free = " - " + humanSize((u64)sd.freeClusters * sd.clusterSize) + " free";
-        menu->heading = "Install from SD" + free;
+        menu->heading = std::string(gLocalShowInstalled ? "Install from SD (all)" : "Install from SD") + free;
         menu->init();
         return menu;
     }
@@ -1748,6 +1763,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug) {
         (void)dsiwareCount;
         delete prev;
+        CoverCachePause coverPause;   // the AM/SD scans own the card while they run
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
         // 3DS: installed titles from your library (uninstall here)
