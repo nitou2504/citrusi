@@ -182,7 +182,7 @@ int main()
 
 			else if(kDown & KEY_X) menu->scrollDesc(1);
 
-			else if(kDown & KEY_Y) menu->scrollDesc(-1);
+			else if(kDown & KEY_Y) menu->toggleMark();
 
 			else if(kDown & KEY_SELECT) menu = menu->searchPrompt();
 

@@ -580,6 +580,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             std::string title = this->heading.empty() ? shorten(this->currentDirectory.generic_string(),30) : shorten(this->heading,34);
             if (this->type == MENU_ROMM && libRefreshRunning(this->crossSystem ? "" : this->platformSlug))
                 title += "  ~ updating...";
+            if (this->type == MENU_LOCAL) {
+                int nSel = 0;
+                for (auto e : this->entries) if (e->selected) nSel++;
+                if (nSel > 0) title += "  " + std::to_string(nSel) + " selected";
+            }
             // flat background + header
             C2D_DrawRectSolid(0, 0, 0, 400, 240, COL_BG);
             drawText(12, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
@@ -608,6 +613,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 }
                 float scale = getFontScale(0.55);
                 std::string body = (*entry)->display;
+                // Install-from-SD: [x] prefix on batch-marked rows
+                if (this->type == MENU_LOCAL && (*entry)->selected) body = "[x] " + body;
                 // RomM rows: fixed on-SD dot outside the scrolling text
                 if (railed && body.size() >= 2) {
                     if (body[0] == '*')
@@ -763,6 +770,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         gDescScroll += dir;
         if (gDescScroll < 0) gDescScroll = 0;
         // upper clamp happens in drawBottom (needs line count)
+    }
+
+    void Menu::toggleMark() {
+        // Y marks/unmarks a game for a batch on the Install-from-SD screen;
+        // everywhere else Y still scrolls the details panel
+        if (this->type != MENU_LOCAL) { this->scrollDesc(-1); return; }
+        if (this->entries.empty()) return;
+        MenuSelection* sel = *this->selection;
+        if (sel->action == LocalInstall) sel->selected = !sel->selected;
     }
 
     // small flat metadata chip with y as its TOP; returns x after the chip
@@ -968,14 +984,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                               (sel->platformSlug==ROMM_SLUG_GBA)?"GBA":"NDS";
             float cxp = drawChip(CTX, y, tag, COL_TEXT_DIM);
             cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
-            if (sel->installed) drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+            if (sel->installed) cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+            if (sel->selected)  drawChip(cxp, y, "SELECTED", COL_ACCENT);
             y += 21;
             y = cardDivider(y) + 5;
             drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255),
-                        sel->installed ? "Installed. Press A to reinstall."
-                                       : "Press A to install this game.", 3);
+                        sel->installed ? "Installed. A reinstalls. Y marks it for a batch."
+                                       : "Press A to install. Y marks it for a batch.", 3);
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
-                     "A Install    B Back    START Quit", C2D_AlignCenter);
+                     "A Install    Y Select    B Back", C2D_AlignCenter);
             return;
         }
         // main menu / systems / SD browser

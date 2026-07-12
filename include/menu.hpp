@@ -101,6 +101,8 @@ class Menu {
         void tickBottom();
         // scroll the description panel (X/Y)
         void scrollDesc(int dir);
+        // Y: toggle the batch mark on the Install-from-SD row (else scrollDesc)
+        void toggleMark();
         // SELECT: search prompt (RomM view); returns the (possibly new) menu
         Menu* searchPrompt();
         void refreshStrings();
