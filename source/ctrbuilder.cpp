@@ -641,6 +641,10 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
             tileIcon(lin24, (u16*)&smdh[0x2040], 24);
             tileIcon(l48,   (u16*)&smdh[0x24C0], 48);
         }
+        // debug: keep the last baked SMDH on SD so icon issues can be
+        // inspected off-device (fetched over ftpd)
+        FILE* dbg = fopen("sdmc:/3ds/forwarder/last-gba-smdh.bin", "wb");
+        if (dbg) { fwrite(smdh.data(), 1, smdh.size(), dbg); fclose(dbg); }
     }
 
     // --- banner (reuse the CBMD patcher; template sound is silent)
