@@ -451,6 +451,26 @@ std::string artIisuIconAuto(SgdbClient& sgdb, RommClient& romm, const std::strin
     return "";
 }
 
+// auto banner tier: iiSU clear-logo on an exact name match (heroes and box
+// arts stay picker-only — verified too hit-or-miss for a default)
+std::string artIisuBannerAuto(SgdbClient& sgdb, RommClient& romm, const std::string& query,
+                              const std::string& slug, ArtEntry& entry) {
+    std::vector<IisuAsset> assets;
+    if (!iisuSearch(sgdb, query, slug, assets)) return "";
+    std::string qn = artNorm(query);
+    for (auto& a : assets) {
+        if (a.type != "logo" || artNorm(a.gameName) != qn) continue;
+        std::string tex = artIisuBannerById(sgdb, romm, a.id);
+        if (!tex.empty()) {
+            aflog.info("iisu logo hit id=" + std::to_string(a.id) + " '" + a.gameName + "'");
+            entry.bannerSource = "iisu";
+            entry.bannerId = a.id;
+            return tex;
+        }
+    }
+    return "";
+}
+
 // ---- auto resolution ---------------------------------------------------------
 
 int artSgdbStrongMatch(SgdbClient& sgdb, const std::vector<std::string>& queries,
@@ -521,6 +541,13 @@ void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName
     if (!out.bannerTex.empty()) {
         entry.bannerSource = "libretro";
         entry.bannerName = usedName;
+    }
+    if (out.bannerTex.empty()) {   // iiSU logo, last tier before the RomM cover
+        if (status) status("Searching iiSU logo...");
+        for (const std::string& q : artQueriesFor(fsName, title)) {
+            out.bannerTex = artIisuBannerAuto(sgdb, romm, q, ROMM_SLUG_GBA, entry);
+            if (!out.bannerTex.empty()) break;
+        }
     }
     aflog.info(std::string("resolve done: icon=") + (out.icon48.empty() ? "miss" : "ok") +
                " banner=" + (out.bannerTex.empty() ? "miss" : "ok"));

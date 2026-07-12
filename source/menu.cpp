@@ -109,6 +109,14 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
         boxart = artSgdbLogoAuto(gSgdb, gRomm, artQueriesFor(romBase, title), ne);
         if (!boxart.empty()) { ae = ne; persist = true; }
     }
+    if (boxart.empty()) {                          // iiSU logo, last before the cover
+        ArtEntry ne;
+        for (const std::string& q : artQueriesFor(romBase, title)) {
+            ne.query = q;
+            boxart = artIisuBannerAuto(gSgdb, gRomm, q, ROMM_SLUG_NDS, ne);
+            if (!boxart.empty()) { ae = ne; persist = true; break; }
+        }
+    }
     if (boxart.empty() && config && config->artNotify) {   // S2, banner line only
         ArtEntry ne;
         std::vector<std::string> qs = artQueriesFor(romBase, title);

@@ -87,6 +87,9 @@ std::string artIisuBannerById(SgdbClient& sgdb, RommClient& romm, int assetId);
 // auto icon tier: box art whose name norm-matches the query exactly
 std::string artIisuIconAuto(SgdbClient& sgdb, RommClient& romm, const std::string& query,
                             const std::string& slug, ArtEntry& entry);
+// auto banner tier: clear-logo on an exact name match (last before the cover)
+std::string artIisuBannerAuto(SgdbClient& sgdb, RommClient& romm, const std::string& query,
+                              const std::string& slug, ArtEntry& entry);
 
 // ---- auto resolution (tier 1) ---------------------------------------------
 
