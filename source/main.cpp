@@ -22,6 +22,7 @@ extern "C" {
 #include "librefresh.hpp"
 #include "dialog.hpp"
 #include "sgdb.hpp"
+#include "logger.hpp"
 namespace fs = std::filesystem;
 
 // default 3dsx main-thread stack is 32KB; http/json/dialog paths need headroom
@@ -130,6 +131,8 @@ int main()
 {
 	if (R_FAILED(init()))
 		return -1;
+	// build stamp: tells the log (and us) exactly which binary is running
+	Logger("boot").info(std::string(VERSION) + " built " + __DATE__ + " " + __TIME__);
 	
 	Config* config = new Config();
 	config->dsiwareCount=getDsiWareCount();
