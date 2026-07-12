@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <citro2d.h>
+#include <algorithm>
 #include <cstring>
 #include <vector>
 #include "artpicker.hpp"
@@ -64,21 +65,23 @@ int resolveGame(const std::string& query, std::string* gameName, bool* offline) 
     return games[best].id;
 }
 
+// same preference order as the auto path: SGDB icons first (smallest
+// adequate first), the RomM cover tile last (it's the fallback)
 void buildIconCands(int gameId, const std::string& coverPath,
                     std::vector<Cand>& out, bool* offline) {
     freeCands(out);
-    if (!coverPath.empty()) {
-        Cand c;
-        c.source = "romm-cover";
-        c.url = coverPath;
-        c.cacheKey = "cover-" + coverPath;
-        c.thumbKey = c.cacheKey;
-        c.name = "RomM cover";
-        out.push_back(c);
-    }
     if (gameId && gSgdb.hasKey()) {
         std::vector<SgdbIcon> icons;
         if (gSgdb.icons(gameId, icons)) {
+            // sort like the auto pick: adequate (>=48px) by ascending area,
+            // then the too-small ones by descending area
+            std::sort(icons.begin(), icons.end(), [](const SgdbIcon& a, const SgdbIcon& b) {
+                bool aFit = std::min(a.width, a.height) >= 48;
+                bool bFit = std::min(b.width, b.height) >= 48;
+                if (aFit != bFit) return aFit;
+                long aa = (long)a.width * a.height, ba = (long)b.width * b.height;
+                return aFit ? aa < ba : aa > ba;
+            });
             for (auto& i : icons) {
                 Cand c;
                 c.source = "sgdb";
@@ -91,6 +94,15 @@ void buildIconCands(int gameId, const std::string& coverPath,
                 out.push_back(c);
             }
         } else if (offline) *offline = true;
+    }
+    if (!coverPath.empty()) {
+        Cand c;
+        c.source = "romm-cover";
+        c.url = coverPath;
+        c.cacheKey = "cover-" + coverPath;
+        c.thumbKey = c.cacheKey;
+        c.name = "RomM cover";
+        out.push_back(c);
     }
     aplog.info("icon cands: " + std::to_string(out.size()));
 }
@@ -337,7 +349,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
         char head[96];
         snprintf(head, sizeof(head), "%s %s  %d found  %d/%d",
                  (page == 0) ? "ICON" : "BANNER",
-                 (wantIcon && wantBanner) ? "(Y swap)" : "",
+                 (wantIcon && wantBanner) ? ((page == 0) ? "(Y: banner)" : "(Y: icon)") : "",
                  count, count ? (scroll / perPage) + 1 : 1,
                  count ? (count + perPage - 1) / perPage : 1);
         drawText(160, 8, 0, 0.55f, COL_BG, COL_TEXT, head, C2D_AlignCenter);
