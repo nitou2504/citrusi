@@ -166,7 +166,8 @@ int main()
 		
 			// Button Handling
 
-		if (kDown & KEY_START) break; // break in order to return to hbmenu
+		// START quits, except on Install-from-SD with games marked: begin the batch
+		if (kDown & KEY_START) { if (!menu->startBatch()) break; }
 
 		{
 
@@ -182,7 +183,7 @@ int main()
 
 			else if(kDown & KEY_X) menu->scrollDesc(1);
 
-			else if(kDown & KEY_Y) menu->scrollDesc(-1);
+			else if(kDown & KEY_Y) menu->toggleMark();
 
 			else if(kDown & KEY_SELECT) menu = menu->searchPrompt();
 

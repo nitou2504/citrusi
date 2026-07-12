@@ -23,7 +23,10 @@ enum MenuAction {
     OpenSDBrowser,
     EditRommConfig,
     OpenSettings,
-    SettingToggle
+    SettingToggle,
+    LocalInstall,          // "Install from SD": install one local file (.cia/.nds/.gba)
+    LocalInstallSelected,  // batch-install the Y-marked rows
+    LocalInstallAll        // batch-install every not-yet-installed row
 };
 
 enum MenuType {
@@ -33,7 +36,8 @@ enum MenuType {
     MENU_SYSTEMS,
     MENU_MANAGE,
     MENU_SETTINGS,
-    MENU_SERVER
+    MENU_SERVER,
+    MENU_LOCAL             // "Install from SD": local files from the three dirs
 };
 
 class MenuSelection {
@@ -61,6 +65,7 @@ class MenuSelection {
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;
+        bool selected=false;         // "Install from SD": Y-marked for batch install
         std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
@@ -96,6 +101,8 @@ class Menu {
         void tickBottom();
         // scroll the description panel (X/Y)
         void scrollDesc(int dir);
+        // Y: toggle the batch mark on the Install-from-SD row (else scrollDesc)
+        void toggleMark();
         // SELECT: search prompt (RomM view); returns the (possibly new) menu
         Menu* searchPrompt();
         void refreshStrings();
@@ -105,12 +112,16 @@ class Menu {
         void up();
         void pageUp();
         void action();
+        // START on the Install-from-SD screen: queue a batch of the marked
+        // rows. Returns false (nothing marked / other screen) so START quits.
+        bool startBatch();
         Menu* back();
         Menu* handleQueue(Builder* builder, C3D_RenderTarget* target=nullptr, Config* config =nullptr);
         bool hasQueue();
 
 };
 Menu* generateMenu(std::filesystem::path path, Menu* prev);
+Menu* generateLocalMenu(Menu* prev);
 Menu* generateMainMenu(Menu* prev);
 Menu* generateSystemMenu(Menu* prev);
 Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug);
