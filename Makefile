@@ -28,7 +28,7 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 
 APP_TITLE	:= romm3ds
-APP_DESCRIPTION := RomM NDS client + forwarder manager
+APP_DESCRIPTION := RomM client - 3DS, GBA & NDS installs with scraped icons & banners
 APP_AUTHOR := Nitou25
 
 TARGET		:=	$(notdir $(CURDIR))
