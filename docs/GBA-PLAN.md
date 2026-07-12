@@ -1,10 +1,10 @@
 # GBA support — design & decisions
 
-Status: **core shipped + art layer built (2026-07-11); art layer pending
-hardware test.** The on-device VC injector, save-type detection, and full GBA
-app integration work on a New 3DS XL. The icon/banner art layer
-([ART-UX-SPEC.md](ART-UX-SPEC.md)) is implemented for GBA and NDS — needs an
-on-hardware pass. Companion server is the user's existing RomM instance.
+Status: **core + art layer shipped and hardware-verified (2026-07-12).**
+The on-device VC injector, save-type detection, full GBA app integration and
+the icon/banner art layer ([ART-UX-SPEC.md](ART-UX-SPEC.md)) all work on the
+New 3DS XL. See CHANGELOG.md ("the GBA + art release") for the full feature
+and fix list. Companion server is the user's existing RomM instance.
 
 ## Progress log
 
@@ -33,7 +33,24 @@ Done (on `feat/gba`, verified on hardware):
   background-refresh perf work. Cached tid-ownership lookups fixed the GBA
   library open lag.
 
-Built, pending hardware test:
+Shipped and hardware-verified (2026-07-12) — the debugging findings that made
+it work are worth keeping:
+- **GX display transfers need width >= 64 / height >= 16** — smaller textures
+  (the picker's 48px thumbs) never complete and gspWaitForPPF() wedges the
+  transfer engine: full console freeze, Rosalina included. Pad textures.
+- **HOME caches title icons per (tid, version)** — same-TID reinstalls must
+  bump the TMD/ticket version or icon changes never appear (banners are not
+  cached this way, which made the symptom confusing).
+- **The donor template icon is solid black** (2304 x 0x0000) and the donor
+  config block ships Nintendo's dark filter: a linear 60% darken video LUT
+  (white -> 153). The config block (agb_edit layout) exposes sleepButtons
+  @0x0E, lcdGhosting @0x20 and the 768-byte LUT @0x24 — all now patched at
+  build time (screen presets + L+R+SELECT lid-close sleep).
+- **httpc is not reliable mid-art-flow** (hangs with no timeout); all art
+  fetches go over curl/soc, initialized at app boot, with the cover-prefetch
+  worker paused while the foreground owns the network.
+
+Art layer (was "built, pending hardware test"):
 - **Art layer** (icons + banners) for GBA *and* NDS — the
   [ART-UX-SPEC.md](ART-UX-SPEC.md) flow, built 2026-07-11 (untested on
   hardware). New modules: `artquery.cpp` (sanitizer/norm/confidence),

@@ -2,9 +2,66 @@
 
 All notable changes to romm3ds. Dates are the working days the changes landed.
 
-## [Unreleased]
+## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
-### Added
+### Added — GBA support (hardware-verified)
+- **GBA Virtual Console injects built on-device**: ROM baked into a native
+  AGB_FIRM title (vcoven layout), streamed install, save-type detection via
+  open_agb_firm's `gba_db.bin` (SHA1 → cart serial → version LUT; 174/174 on
+  the real library). Library browse/download for the `gba` platform, Manage
+  section, single-pass uninstall (title + ROM).
+- **GBA screen presets** (Settings → "GBA screen"): the donor config block
+  carries Nintendo's dark filter — a linear 60% darken LUT (white → 153).
+  Presets bake a replacement video LUT into each install: **AGS-101 colors**
+  (gamma 2.2→1.54, default), original dark filter, unfiltered, brighter gamma
+  (2.2→1.7), night (AGS-101 + 3400K blue-light whitepoint).
+- **Lid-close sleep combo**: injects set `sleepButtons` = L+R+SELECT, so games
+  with a built-in sleep mode (NSUI sleep-patch convention) sleep on lid close.
+- Injects carry an explicitly generated silent banner CWAV.
+
+### Added — art layer (icons + banners, GBA & NDS)
+- **Auto art on install**: SGDB icon on a strong name match (RomM metadata
+  title first, then filename) with `.ico` assets preferred (native 48px
+  frames), libretro clear-logo banner by exact No-Intro name; iiSU community
+  box art / logo as the tier above the RomM-cover fallback. One notify dialog
+  when art is missing ([Search] / [Use cover]); installs never end artless.
+- **Art picker** (install "Choose art", on-SD and Manage "Change art"):
+  bottom-screen thumb grid — SGDB icons/logos/grid capsules, libretro logo,
+  iiSU assets, RomM cover — with X refine-search and Y icon/banner page swap.
+- **art.json persistence** keyed by extension-less stem; reinstalls reuse
+  choices; `[!]` marker in Manage while fallback art is in use.
+- SteamGridDB over curl+mbedtls (TLS 1.2), key from `sgdb.env` or typed into
+  Settings; libretro/RomM/iiSU art also fetched over curl.
+
+### Changed
+- **Unified dialog copy** across 3DS/GBA/NDS: "Install this game?",
+  Install / Change art / Back, single Install/Uninstall/Art-update failure
+  phrases; forwarder/inject/cia jargon removed from primary flows.
+- **Coherent screens + busy feedback**: Manage system picker has its own
+  bottom panel (no more RomM Library text), platform-correct empty states,
+  and immediate "Uninstalling…/Downloading…/Installing…/Deleting…" status
+  before every blocking action.
+- **New brand**: pixel-cartridge icon + transparent 3DS-style banner with
+  Pixelify Sans wordmark (RomM violet palette); SMDH description covers all
+  three systems; app version 0.2 (also forces HOME to refresh the icon).
+- NDS banner chain reordered: SD assets → YANBF → SGDB logo → iiSU logo →
+  GameTDB box → notify → RomM cover → DS-icon stamp (boxes are fallbacks now).
+
+### Fixed
+- **Console freeze in the art picker**: GX display transfers need width ≥ 64 /
+  height ≥ 16 — smaller thumb textures wedged the transfer engine (even
+  Rosalina died). Textures are padded to the hardware minimum.
+- **HOME icon cache**: reinstalls now bump the TMD/ticket title version, so a
+  Change-art icon actually shows (HOME caches icons per tid+version).
+- Solid-black donor template icon replaced with a generic GBA tile.
+- Corrupt cached art (bit-flipped downloads) is purged and refetched once
+  instead of poisoning the slot forever.
+- RomM ≥ 4.9 renamed the rom-list filter to `platform_ids` — both params are
+  sent now (4.4 servers ignored the new one and returned the whole library).
+- soc/curl init moved to app boot; the cover-prefetch worker pauses while the
+  foreground fetches art (shared httpc + SD contention).
+
+### Earlier unreleased
 - Banner fallback to the ROM's own DS icon (rendered as a white "stamp") when a
   game has no YANBF asset and no GameTDB cover, instead of the plain template.
 
