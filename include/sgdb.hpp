@@ -44,6 +44,8 @@ class SgdbClient {
     bool icons(int gameId, std::vector<SgdbIcon>& out);
     // GET /logos/game/{id}?mimes=image/png (wide clear-logos, banner source)
     bool logos(int gameId, std::vector<SgdbAsset>& out);
+    // GET /grids/game/{id} in horizontal capsule sizes (banner-shaped art)
+    bool grids(int gameId, std::vector<SgdbAsset>& out);
     // fetch an icon/thumb png into memory (no auth needed for cdn)
     bool fetchImage(const std::string& url, std::string& out);
     // generic GET over curl (http or https) with an optional full header

@@ -326,6 +326,21 @@ std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int 
     return artBannerFromImage(bytes);
 }
 
+std::string artSgdbGridById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId) {
+    std::string bytes = artCacheRead("sgdb-grid-" + std::to_string(assetId));
+    if (bytes.empty()) {
+        std::vector<SgdbAsset> list;
+        if (!sgdb.grids(gameId, list)) return "";
+        for (auto& a : list)
+            if (a.id == assetId) {
+                artGetUrl(sgdb, romm, a.url, "sgdb-grid-" + std::to_string(assetId), bytes);
+                break;
+            }
+        if (bytes.empty()) return "";
+    }
+    return artBannerFromImage(bytes);
+}
+
 std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
                             const std::vector<std::string>& queries, ArtEntry& entry) {
     int gameId = artSgdbStrongMatch(sgdb, queries, &entry.query);
@@ -450,6 +465,9 @@ bool artBuildFromEntry(SgdbClient& sgdb, RommClient& romm, const std::string& fs
         if (out.bannerTex.empty()) ok = false;
     } else if (entry.bannerSource == "sgdb") {
         out.bannerTex = artSgdbLogoById(sgdb, romm, entry.sgdbGameId, entry.bannerId);
+        if (out.bannerTex.empty()) ok = false;
+    } else if (entry.bannerSource == "sgdb-grid") {
+        out.bannerTex = artSgdbGridById(sgdb, romm, entry.sgdbGameId, entry.bannerId);
         if (out.bannerTex.empty()) ok = false;
     } else if (entry.bannerSource == "romm-cover") {
         ArtPieces cov;

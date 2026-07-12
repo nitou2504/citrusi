@@ -48,6 +48,8 @@ bool artAssetIsIco(const SgdbAsset& a);
 std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
 // SGDB logo (banner source) by asset id
 std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
+// SGDB horizontal grid capsule (banner-shaped art) by asset id
+std::string artSgdbGridById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
 // auto banner tier (NDS): strong SGDB match over the query tiers -> its
 // first logo. On success fills entry.sgdbGameId/bannerSource/bannerId.
 std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,

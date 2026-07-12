@@ -145,8 +145,12 @@ bool SgdbClient::search(const std::string& query, std::vector<SgdbGame>& out) {
 bool SgdbClient::assets(const char* category, int gameId, std::vector<SgdbAsset>& out) {
     out.clear();
     // icons come unfiltered: the .ico assets often carry native 48x48/24x24
-    // frames (exactly the SMDH sizes); logos stay PNG-only
-    std::string filter = (strcmp(category, "icons") == 0) ? "" : "?mimes=image/png";
+    // frames (exactly the SMDH sizes); logos stay PNG-only; grids only in the
+    // horizontal capsule sizes (~2.14:1, near the 256x128 banner shape)
+    std::string filter = (strcmp(category, "icons") == 0) ? "" :
+                         (strcmp(category, "grids") == 0)
+                             ? "?dimensions=460x215,920x430&mimes=image/png"
+                             : "?mimes=image/png";
     std::string body;
     if (!get("https://www.steamgriddb.com/api/v2/" + std::string(category) +
              "/game/" + std::to_string(gameId) + filter, body)) return false;
@@ -175,6 +179,10 @@ bool SgdbClient::icons(int gameId, std::vector<SgdbIcon>& out) {
 
 bool SgdbClient::logos(int gameId, std::vector<SgdbAsset>& out) {
     return assets("logos", gameId, out);
+}
+
+bool SgdbClient::grids(int gameId, std::vector<SgdbAsset>& out) {
+    return assets("grids", gameId, out);
 }
 
 bool SgdbClient::fetchImage(const std::string& url, std::string& out) {

@@ -138,6 +138,21 @@ void buildBannerCands(int gameId, const std::string& fsName,
                 out.push_back(c);
             }
         } else if (offline) *offline = true;
+        // horizontal grid capsules: full art + logo, near-banner shape
+        std::vector<SgdbAsset> grids;
+        if (gSgdb.grids(gameId, grids)) {
+            for (auto& g : grids) {
+                Cand c;
+                c.source = "sgdb-grid";
+                c.id = g.id;
+                c.w = g.width; c.h = g.height;
+                c.url = g.url;
+                c.thumbUrl = g.thumbUrl;
+                c.cacheKey = "sgdb-grid-" + std::to_string(g.id);
+                c.thumbKey = "sgdb-grid-th-" + std::to_string(g.id);
+                out.push_back(c);
+            }
+        }
     }
     if (!coverPath.empty()) {
         Cand c;
@@ -372,6 +387,8 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
             if (c.source == "sgdb" && c.url.size() > 4 &&
                 c.url.compare(c.url.size() - 4, 4, ".ico") == 0)
                 snprintf(info, sizeof(info), "SteamGridDB  ico (native sizes)");
+            else if (c.source == "sgdb-grid")
+                snprintf(info, sizeof(info), "SteamGridDB grid  %dx%d", c.w, c.h);
             else if (c.source == "sgdb" && c.w)
                 snprintf(info, sizeof(info), "SteamGridDB  %dx%d", c.w, c.h);
             else if (c.source == "libretro")
