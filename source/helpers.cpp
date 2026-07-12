@@ -5,6 +5,7 @@
 #include <cstring>
 #include <algorithm>
 #include "helpers.hpp"
+#include "logger.hpp"
 #include <sys/stat.h>
 
 std::string sha256(u8* data, u32 size) 
@@ -123,15 +124,18 @@ std::string toLowerCase(std::string s) {
     return ret;
 }
 std::string readEntireFile(const std::string& path) {
+  // a failed open used to fall straight into fseek(NULL) -> data abort
   FILE * f = fopen(path.c_str(),"rb");
+  if (!f) {
+    Logger("file").error("open failed: " + path);
+    return "";
+  }
   fseek(f,0,SEEK_END);
   size_t s = ftell(f);
   fseek(f,0,SEEK_SET);
-  char *buf=(char*)calloc(1,s);
-  fread(buf,1,s,f);
+  std::string ret(s, '\0');
+  if (s && fread(&ret[0],1,s,f) != s) ret.clear();
   fclose(f);
-  std::string ret(buf,s);
-  free(buf);
   return ret;
 }
 

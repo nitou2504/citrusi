@@ -28,6 +28,20 @@ static inline void wr64be(std::string& b, u32 o, u64 v) {
 static inline u32 align40(u32 v) { return (v + 0x3F) & ~0x3F; }
 static inline u32 align200(u32 v) { return (v + 0x1FF) & ~0x1FF; }
 
+// GBA template pieces, read from romfs once at init — re-reading them per
+// build meant a romfs open could fail mid-batch (and used to crash)
+static std::string tplNcch, tplExh, tplIcn, tplLogo, tplRfs, tplCfg, tplBnr;
+static void loadGbaTemplates() {
+    if (!tplNcch.empty()) return;
+    tplNcch = readEntireFile(GBA_TPL_DIR + "ncchheader.bin");
+    tplExh  = readEntireFile(GBA_TPL_DIR + "exheader.bin");
+    tplIcn  = readEntireFile(GBA_TPL_DIR + "icon.icn");
+    tplLogo = readEntireFile(GBA_TPL_DIR + "logo.darc.lz");
+    tplRfs  = readEntireFile(GBA_TPL_DIR + "romfs.bin");
+    tplCfg  = readEntireFile(GBA_TPL_DIR + "config_block.bin");
+    tplBnr  = readEntireFile(GBA_TPL_DIR + "template.bnr");
+}
+
 ReturnResult* CtrBuilder::initialize() {
     if (!fileExists(CTR_TEMPLATE_PATH))
         return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_NDS_NOT_FOUND, "ctr template missing");
@@ -35,6 +49,7 @@ ReturnResult* CtrBuilder::initialize() {
     if (!parseTemplate())
         return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "ctr template parse failed");
     std::filesystem::create_directories(std::filesystem::path(CTR_CONFIG_DIR));
+    loadGbaTemplates();
     return new ReturnResult(ERROR_SUCCESS, "");
 }
 
@@ -579,14 +594,10 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
                                       std::function<bool(u64,u64)> progress) {
     if (!parsed) return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "template not loaded");
 
-    // --- template pieces (small, from romfs)
-    std::string ncch  = readEntireFile(GBA_TPL_DIR + "ncchheader.bin");
-    std::string exh   = readEntireFile(GBA_TPL_DIR + "exheader.bin");
-    std::string icn   = readEntireFile(GBA_TPL_DIR + "icon.icn");
-    std::string logo  = readEntireFile(GBA_TPL_DIR + "logo.darc.lz");
-    std::string rfs   = readEntireFile(GBA_TPL_DIR + "romfs.bin");
-    std::string cfg   = readEntireFile(GBA_TPL_DIR + "config_block.bin");
-    std::string bnrT  = readEntireFile(GBA_TPL_DIR + "template.bnr");
+    // --- template pieces (cached at init; see loadGbaTemplates)
+    loadGbaTemplates();
+    std::string ncch = tplNcch, exh = tplExh, icn = tplIcn;
+    std::string logo = tplLogo, rfs = tplRfs, cfg = tplCfg, bnrT = tplBnr;
     if (ncch.size() != 0x200 || exh.size() != 0x800 || cfg.size() != 0x324 ||
         icn.size() < 0x36C0 || logo.empty() || rfs.empty() || bnrT.empty())
         return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "gba template missing/bad");

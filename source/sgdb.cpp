@@ -99,6 +99,9 @@ bool SgdbClient::get(const std::string& url, std::string& out, const std::string
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 5L);
     curl_easy_setopt(c, CURLOPT_TIMEOUT, 12L);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    // the art phase touches 5+ hosts; curl's default cache would keep a socket
+    // (an fd) open for each, starving later romfs/SD opens
+    curl_easy_setopt(c, CURLOPT_MAXCONNECTS, 2L);
     // matches the app's httpc SSLCOPT_DisableVerify posture; pinned roots TODO
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
