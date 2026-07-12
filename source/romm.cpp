@@ -201,8 +201,11 @@ int RommClient::findPlatform(const std::string& slug) {
 
 bool RommClient::listRoms(int platformId, std::vector<RommRom>& out, const std::string& slug) {
     out.clear();
-    char q[128];
-    snprintf(q, sizeof(q), "/api/roms?platform_id=%d&limit=10000&with_char_index=false", platformId);
+    char q[160];
+    // RomM >= 4.9 renamed the filter to platform_ids; both are sent — each
+    // server version ignores the param it doesn't know
+    snprintf(q, sizeof(q), "/api/roms?platform_ids=%d&platform_id=%d&limit=10000&with_char_index=false",
+             platformId, platformId);
     std::string body;
     if (R_FAILED(get(this->host + q, body))) return false;
     try {
