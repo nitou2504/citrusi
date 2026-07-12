@@ -37,8 +37,15 @@ Notes:
   404s) — never queried for NDS.
 - RomM provides **covers only** (600×900 portrait, by rom id — immune to bad
   file names; library has ~full coverage). RomM has no icons or banners.
-- Transports: RomM + libretro + GameTDB over existing `httpc` (plain HTTP);
-  SGDB over the new curl+mbedtls client (TLS 1.2, see GBA-PLAN).
+- Transports — **revised 2026-07-11 (hardware)**: ALL art fetches (SGDB,
+  libretro, RomM covers, picker thumbs) go over the curl+soc client; RomM
+  server paths get host + Basic auth added. The original plan (RomM/libretro
+  /GameTDB over `httpc`) hung on hardware: httpc requests issued mid-art-flow
+  stalled forever (no timeout in `RommClient::get`) while curl kept working —
+  one hang even froze the console before soc init moved to app boot. `httpc`
+  remains only for the proven paths: game downloads and the cover-prefetch
+  worker (paused while art resolves). NDS `fetchBoxart` (assets/YANBF/GameTDB)
+  still uses httpc — untested risk, same flow.
 
 ## 3. Name handling
 
