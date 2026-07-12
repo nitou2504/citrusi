@@ -43,13 +43,13 @@
 
     "menu_installAll":"< Install All nds >",
     "menu_tooManyDSiWare":"Too many DSiWare installed",
-    "menu_installTitleQ":"Do you wish to install",
+    "menu_installTitleQ":"Install this game?",
     "menu_customTitleQ":"Enter a Custom Title Name",
-    "menu_installComplete":"Install Complete",
-    "menu_installFailed":"Install Failed",
+    "menu_installComplete":"Installed!",
+    "menu_installFailed":"Install failed",
     "menu_allForwarders":"forwarders for all nds in:",
     "menu_noTemplate":"Failed to load template",
-    "menu_installing":"Installing",
+    "menu_installing":"Installing...",
 
     "dialog_checkLog":"Check the log for errors",
 

@@ -118,7 +118,7 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
     }
     if (boxart.empty()) {
         // Dialog word-wraps each message line — pass full titles, no shorten()
-        Dialog(target,0,0,320,240,{"Fetching box art...",title},{},0).handle();
+        Dialog(target,0,0,320,240,{"Preparing art...",title},{},0).handle();
         boxart = fetchBoxart(gRomm, romPath, coverPath);
     }
     if (boxart.empty()) {                          // SGDB logo tier (auto, strong only)
@@ -140,7 +140,7 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
         ArtEntry ne;
         std::vector<std::string> qs = artQueriesFor(romBase, title);
         ne.query = qs.empty() ? artSanitizeQuery(romBase) : qs[0];
-        const char* coverBtn = coverPath.empty() ? "Use DS icon" : "Use RomM cover";
+        const char* coverBtn = coverPath.empty() ? "Use DS icon" : "Use cover";
         for (;;) {
             int c = Dialog(target,0,0,320,240,{"Art not found:","banner: not found for \""+ne.query+"\""},{"Search",coverBtn}).handle();
             if (c != 0) break;
@@ -183,13 +183,13 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
     Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),title},{},0).handle();
     u64 ctid = gCtr.allocateTID(romBase);
     if (ctid == 0) {
-        Dialog(target,0,0,320,240,{"No free forwarder title IDs"},{"OK"}).handle();
+        Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle();
         return false;
     }
     ReturnResult* r = gCtr.buildCIA(romPath, title, ctid, boxart, gameCwav);
     bool ok = r->isSuccess();
     if (!ok)
-        Dialog(target,0,0,320,240,{"Forwarder install failed",r->message,gLang.parseString("format_hex",(u32)r->code)},{"OK"}).handle();
+        Dialog(target,0,0,320,240,{"Install failed",r->message,gLang.parseString("format_hex",(u32)r->code)},{"OK"}).handle();
     else if (persist)
         artStorePut(romBase, ae);
     delete r;
@@ -255,7 +255,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
     bool iconMiss = piecesOut.icon48.empty();
     bool bannerMiss = piecesOut.bannerTex.empty();
     if ((iconMiss || bannerMiss) && config->artNotify && !forcePicker) {
-        const char* coverBtn = coverPath.empty() ? "Use plain tile" : "Use RomM cover";
+        const char* coverBtn = coverPath.empty() ? "Use tile" : "Use cover";
         for (;;) {
             std::string q = entryOut.query;
             int c;
@@ -636,7 +636,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 drawText(cx, iy, 0.56f, 0.42f, COL_SURFACE, COL_TEXT_DIM, line, C2D_AlignCenter);
                 if (sel->display.size() && sel->display[0] == '*')
                     drawText(cx, iy + 13, 0.56f, 0.42f, COL_SURFACE, COL_ACCENT,
-                             (this->type == MENU_MANAGE) ? "forwarder" : "on SD", C2D_AlignCenter);
+                             (this->type == MENU_MANAGE) ? "installed" : "on SD", C2D_AlignCenter);
             }
     }
     // ---- bottom-screen details panel ------------------------------------
@@ -792,7 +792,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (sel->year > 0) { snprintf(chip, sizeof(chip), "%d", sel->year); cxp = drawChip(cxp, y, chip, COL_TEXT_DIM); }
             cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
             if (sel->rating > 0) { snprintf(chip, sizeof(chip), "%.0f/100", sel->rating); cxp = drawChip(cxp, y, chip, COL_TEXT_DIM); }
-            if (onSD) drawChip(cxp, y, is3ds ? "INSTALLED" : "FORWARDER", COL_ACCENT);
+            if (onSD) drawChip(cxp, y, "INSTALLED", COL_ACCENT);
             y += CHIP_H + 6;
             y = cardDivider(y);
             // genres: 4px pad, dwell then scroll after ~3s
@@ -848,7 +848,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
                 if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
                 if (!sel->rtid && !sel->installed && !sel->ytid)
-                    drawChip(cxp, y, sel->fwdCia.empty() ? "no forwarder detected" : "fwd cia on SD", COL_TEXT_DIM);
+                    drawChip(cxp, y, sel->fwdCia.empty() ? "not installed" : ".cia on SD", COL_TEXT_DIM);
             }
             y += 21;
             y = cardDivider(y) + 5;
@@ -857,7 +857,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (m3ds) {
                 snprintf(tid, sizeof(tid), "title  %016llX", (unsigned long long)sel->tid);
                 drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
-                drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed 3DS title. Press A to uninstall.", 2);
+                drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
                 return;
             }
             if (sel->rtid) {
@@ -875,16 +875,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (!sel->rtid && !sel->installed && !sel->ytid)
                 drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM,
                             sel->fwdCia.empty()
-                                ? "No forwarder detected — rom is on the SD card. Press A to install one."
-                                : "No forwarder installed, but its .cia is on the SD card. Press A to install it.", 3);
+                                ? "Not installed — the ROM is on your SD card. Press A to install."
+                                : "Not installed — a ready .cia is on your SD card. Press A to install.", 3);
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
             drawBottomFrame("A Change    B Back    START Quit");
             static const char* descs[] = {
-                "Give each forwarder a random title ID. Useful for rom hacks that share a game code.",
+                "Give each install a random title ID. Useful for rom hacks that share a game code.",
                 "Ask for a custom HOME menu name on every install.",
-                "Overwrite existing forwarders without asking first.",
+                "Overwrite existing installs without asking first.",
                 "", // language (removed)
                 "DSiWare template used by SD card installs.",
                 "RomM server address and account used by the library."
@@ -922,14 +922,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         } else if (this->type == MENU_SYSTEMS) {
             drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT, "RomM Library", C2D_AlignCenter);
             drawWrapped(48, 108, 224, 14, 0.45f, COL_TEXT_DIM,
-                        "Pick a system to browse. NDS installs a forwarder; 3DS installs the .cia. "
-                        "Search all systems searches across both.", 4);
+                        "Pick a system to browse and install games. "
+                        "Search all systems looks across all three.", 4);
             if (!gRomm.host.empty())
                 drawText(160, 172, 0.5f, 0.42f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
         } else {
             drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT, "SD card install", C2D_AlignCenter);
             drawWrapped(48, 108, 224, 14, 0.45f, COL_TEXT_DIM,
-                        "Pick a .nds file to build its forwarder. Install options live in Settings.", 3);
+                        "Pick a .nds file to install it. Options live in Settings.", 3);
         }
     }
 
@@ -1655,7 +1655,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     if (entry.platformSlug.empty())          // main entry -> system pick
                         return generateManageSystemMenu(this);
-                    showLoading(target, {std::string("Scanning ")+(entry.platformSlug==ROMM_SLUG_3DS?"3DS":"NDS")+" titles..."});
+                    showLoading(target, {std::string("Scanning ")+(entry.platformSlug==ROMM_SLUG_3DS?"3DS":entry.platformSlug==ROMM_SLUG_GBA?"GBA":"NDS")+" titles..."});
                     return generateManageMenu(this,config->dsiwareCount,entry.platformSlug);
                 case EditRommConfig:
                     gRomm.loadConfig();
@@ -1758,21 +1758,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool needDownload = true;
                     bool pickArt = false;    // "+ Art"/"Change art": picker before the (re)install
                     if (onSD && is3ds) {
-                        int c = Dialog(target,0,0,320,240,{"Already downloaded:",entry.fsName},{"Install","Redownload","Cancel"}).handle();
+                        int c = Dialog(target,0,0,320,240,{"Already downloaded:",entry.fsName},{"Install","Redownload","Back"}).handle();
                         if (c==2 || c==-1) break;
                         needDownload = (c==1);
                     } else if (onSD) {
-                        int c = Dialog(target,0,0,320,240,{"Already on SD:",entry.fsName},{isNds?"Install fwd":"Install","Change art","Back"}).handle();
+                        int c = Dialog(target,0,0,320,240,{"Already on SD:",entry.fsName},{"Install","Change art","Back"}).handle();
                         if (c==2 || c==-1) break;
                         pickArt = (c==1);
                         needDownload = false;
                     } else if (isGba) {
-                        int c = Dialog(target,0,0,320,240,{"Download for GBA inject?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),"+ Art",gLang.getString("menu_no")}).handle();
+                        int c = Dialog(target,0,0,320,240,{"Install this game?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),"Choose art",gLang.getString("menu_no")}).handle();
                         if (c==2 || c==-1) break;
                         pickArt = (c==1);
                     } else {
-                        const char* q = is3ds ? "Download + install?" :
-                                                "Download + install forwarder?";
+                        const char* q = "Install this game?";
                         if (Dialog(target,0,0,320,240,{q,entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
                     }
@@ -1869,10 +1868,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string romBase = std::filesystem::path(romPath).filename().generic_string();
                         u64 gtid = gCtr.allocateGbaTID(romBase);
                         if (gtid == 0) {
-                            Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle();
                             break;
                         }
-                        Dialog(target,0,0,320,240,{"Building inject...",entry.title},{},0).handle();
+                        Dialog(target,0,0,320,240,{"Installing...",entry.title},{},0).handle();
                         u64 lastG = 0;
                         ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid,
                                                             gbaArt.icon48, gbaArt.bannerTex,
@@ -1889,7 +1888,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (installed)
                             artStorePut(entry.fsName, gbaArtEntry);
                         else
-                            Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
                         delete gr;
                     } else {
                         installed = buildForwarderFor(target, config, romPath, entry.title, entry.coverPath, pickArt);
@@ -1907,7 +1906,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 case ManageRom: {
                     if (entry.platformSlug == ROMM_SLUG_3DS) {   // installed 3DS title -> uninstall
                         std::string n3 = entry.title;
-                        if (Dialog(target,0,0,320,240,{n3,"Installed 3DS title"},{"Uninstall","Back"}).handle()!=0) break;
+                        if (Dialog(target,0,0,320,240,{n3,"Installed"},{"Uninstall","Back"}).handle()!=0) break;
                         if (Dialog(target,0,0,320,240,{"Uninstall game?",n3},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                         Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
                         AM_DeleteTicket(entry.tid);
@@ -1922,7 +1921,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (entry.installed) {
                             std::string romBase = entry.path.filename().generic_string();
                             bool weakArt = artStoreGet(romBase).weak;
-                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"GBA inject installed - fallback art":"GBA inject installed"},{"Change art","Uninstall","Back"}).handle();
+                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"Installed - using fallback art":"Installed"},{"Change art","Uninstall","Back"}).handle();
                             if (c==0) {
                                 // rebuild in place: same TID keeps the HOME
                                 // position and save data, only the art changes
@@ -1933,8 +1932,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                                          entry.coverPath, ae, pieces, true);
                                 if (pieces.icon48.empty() && pieces.bannerTex.empty()) break;
                                 u64 gtid = gCtr.allocateGbaTID(romBase);
-                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle(); break; }
-                                Dialog(target,0,0,320,240,{"Rebuilding inject...",ng},{},0).handle();
+                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); break; }
+                                Dialog(target,0,0,320,240,{"Updating art...",ng},{},0).handle();
                                 u64 lastG = 0;
                                 ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
                                                                     pieces.icon48, pieces.bannerTex,
@@ -1950,7 +1949,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 if (gr->isSuccess()) {
                                     artStorePut(romBase, ae);
                                     Dialog(target,0,0,320,240,{"Art updated!",ng},{"OK"}).handle();
-                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Rebuild failed",gr->message},{"OK"}).handle();
+                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Art update failed",gr->message},{"OK"}).handle();
                                 delete gr;
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
@@ -1969,17 +1968,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Uninstalled.",ng},{"OK"}).handle();
                             }
                         } else {
-                            int c = Dialog(target,0,0,320,240,{ng,"No inject installed."},{"Install inject","Delete ROM","Back"}).handle();
+                            int c = Dialog(target,0,0,320,240,{ng,"Not installed."},{"Install","Delete ROM","Back"}).handle();
                             if (c==0) {
                                 if (!ensureCtrBuilder(target)) break;
                                 std::string romBase = entry.path.filename().generic_string();
                                 u64 gtid = gCtr.allocateGbaTID(romBase);
-                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free GBA title IDs"},{"OK"}).handle(); break; }
+                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); break; }
                                 ArtEntry gbaArtEntry;
                                 ArtPieces gbaArt;
                                 resolveGbaArtInteractive(target, config, romBase, ng,
                                                          entry.coverPath, gbaArtEntry, gbaArt);
-                                Dialog(target,0,0,320,240,{"Building inject...",ng},{},0).handle();
+                                Dialog(target,0,0,320,240,{"Installing...",ng},{},0).handle();
                                 u64 lastG = 0;
                                 ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
                                                                     gbaArt.icon48, gbaArt.bannerTex,
@@ -1995,7 +1994,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 if (gr->isSuccess()) {
                                     artStorePut(romBase, gbaArtEntry);
                                     Dialog(target,0,0,320,240,{"Installed!",ng},{"OK"}).handle();
-                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message},{"OK"}).handle();
+                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message},{"OK"}).handle();
                                 delete gr;
                             } else if (c==1) {
                                 if (Dialog(target,0,0,320,240,{"Delete ROM file?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
@@ -2012,9 +2011,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (!hasFwd) {
                         if (!entry.fwdCia.empty()) {
                             // an uninstalled forwarder .cia exists on SD: offer to install it directly
-                            int c = Dialog(target,0,0,320,240,{name,"No forwarder detected.","Forwarder .cia found on SD."},{"Install cia","Build FWD","Delete ROM","Back"}).handle();
+                            int c = Dialog(target,0,0,320,240,{name,"Not installed.","A ready .cia is on your SD."},{"Install","Rebuild","Delete ROM","Back"}).handle();
                             if (c==0) {
-                                showLoading(target, {"Installing forwarder..."});
+                                showLoading(target, {"Installing..."});
                                 std::string ierr;
                                 bool ok = installCiaFromFile(entry.fwdCia, ierr, true, nullptr);
                                 if (!ok) {
@@ -2043,7 +2042,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         // no forwarder yet: offer to build one
                         int c = entry.fwdCia.empty()
-                            ? Dialog(target,0,0,320,240,{name,"No forwarder detected."},{"Install FWD","Delete ROM","Back"}).handle()
+                            ? Dialog(target,0,0,320,240,{name,"Not installed."},{"Install","Delete ROM","Back"}).handle()
                             : 0;
                         if (c==0) {
                             if (config->dsiwareCount >= MAX_DSIWARE) {
@@ -2068,11 +2067,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         break;
                     }
-                    std::string fwdState = "fwd:";
-                    if (entry.rtid) fwdState += " romm3ds";
-                    if (entry.installed) fwdState += " TWL";
-                    if (entry.ytid) fwdState += " YANBF";
-                    if (artStoreGet(name).weak) fwdState += " - fallback art";
+                    std::string fwdState = "Installed";
+                    if (artStoreGet(name).weak) fwdState += " - using fallback art";
                     // Change art only for our own forwarders (romm3ds TID range)
                     if (entry.rtid) {
                         int c = Dialog(target,0,0,320,240,{name,fwdState},{"Change art","Uninstall","Back"}).handle();
@@ -2094,13 +2090,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             ae.weak = false;
                             Dialog(target,0,0,320,240,{"Fetching sound...",entry.title},{},0).handle();
                             std::string gameCwav = fetchGameSound(gRomm, entry.path.generic_string());
-                            Dialog(target,0,0,320,240,{"Rebuilding forwarder...",entry.title},{},0).handle();
+                            Dialog(target,0,0,320,240,{"Updating art...",entry.title},{},0).handle();
                             ReturnResult* r = gCtr.buildCIA(entry.path.generic_string(), entry.title,
                                                             entry.rtid, pieces.bannerTex, gameCwav);
                             if (r->isSuccess()) {
                                 artStorePut(name, ae);
                                 Dialog(target,0,0,320,240,{"Art updated!",entry.title},{"OK"}).handle();
-                            } else Dialog(target,0,0,320,240,{"Rebuild failed",r->message},{"OK"}).handle();
+                            } else Dialog(target,0,0,320,240,{"Art update failed",r->message},{"OK"}).handle();
                             delete r;
                             while (this->queue.size() > 0) this->queue.pop();
                             gFwdReady = false; invalidateYanbfCache();
@@ -2119,7 +2115,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool err=false;
                     if (delFwd && entry.installed && entry.tid!=0) {
                         if (R_FAILED(deleteForwarder(entry.tid))) {
-                            Dialog(target,0,0,320,240,{"Failed to delete TWL forwarder"},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{"Uninstall failed"},{"OK"}).handle();
                             err=true;
                         } else if (config->dsiwareCount>0) {
                             config->dsiwareCount--;
@@ -2127,25 +2123,25 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     if (delFwd && entry.ytid!=0) {
                         if (R_FAILED(deleteYanbfForwarder(entry.ytid))) {
-                            Dialog(target,0,0,320,240,{"Failed to delete YANBF forwarder"},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{"Uninstall failed"},{"OK"}).handle();
                             err=true;
                         }
                     }
                     if (delFwd && entry.rtid!=0) {
                         if (R_FAILED(deleteRommCtrForwarder(entry.rtid))) {
-                            Dialog(target,0,0,320,240,{"Failed to delete romm3ds forwarder"},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{"Uninstall failed"},{"OK"}).handle();
                             err=true;
                         }
                     }
                     if (delRom && !err) {
                         std::error_code ec;
                         if (!std::filesystem::remove(entry.path, ec)) {
-                            Dialog(target,0,0,320,240,{"Failed to delete ROM file"},{"OK"}).handle();
+                            Dialog(target,0,0,320,240,{"Uninstall failed"},{"OK"}).handle();
                             err=true;
                         }
                     }
                     if (!err)
-                        Dialog(target,0,0,320,240,{"Deleted.",name},{"OK"}).handle();
+                        Dialog(target,0,0,320,240,{"Uninstalled.",name},{"OK"}).handle();
                     while (this->queue.size() > 0) this->queue.pop();
                     gFwdReady = false; invalidateYanbfCache();
                     showLoading(target, {"Refreshing..."});
