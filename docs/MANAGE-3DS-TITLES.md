@@ -49,3 +49,24 @@ cache. Fits the PERF-PLAN "cached-first + background refresh" pattern.
 
 The same SMDH name source enables the install-detection fallback described
 in 3DS-INSTALL-DETECTION.md (mark region variants as installed by name).
+
+---
+
+## Implementation plan (agent-researched, 2026-07-12 — ready to build)
+
+Verified foundations: FBI-style SMDH name reads work via FSUSER_OpenFileDirectly
+(archive 0x2345678A, filePath {0,0,2,'icon',0}; English short title at 0x208);
+AM_GetTitleInfo batch-fills sizes/versions; our UID ranges classify ours
+(YANBF 0xFF400+, fwd 0xFF800+, GBA 0xFFC00+, app itself 0xFF3FF = protected).
+
+Steps (see conversation log / agent report for full detail):
+1. New module installedtitles.{hpp,cpp}: enumerate SD apps, classify TitleKind,
+   SMDH name reader with smdhnames.json cache keyed tid|version, StorageTally.
+2. Manage->3DS lists ALL apps (merge RomM matches for covers/names).
+3. First pass behind "Reading titles..." loading (cache makes later passes instant).
+4. Uninstall any title + protection (self/system) + optional update/DLC cleanup.
+5. Storage breakdown on the Manage system-picker bottom panel (per-system bytes
+   + SD free, humanSize).
+6. Sort by size desc (default) with A-Z toggle.
+Effort ~12-17h. Pitfalls documented: no-SMDH titles, media types, DSiWare has
+banners not SMDH, orphaned updates/DLC, cover-worker SD contention (pause it).
