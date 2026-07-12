@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <fstream>
 #include <filesystem>
 #include <map>
@@ -574,6 +575,7 @@ static std::string gbaCodeTail(const std::string& cfgTpl, u32 romSize, u8 saveTy
 ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::string& title,
                                       u64 tid, const std::string& icon48,
                                       const std::string& bannerTex,
+                                      int screenMode,
                                       std::function<bool(u64,u64)> progress) {
     if (!parsed) return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "template not loaded");
 
@@ -603,6 +605,27 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     if (romSize < 0xC0 || romSize > 32*1024*1024)
         return new ReturnResult(ERROR_PATH, "bad rom size");
     std::string productCode = std::string("CTR-N-") + gamecode;
+
+    // --- config block tweaks (agb_edit layout: sleepButtons @0x0E,
+    // videoLUT @0x24 = 256 RGB triplets)
+    {
+        // lid-close button combo L+R+SELECT — activates the built-in sleep of
+        // games that have one (NSUI sleep-patch default); harmless otherwise
+        u16 sleepBtns = (1 << 9) | (1 << 8) | (1 << 2);
+        memcpy(&cfg[0x0E], &sleepBtns, 2);
+        if (screenMode == GBA_SCREEN_GAMMA) {
+            // AGS-101 look (open_agb_firm/agb_edit preset): gamma 2.2 -> 1.54.
+            // White stays 255; the template's flat 60% darken crushed it to 153.
+            for (int i = 0; i < 256; i++) {
+                u8 v = (u8)(255.0 * pow(i / 255.0, 2.2 / 1.54) + 0.5);
+                cfg[0x24 + i*3] = cfg[0x24 + i*3 + 1] = cfg[0x24 + i*3 + 2] = v;
+            }
+        } else if (screenMode == GBA_SCREEN_RAW) {
+            for (int i = 0; i < 256; i++)   // identity: no filter at all
+                cfg[0x24 + i*3] = cfg[0x24 + i*3 + 1] = cfg[0x24 + i*3 + 2] = (u8)i;
+        }
+        // GBA_SCREEN_ORIGINAL keeps the donor's dark filter untouched
+    }
 
     // --- pass 1: SHA1 (for the save DB) + signature scan in one read
     ctrLogger.info("gba: scan+sha1 pass, rom " + std::to_string(romSize));

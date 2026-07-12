@@ -53,6 +53,7 @@ static Logger rlog("romm");
 #define SETTING_SHOW_3DS 7
 #define SETTING_ART_NOTIFY 8
 #define SETTING_SGDB_KEY 9
+#define SETTING_GBA_SCREEN 14
 
 static CtrBuilder gCtr;
 static bool gCtrReady = false;
@@ -909,6 +910,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (id >= 0 && id <= 5) d = descs[id];
                 else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key (saved to sd:/3ds/romm3ds/sgdb.env) or re-read the file.";
+                else if (id == SETTING_GBA_SCREEN) d = "Color filter baked into new GBA installs. AGS-101 = gamma-corrected and bright (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed colors. Reinstall or Change art to apply to a game.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -1062,6 +1064,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         add(SETTING_SHOW_3DS,     std::string("Show 3DS .3ds (non-installable): ") + (config->show3dsRoms ? "on" : "off"));
         add(SETTING_ART_NOTIFY,   std::string("Art: ") + (config->artNotify ? "notify when missing" : "silent fallback"));
         add(SETTING_SGDB_KEY,     std::string("SteamGridDB key: ") + (ensureSgdb() ? "found" : "missing"));
+        static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered"};
+        add(SETTING_GBA_SCREEN,   std::string("GBA screen: ") + gbaScreenNames[config->gbaScreen % 3]);
         if (config->templates.size() > 1)
             add(SETTING_TEMPLATE, "Template: " + config->templates.at(config->currentTemplate));
         gRomm.loadConfig();
@@ -1702,6 +1706,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
                         case SETTING_SHOW_3DS:     config->show3dsRoms = !config->show3dsRoms; break;
                         case SETTING_ART_NOTIFY:   config->artNotify = !config->artNotify; break;
+                        case SETTING_GBA_SCREEN:   config->gbaScreen = (config->gbaScreen + 1) % 3; break;
                         case SETTING_SGDB_KEY: {
                             gSgdbKeyTried = false;   // re-read sgdb.env on demand
                             int c;
@@ -1883,6 +1888,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         u64 lastG = 0;
                         ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid,
                                                             gbaArt.icon48, gbaArt.bannerTex,
+                                                            config->gbaScreen,
                             [&](u64 done, u64 total) -> bool {
                                 hidScanInput();
                                 if (hidKeysDown() & KEY_B) return false;
@@ -1946,6 +1952,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 u64 lastG = 0;
                                 ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
                                                                     pieces.icon48, pieces.bannerTex,
+                                                                    config->gbaScreen,
                                     [&](u64 done, u64 total) -> bool {
                                         hidScanInput();
                                         if (hidKeysDown() & KEY_B) return false;
@@ -1992,6 +1999,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 u64 lastG = 0;
                                 ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
                                                                     gbaArt.icon48, gbaArt.bannerTex,
+                                                                    config->gbaScreen,
                                     [&](u64 done, u64 total) -> bool {
                                         hidScanInput();
                                         if (hidKeysDown() & KEY_B) return false;

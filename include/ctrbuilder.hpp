@@ -13,6 +13,12 @@
 #define GBA_UID_BASE  0xFFC00
 #define GBA_UID_COUNT 0x400
 #define GBA_TPL_DIR   std::string("romfs:/gba/")
+// GBA video LUT (the config block's "dark filter"):
+// GAMMA = AGS-101 gamma correction 2.2->1.54 (bright, corrected colors)
+// ORIGINAL = donor's linear 60% darken; RAW = no filter (washed but brightest)
+#define GBA_SCREEN_GAMMA    0
+#define GBA_SCREEN_ORIGINAL 1
+#define GBA_SCREEN_RAW      2
 
 class CtrBuilder {
     private:
@@ -48,10 +54,12 @@ class CtrBuilder {
     // Streams the ROM from SD — never holds the whole CIA in RAM (32 MB max).
     // icon48: 48*48*2 linear RGB565 ("" = keep template icon art)
     // bannerTex: 0x10000-byte 256x128 RGBA4444 ("" = keep template banner art)
+    // screenMode: GBA_SCREEN_* video LUT choice (see below)
     // progress(done,total) over installed bytes; return false to cancel.
     ReturnResult* buildGbaCIA(const std::string& romPath, const std::string& title,
                               u64 tid, const std::string& icon48,
                               const std::string& bannerTex,
+                              int screenMode = 0,
                               std::function<bool(u64,u64)> progress = nullptr);
 };
 
