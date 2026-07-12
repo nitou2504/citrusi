@@ -105,13 +105,13 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
     }
     if (boxart.empty()) {                          // SGDB logo tier (auto, strong only)
         ArtEntry ne;
-        ne.query = artSanitizeQuery(romBase);
-        boxart = artSgdbLogoAuto(gSgdb, gRomm, ne.query, ne);
+        boxart = artSgdbLogoAuto(gSgdb, gRomm, artQueriesFor(romBase, title), ne);
         if (!boxart.empty()) { ae = ne; persist = true; }
     }
     if (boxart.empty() && config && config->artNotify) {   // S2, banner line only
         ArtEntry ne;
-        ne.query = artSanitizeQuery(romBase);
+        std::vector<std::string> qs = artQueriesFor(romBase, title);
+        ne.query = qs.empty() ? artSanitizeQuery(romBase) : qs[0];
         const char* coverBtn = coverPath.empty() ? "Use DS icon" : "Use RomM cover";
         for (;;) {
             int c = Dialog(target,0,0,320,240,{"Art not found:","banner: not found for \""+ne.query+"\""},{"Search",coverBtn}).handle();
@@ -207,7 +207,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
         return;
     }
     showLoading(target, {"Looking up art...", title});
-    artResolveGba(gSgdb, gRomm, fsName, entryOut, piecesOut);
+    artResolveGba(gSgdb, gRomm, fsName, title, entryOut, piecesOut);
     if (forcePicker) {
         artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
                      entryOut, piecesOut, true, true);
@@ -2037,7 +2037,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (!ensureCtrBuilder(target)) break;
                             ensureSgdb();
                             ArtEntry ae = artStoreGet(name);
-                            if (ae.query.empty()) ae.query = artSanitizeQuery(name);
+                            if (ae.query.empty()) {
+                                std::vector<std::string> qs = artQueriesFor(name, entry.title);
+                                ae.query = qs.empty() ? artSanitizeQuery(name) : qs[0];
+                            }
                             ArtPieces pieces;
                             bool bCh = false;
                             artPickerRun(target, name, entry.title, entry.coverPath, ROMM_SLUG_NDS,

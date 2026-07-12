@@ -44,10 +44,18 @@ std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pic
 std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
 // SGDB logo (banner source) by asset id
 std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
-// auto banner tier (NDS): strong SGDB match for query -> its first logo.
-// On success fills entry.sgdbGameId/bannerSource/bannerId.
+// auto banner tier (NDS): strong SGDB match over the query tiers -> its
+// first logo. On success fills entry.sgdbGameId/bannerSource/bannerId.
 std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
-                            const std::string& query, ArtEntry& entry);
+                            const std::vector<std::string>& queries, ArtEntry& entry);
+
+// SGDB query tiers: RomM metadata title (IGDB match by rom id — survives bad
+// file names) first, then the sanitized file name
+std::vector<std::string> artQueriesFor(const std::string& fsName, const std::string& title);
+// try the queries in order; game id on a strong match, 0 otherwise.
+// *usedQuery = the query that hit (or queries[0] as the S3 prefill).
+int artSgdbStrongMatch(SgdbClient& sgdb, const std::vector<std::string>& queries,
+                       std::string* usedQuery);
 
 // RomM box cover (server path, by rom id — immune to bad file names) ->
 // requested pieces. Fills only the requested members of out.
@@ -56,12 +64,13 @@ bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& cov
 
 // ---- auto resolution (tier 1) ---------------------------------------------
 
-// GBA auto path: SGDB search (strong match -> icon) + libretro banner.
-// Fills entry (query/gameId/sources/weak) and the resolved pieces; missing
-// pieces stay "" and entry.weak reflects them only after the caller applies
-// a fallback. entry.valid is NOT set (caller persists after install).
+// GBA auto path: SGDB search (strong match -> icon; title tier then file
+// name) + libretro banner. Fills entry (query/gameId/sources/weak) and the
+// resolved pieces; missing pieces stay "" and entry.weak reflects them only
+// after the caller applies a fallback. entry.valid is NOT set (caller
+// persists after install).
 void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName,
-                   ArtEntry& entry, ArtPieces& out);
+                   const std::string& title, ArtEntry& entry, ArtPieces& out);
 
 // rebuild pieces from a persisted entry (cache-first). false if a piece that
 // the entry names can't be produced anymore.

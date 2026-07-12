@@ -202,25 +202,20 @@ std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int 
 }
 
 std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
-                            const std::string& query, ArtEntry& entry) {
-    if (!sgdb.hasKey()) return "";
-    std::vector<SgdbGame> games;
-    if (!sgdb.search(query, games) || games.empty()) return "";
-    std::vector<std::string> names;
-    for (auto& g : games) names.push_back(g.name);
-    int best = -1;
-    if (artConfidence(query, names, &best) != ART_MATCH_STRONG) return "";
+                            const std::vector<std::string>& queries, ArtEntry& entry) {
+    int gameId = artSgdbStrongMatch(sgdb, queries, &entry.query);
+    if (!gameId) return "";
     std::vector<SgdbAsset> logos;
-    if (!sgdb.logos(games[best].id, logos) || logos.empty()) return "";
+    if (!sgdb.logos(gameId, logos) || logos.empty()) return "";
     std::string bytes;
     if (!artGetUrl(sgdb, romm, logos[0].url,
                    "sgdb-logo-" + std::to_string(logos[0].id), bytes)) return "";
     std::string tex = artBannerFromImage(bytes);
     if (!tex.empty()) {
-        entry.sgdbGameId = games[best].id;
+        entry.sgdbGameId = gameId;
         entry.bannerSource = "sgdb";
         entry.bannerId = logos[0].id;
-        aflog.info("sgdb logo hit for '" + query + "'");
+        aflog.info("sgdb logo hit for '" + entry.query + "'");
     }
     return tex;
 }
@@ -244,31 +239,52 @@ bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& cov
 
 // ---- auto resolution ---------------------------------------------------------
 
-void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName,
-                   ArtEntry& entry, ArtPieces& out) {
-    entry.query = artSanitizeQuery(fsName);
-
-    // icon: SGDB, only on a strong (auto-pick) match
-    if (sgdb.hasKey()) {
+int artSgdbStrongMatch(SgdbClient& sgdb, const std::vector<std::string>& queries,
+                       std::string* usedQuery) {
+    if (usedQuery && !queries.empty()) *usedQuery = queries[0];
+    if (!sgdb.hasKey()) return 0;
+    for (const std::string& q : queries) {
+        if (q.empty()) continue;
         std::vector<SgdbGame> games;
-        if (sgdb.search(entry.query, games)) {
-            std::vector<std::string> names;
-            for (auto& g : games) names.push_back(g.name);
-            int best = -1;
-            ArtConfidence conf = artConfidence(entry.query, names, &best);
-            if (conf == ART_MATCH_STRONG) {
-                entry.sgdbGameId = games[best].id;
-                int pickedId = 0;
-                out.icon48 = artSgdbIcon(sgdb, romm, entry.sgdbGameId, &pickedId);
-                if (!out.icon48.empty()) {
-                    entry.iconSource = "sgdb";
-                    entry.iconId = pickedId;
-                }
-            } else {
-                aflog.info("sgdb match " + std::to_string((int)conf) + " for '" + entry.query + "'");
-            }
-        } else {
+        if (!sgdb.search(q, games)) {
             aflog.error("sgdb search failed: " + sgdb.lastError);
+            continue;
+        }
+        std::vector<std::string> names;
+        for (auto& g : games) names.push_back(g.name);
+        int best = -1;
+        ArtConfidence conf = artConfidence(q, names, &best);
+        if (conf == ART_MATCH_STRONG) {
+            if (usedQuery) *usedQuery = q;
+            return games[best].id;
+        }
+        aflog.info("sgdb match " + std::to_string((int)conf) + " for '" + q + "'");
+    }
+    return 0;
+}
+
+// query tiers: the RomM metadata title (IGDB match by rom id — immune to bad
+// file names) first, then the sanitized file name
+std::vector<std::string> artQueriesFor(const std::string& fsName,
+                                       const std::string& title) {
+    std::vector<std::string> qs;
+    std::string qt = artSanitizeQuery(title);
+    std::string qf = artSanitizeQuery(fsName);
+    if (!qt.empty()) qs.push_back(qt);
+    if (!qf.empty() && qf != qt) qs.push_back(qf);
+    return qs;
+}
+
+void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName,
+                   const std::string& title, ArtEntry& entry, ArtPieces& out) {
+    // icon: SGDB, only on a strong (auto-pick) match — title tier, then file name
+    entry.sgdbGameId = artSgdbStrongMatch(sgdb, artQueriesFor(fsName, title), &entry.query);
+    if (entry.sgdbGameId) {
+        int pickedId = 0;
+        out.icon48 = artSgdbIcon(sgdb, romm, entry.sgdbGameId, &pickedId);
+        if (!out.icon48.empty()) {
+            entry.iconSource = "sgdb";
+            entry.iconId = pickedId;
         }
     }
 

@@ -5,8 +5,11 @@ are built on `feat/gba` (`artquery` / `artfetch` / `artstore` / `artpicker` +
 menu wiring; see the [GBA-PLAN.md](GBA-PLAN.md) progress log for the module
 map). Implementation deviations: art.json keys by extension-less stem, the
 Manage marker renders as `[!]` (font safety), the NDS notify runs at build
-time (after download — the GameTDB chain needs the ROM on SD), and GameTDB
-isn't repeated as a picker candidate (the RomM cover shows the same box).
+time (after download — the GameTDB chain needs the ROM on SD), GameTDB
+isn't repeated as a picker candidate (the RomM cover shows the same box),
+and the SGDB search tries the **RomM metadata title first** (IGDB match by
+rom id — survives bad file names), then the sanitized file name (§3.1),
+then asks the user.
 
 ## 1. Principles
 
