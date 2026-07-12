@@ -23,7 +23,10 @@ enum MenuAction {
     OpenSDBrowser,
     EditRommConfig,
     OpenSettings,
-    SettingToggle
+    SettingToggle,
+    LocalInstall,          // "Install from SD": install one local file (.cia/.nds/.gba)
+    LocalInstallSelected,  // batch-install the Y-marked rows
+    LocalInstallAll        // batch-install every not-yet-installed row
 };
 
 enum MenuType {
@@ -33,7 +36,8 @@ enum MenuType {
     MENU_SYSTEMS,
     MENU_MANAGE,
     MENU_SETTINGS,
-    MENU_SERVER
+    MENU_SERVER,
+    MENU_LOCAL             // "Install from SD": local files from the three dirs
 };
 
 class MenuSelection {
@@ -61,6 +65,7 @@ class MenuSelection {
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;
+        bool selected=false;         // "Install from SD": Y-marked for batch install
         std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
@@ -111,6 +116,7 @@ class Menu {
 
 };
 Menu* generateMenu(std::filesystem::path path, Menu* prev);
+Menu* generateLocalMenu(Menu* prev);
 Menu* generateMainMenu(Menu* prev);
 Menu* generateSystemMenu(Menu* prev);
 Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug);
