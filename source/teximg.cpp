@@ -82,7 +82,11 @@ std::vector<unsigned char> decodeImageRGBA(const std::string& bytes, int maxW, i
      GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
 
 bool texFromRGBA(const unsigned char* rgba, int w, int h, C2D_Image* out) {
-    int tw = npow2(w), th = npow2(h);
+    // GX display transfers need width >= 64 and height >= 16 — a smaller
+    // transfer never completes and gspWaitForPPF() hangs forever (froze the
+    // console on the art picker's 32x48 thumbs). Pad the texture, the
+    // subtexture still crops to w x h.
+    int tw = npow2(w < 64 ? 64 : w), th = npow2(h < 16 ? 16 : h);
     u32* linear = (u32*)linearAlloc(tw * th * 4);
     if (!linear) return false;
     memset(linear, 0, tw * th * 4);
