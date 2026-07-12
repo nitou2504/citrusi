@@ -849,6 +849,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
         }
     }
+    // Install-from-SD lists the three rom dirs, which also hold everything
+    // downloaded from RomM — so installed files are hidden by default and X
+    // reveals them (needed for Reinstall / Change art).
+    static bool gLocalShowInstalled = false;
+    static int  gLocalHidden = 0;        // installed files the filter left out
+
     void Menu::drawMenu() {
             gTick++;
             // restart the selected-row marquee whenever selection changes
@@ -1268,10 +1274,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         }
         if (this->type == MENU_LOCAL) {
             if (this->entries.empty()) {
-                drawBottomFrame("B Back    START Quit");
-                drawText(160, 92, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "No games found.", C2D_AlignCenter);
-                drawWrapped(48, 116, 224, 14, 0.42f, COL_TEXT_DIM,
-                            "Drop .cia in sd:/cia, .nds in sd:/roms/nds, .gba in sd:/roms/gba.", 3);
+                drawBottomFrame(gLocalHidden ? "X Show installed    B Back" : "B Back    START Quit");
+                if (gLocalHidden && !gLocalShowInstalled) {
+                    drawText(160, 88, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Nothing new to install.", C2D_AlignCenter);
+                    drawWrapped(48, 112, 224, 14, 0.42f, COL_TEXT_DIM,
+                                "All " + std::to_string(gLocalHidden) + " files on the SD card are already "
+                                "installed. Press X to show them and reinstall or change art.", 4);
+                } else {
+                    drawText(160, 92, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "No games found.", C2D_AlignCenter);
+                    drawWrapped(48, 116, 224, 14, 0.42f, COL_TEXT_DIM,
+                                "Drop .cia in sd:/cia, .nds in sd:/roms/nds, .gba in sd:/roms/gba.", 3);
+                }
                 return;
             }
             int nSel = 0;
@@ -1305,7 +1318,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             std::string hint = (nSel > 0)
                 ? std::to_string(nSel) + " selected   START Install   B Back"
-                : std::string("A Install   Y Select   B Back");
+                : std::string("A Install   Y Select   X ") +
+                  (gLocalShowInstalled ? "Hide done" : "Show all") + "   B Back";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
                      hint.c_str(), C2D_AlignCenter);
             return;
@@ -1394,10 +1408,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // and .gba (sd:/roms/gba) — each row tagged with its system and marked
     // "* " when already installed. No RomM needed; if a platform library is
     // already cached, its title/cover is reused to drive the art pipeline.
-    // Install-from-SD lists the three rom dirs, which also hold everything
-    // downloaded from RomM — so installed files are hidden by default and X
-    // reveals them (needed for Reinstall / Change art).
-    static bool gLocalShowInstalled = false;
 
     Menu* generateLocalMenu(Menu* prev);   // fwd: the toggle rebuilds the list
 
@@ -1410,6 +1420,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     Menu* generateLocalMenu(Menu* prev) {
         delete prev;
         CoverCachePause coverPause;   // the scan owns the SD while it runs
+        gLocalHidden = 0;
         installed3dsRefresh();    // AM installed set: GBA inject + .cia detection
         refreshNdsForwarders();   // NDS forwarder detection
         // optional metadata reuse: filename -> cached library entry, per slug,
@@ -1467,7 +1478,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     inst = ndsForwarderInstalled(fname);
                 }
                 e->installed = inst;
-                if (inst && !gLocalShowInstalled) { delete e; continue; }
+                if (inst && !gLocalShowInstalled) { gLocalHidden++; delete e; continue; }
                 e->display = (inst ? "* " : "  ") + std::string("[") + s.tag + "] " + utf8FoldLatin(stem);
                 entries.push_back(e);
             }
@@ -1488,7 +1499,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         std::string free = "";
         if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
             free = " - " + humanSize((u64)sd.freeClusters * sd.clusterSize) + " free";
-        menu->heading = std::string(gLocalShowInstalled ? "Install from SD (all)" : "Install from SD") + free;
+        menu->heading = std::string(gLocalShowInstalled ? "Install from SD (all)" : "Install from SD")
+                      + (gLocalHidden && !gLocalShowInstalled
+                         ? "  " + std::to_string(gLocalHidden) + " installed hidden" : "")
+                      + free;
         menu->init();
         return menu;
     }
@@ -1518,6 +1532,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         menu->init();
         return menu;
     }
+
 
     static Config* gConfigPtr = nullptr;
 
