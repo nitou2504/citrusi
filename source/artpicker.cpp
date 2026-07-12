@@ -107,13 +107,9 @@ void buildBannerCands(int gameId, const std::string& fsName,
         for (const std::string& n : names) {
             std::string bytes;
             std::string key = "libretro-gba-" + n;
-            bytes = artCacheRead(key);
-            if (bytes.empty()) {
-                if (!gRomm.fetchUrl(LIBRETRO_GBA_LOGOS + urlEncodePath(n) + ".png", bytes) ||
-                    bytes.empty())
-                    continue;
-                artCacheWrite(key, bytes);
-            }
+            if (!artGetUrl(gSgdb, gRomm, LIBRETRO_GBA_LOGOS + urlEncodePath(n) + ".png",
+                           key, bytes))
+                continue;
             Cand c;
             c.source = "libretro";
             c.name = n;
@@ -156,14 +152,8 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
     for (size_t i = first; i < last && i < cands.size(); i++) {
         Cand& c = cands[i];
         if (c.state != 0) continue;
-        std::string bytes = artCacheRead(c.thumbKey);
-        if (bytes.empty()) {
-            const std::string& url = c.thumbUrl.empty() ? c.url : c.thumbUrl;
-            bool ok;
-            if (url.rfind("https://", 0) == 0) ok = gSgdb.fetchImage(url, bytes);
-            else ok = gRomm.fetchUrl(url, bytes);
-            if (ok && !bytes.empty()) artCacheWrite(c.thumbKey, bytes);
-        }
+        std::string bytes;
+        artGetUrl(gSgdb, gRomm, c.thumbUrl.empty() ? c.url : c.thumbUrl, c.thumbKey, bytes);
         c.state = (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) ? 1 : 2;
         if (c.state == 2) aplog.error("thumb fail: " + c.thumbKey);
         return;

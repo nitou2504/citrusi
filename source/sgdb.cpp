@@ -75,7 +75,7 @@ static size_t writeCb(char* ptr, size_t size, size_t nmemb, void* ud) {
     return size * nmemb;
 }
 
-bool SgdbClient::get(const std::string& url, std::string& out) {
+bool SgdbClient::get(const std::string& url, std::string& out, const std::string& extraHeader) {
     if (!sgdbNetBoot()) { lastError = "network not ready"; return false; }
     out.clear();
     // log a compact form of the url (no query keys carry secrets — auth is a header)
@@ -88,6 +88,8 @@ bool SgdbClient::get(const std::string& url, std::string& out) {
     struct curl_slist* hdrs = nullptr;
     if (!key.empty() && url.find("steamgriddb.com/api/") != std::string::npos)
         hdrs = curl_slist_append(hdrs, ("Authorization: Bearer " + key).c_str());
+    if (!extraHeader.empty())
+        hdrs = curl_slist_append(hdrs, extraHeader.c_str());
     curl_easy_setopt(c, CURLOPT_URL, url.c_str());
     curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, writeCb);
@@ -174,4 +176,9 @@ bool SgdbClient::logos(int gameId, std::vector<SgdbAsset>& out) {
 
 bool SgdbClient::fetchImage(const std::string& url, std::string& out) {
     return get(url, out);
+}
+
+bool SgdbClient::fetchUrl(const std::string& url, std::string& out,
+                          const std::string& headerLine) {
+    return get(url, out, headerLine);
 }

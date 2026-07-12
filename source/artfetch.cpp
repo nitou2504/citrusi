@@ -111,12 +111,17 @@ bool artGetUrl(SgdbClient& sgdb, RommClient& romm, const std::string& url,
                const std::string& cacheKey, std::string& bytes) {
     bytes = artCacheRead(cacheKey);
     if (!bytes.empty()) return true;
-    bool ok;
-    if (url.rfind("https://", 0) == 0)
-        ok = sgdb.fetchImage(url, bytes);      // curl+mbedtls (TLS 1.2)
-    else
-        ok = romm.fetchUrl(url, bytes);        // httpc: plain http / server path
-    if (!ok || bytes.empty()) return false;
+    if (url.empty()) return false;
+    // ALL art fetches go over curl/soc — httpc requests from this flow hung
+    // the app (see GBA-PLAN); curl handles plain http (libretro) and the LAN
+    // RomM host fine. Server-relative paths get host + Basic auth.
+    std::string full = url;
+    std::string auth;
+    if (url[0] == '/') {
+        full = romm.host + url;
+        auth = "Authorization: Basic " + base64Encode(romm.user + ":" + romm.pass);
+    }
+    if (!sgdb.fetchUrl(full, bytes, auth) || bytes.empty()) return false;
     artCacheWrite(cacheKey, bytes);
     return true;
 }

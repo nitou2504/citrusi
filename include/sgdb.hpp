@@ -29,7 +29,7 @@ void sgdbNetExit();
 class SgdbClient {
     private:
     std::string key;      // Bearer token from sgdb.env
-    bool get(const std::string& url, std::string& out);
+    bool get(const std::string& url, std::string& out, const std::string& extraHeader = "");
     bool assets(const char* category, int gameId, std::vector<SgdbAsset>& out);
     public:
     std::string lastError;
@@ -46,4 +46,10 @@ class SgdbClient {
     bool logos(int gameId, std::vector<SgdbAsset>& out);
     // fetch an icon/thumb png into memory (no auth needed for cdn)
     bool fetchImage(const std::string& url, std::string& out);
+    // generic GET over curl (http or https) with an optional full header
+    // line (e.g. "Authorization: Basic ..."). The art path uses this for
+    // EVERYTHING — libretro + RomM covers included — because httpc requests
+    // from the art flow hung the app while curl kept working.
+    bool fetchUrl(const std::string& url, std::string& out,
+                  const std::string& headerLine = "");
 };
