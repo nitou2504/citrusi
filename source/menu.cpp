@@ -306,15 +306,20 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
 
 // build + install a GBA VC inject for an on-SD rom with pre-resolved art
 // (same allocate/build/progress/persist shape as the RomM GBA install path).
-// *cancelled (optional) reports a B-cancel so batch flows can stop early.
+// *cancelled (optional) reports a B-cancel so batch flows can stop early;
+// quiet suppresses the per-item failure dialog (unattended batch phase).
 static bool installGbaInject(C3D_RenderTarget* target, Config* config,
                              const std::string& romPath, const std::string& title,
                              const std::string& fsName, const ArtEntry& ae,
-                             const ArtPieces& pieces, bool* cancelled = nullptr) {
+                             const ArtPieces& pieces, bool* cancelled = nullptr,
+                             bool quiet = false) {
     if (cancelled) *cancelled = false;
     std::string romBase = std::filesystem::path(romPath).filename().generic_string();
     u64 gtid = gCtr.allocateGbaTID(romBase);
-    if (gtid == 0) { Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return false; }
+    if (gtid == 0) {
+        if (!quiet) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle();
+        return false;
+    }
     Dialog(target,0,0,320,240,{"Installing...",title},{},0).handle();
     u64 lastG = 0;
     ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid, pieces.icon48, pieces.bannerTex,
@@ -332,7 +337,8 @@ static bool installGbaInject(C3D_RenderTarget* target, Config* config,
     if (ok) artStorePut(fsName, ae);
     else {
         if (cancelled) *cancelled = (gr->message == "cancelled");
-        Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
+        if (!quiet)
+            Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
     }
     delete gr;
     return ok;
@@ -975,24 +981,40 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             "Drop .cia in sd:/cia, .nds in sd:/roms/nds, .gba in sd:/roms/gba.", 3);
                 return;
             }
+            int nSel = 0;
+            for (auto e : this->entries) if (e->selected) nSel++;
             drawBottomFrame("");
             MenuSelection* sel = *this->selection;
+            u32 lineCol = C2D_Color32(0xC6,0xCF,0xE2,255);
             float y = CARD_Y + PAD;
-            y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
-            y += 5;
-            const char* tag = (sel->platformSlug==ROMM_SLUG_3DS)?"3DS":
-                              (sel->platformSlug==ROMM_SLUG_GBA)?"GBA":"NDS";
-            float cxp = drawChip(CTX, y, tag, COL_TEXT_DIM);
-            cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
-            if (sel->installed) cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
-            if (sel->selected)  drawChip(cxp, y, "SELECTED", COL_ACCENT);
-            y += 21;
-            y = cardDivider(y) + 5;
-            drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255),
-                        sel->installed ? "Installed. A reinstalls. Y marks it for a batch."
-                                       : "Press A to install. Y marks it for a batch.", 3);
+            if (sel->action == LocalInstall) {
+                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
+                y += 5;
+                const char* tag = (sel->platformSlug==ROMM_SLUG_3DS)?"3DS":
+                                  (sel->platformSlug==ROMM_SLUG_GBA)?"GBA":"NDS";
+                float cxp = drawChip(CTX, y, tag, COL_TEXT_DIM);
+                cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
+                if (sel->installed) cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+                if (sel->selected)  drawChip(cxp, y, "SELECTED", COL_ACCENT);
+                y += 21;
+                y = cardDivider(y) + 5;
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
+                            sel->installed ? "Installed. A reinstalls. Y marks it for a batch."
+                                           : "Press A to install. Y marks it for a batch.", 3);
+            } else {
+                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->display, 2);
+                y += 5;
+                y = cardDivider(y) + 5;
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
+                            (sel->action==LocalInstallSelected)
+                                ? "Install every game you marked with Y. Art is resolved first, then each one installs unattended."
+                                : "Install every game listed that isn't installed yet.", 4);
+            }
+            std::string hint = (nSel > 0)
+                ? std::to_string(nSel) + " selected   START Install   B Back"
+                : std::string("A Install   Y Select   B Back");
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
-                     "A Install    Y Select    B Back", C2D_AlignCenter);
+                     hint.c_str(), C2D_AlignCenter);
             return;
         }
         // main menu / systems / SD browser
@@ -1141,6 +1163,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 e->display = (inst ? "* " : "  ") + std::string("[") + s.tag + "] " + utf8FoldLatin(stem);
                 entries.push_back(e);
             }
+        }
+        if (!entries.empty()) {
+            // batch action rows pinned to the top (kept out of the alnum sort)
+            MenuSelection* all = new MenuSelection();
+            all->display = "Install all"; all->action = LocalInstallAll;
+            entries.insert(entries.begin(), all);
+            MenuSelection* sel = new MenuSelection();
+            sel->display = "Install selected"; sel->action = LocalInstallSelected;
+            entries.insert(entries.begin(), sel);
         }
         Menu* menu = new Menu(entries);
         menu->currentDirectory = std::filesystem::path("/");
@@ -1581,6 +1612,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     void Menu::action() {
         if (this->entries.size()==0) return;
         this->queue.push(MenuSelection(*this->selection));
+    }
+    bool Menu::startBatch() {
+        if (this->type != MENU_LOCAL) return false;
+        int nSel = 0;
+        for (auto e : this->entries) if (e->selected) nSel++;
+        if (nSel == 0) return false;   // nothing marked -> START quits as usual
+        MenuSelection s("");
+        s.action = LocalInstallSelected;
+        this->queue.push(s);
+        return true;
     }
     void Menu::pageDown() {
         if (this->entries.size()==0) return;
@@ -2325,6 +2366,96 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     gFwdReady = false; invalidateYanbfCache();
                     showLoading(target, {"Refreshing..."});
                     return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                }
+                case LocalInstallSelected:
+                case LocalInstallAll: {
+                    // Batch: PHASE 1 resolves GBA art (with its prompts), then
+                    // PHASE 2 installs each item unattended. "All" skips titles
+                    // already installed; "Selected" takes exactly the Y-marks.
+                    bool all = (entry.action == LocalInstallAll);
+                    std::vector<MenuSelection*> items;
+                    for (auto e : this->entries) {
+                        if (e->action != LocalInstall) continue;
+                        if (all ? !e->installed : e->selected) items.push_back(e);
+                    }
+                    if (items.empty()) {
+                        if (all) Dialog(target,0,0,320,240,{"Nothing to install.","Everything here is already installed."},{"OK"}).handle();
+                        else     Dialog(target,0,0,320,240,{"Nothing selected.","Press Y to mark games first."},{"OK"}).handle();
+                        break;
+                    }
+                    if (Dialog(target,0,0,320,240,{all?"Install all games?":"Install selected games?",std::to_string(items.size())+" game(s)"},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                        break;
+                    bool needCtr = false;
+                    for (auto it : items) if (it->platformSlug != ROMM_SLUG_3DS) needCtr = true;
+                    if (needCtr && !ensureCtrBuilder(target)) break;
+                    CoverCachePause coverPause;   // own the network across the batch
+
+                    // PHASE 1: art (GBA only — NDS resolves inline at build, CIA none)
+                    std::vector<ArtEntry> aes(items.size());
+                    std::vector<ArtPieces> pcs(items.size());
+                    int gbaTotal = 0;
+                    for (auto it : items) if (it->platformSlug == ROMM_SLUG_GBA) gbaTotal++;
+                    if (gbaTotal) ensureSgdb();
+                    int gbaN = 0;
+                    for (size_t i = 0; i < items.size(); i++) {
+                        MenuSelection* it = items[i];
+                        if (it->platformSlug != ROMM_SLUG_GBA) continue;
+                        gbaN++;
+                        showLoading(target, {"Art "+std::to_string(gbaN)+"/"+std::to_string(gbaTotal), it->title});
+                        resolveGbaArtInteractive(target, config, it->fsName, it->title,
+                                                 it->coverPath, aes[i], pcs[i], false);
+                    }
+
+                    // PHASE 2: unattended install; continue past failures, B cancels the rest
+                    int okCount = 0;
+                    std::vector<std::string> fails;
+                    bool cancelled = false;
+                    for (size_t i = 0; i < items.size(); i++) {
+                        MenuSelection* it = items[i];
+                        hidScanInput();
+                        if (hidKeysDown() & KEY_B) { cancelled = true; break; }
+                        std::string prog = "Installing "+std::to_string(i+1)+"/"+std::to_string(items.size());
+                        showLoading(target, {prog, it->title});
+                        std::string romPath = it->path.generic_string();
+                        bool ok = false;
+                        if (it->platformSlug == ROMM_SLUG_3DS) {
+                            std::string ierr; u64 lastI = 0;
+                            ok = installCiaFromFile(romPath, ierr, config->forceInstall,
+                                [&](unsigned long long done, unsigned long long total) -> bool {
+                                    hidScanInput();
+                                    if (hidKeysDown() & KEY_B) return false;
+                                    if (done - lastI < (4<<20) && done != total) return true;
+                                    lastI = done;
+                                    int pct = (total>0)?(int)(done*100/total):0;
+                                    Dialog(target,0,0,320,240,{prog+" (B = cancel)",it->title,std::to_string(pct)+"%"},{},0).handle();
+                                    return true;
+                                });
+                            if (ok) { u64 tid = it->titleId ? it->titleId : ciaFileTitleId(romPath);
+                                      if (tid && it->rommId > 0) installed3dsRecord(it->rommId, tid); }
+                            else if (ierr == "cancelled") cancelled = true;
+                        } else if (it->platformSlug == ROMM_SLUG_GBA) {
+                            bool wasCancel = false;
+                            ok = installGbaInject(target, config, romPath, it->title, it->fsName,
+                                                  aes[i], pcs[i], &wasCancel, true);
+                            if (wasCancel) cancelled = true;
+                        } else {
+                            ok = buildForwarderFor(target, config, romPath, it->title, it->coverPath, false);
+                            if (ok) { gFwdReady = false; invalidateManagedRoms(); }
+                        }
+                        if (ok) okCount++;
+                        else if (!cancelled) fails.push_back(it->title);
+                        if (cancelled) break;
+                    }
+
+                    std::string summary = "Installed "+std::to_string(okCount)+" of "+std::to_string(items.size())+".";
+                    std::string sub = cancelled ? "Cancelled - remaining skipped."
+                                    : fails.empty() ? "All installed." : "Could not install:";
+                    std::string failsJoined;
+                    for (size_t i = 0; i < fails.size(); i++) { if (i) failsJoined += ", "; failsJoined += fails[i]; }
+                    Dialog(target,0,0,320,240,{summary, sub, failsJoined},{"OK"}).handle();
+                    while (this->queue.size() > 0) this->queue.pop();
+                    showLoading(target, {"Refreshing..."});
+                    return generateLocalMenu(this);
                 }
                 case LocalInstall: {
                     // "Install from SD": a local file already on the SD card —

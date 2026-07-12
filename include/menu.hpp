@@ -112,6 +112,9 @@ class Menu {
         void up();
         void pageUp();
         void action();
+        // START on the Install-from-SD screen: queue a batch of the marked
+        // rows. Returns false (nothing marked / other screen) so START quits.
+        bool startBatch();
         Menu* back();
         Menu* handleQueue(Builder* builder, C3D_RenderTarget* target=nullptr, Config* config =nullptr);
         bool hasQueue();
