@@ -330,6 +330,18 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     wr64be(tik, 0x1DC, tid);
     std::string tmd = tpl.substr(tmdOff, tmdSize);
     wr64be(tmd, 0x18C, tid);
+    // version bump on rebuilds — HOME caches icons per (tid, version)
+    {
+        u16 ver = 1;
+        AM_TitleEntry te;
+        u64 id = tid;
+        if (R_SUCCEEDED(AM_GetTitleInfo(MEDIATYPE_SD, 1, &id, &te)))
+            ver = (u16)(te.version + 1);
+        tmd[0x1DC] = (char)(ver >> 8);
+        tmd[0x1DD] = (char)(ver & 0xFF);
+        tik[0x1E6] = (char)(ver >> 8);
+        tik[0x1E7] = (char)(ver & 0xFF);
+    }
     wr64be(tmd, 0xB04 + 0x8, (u64)newConSize);       // chunk size (BE)
     std::string conHash = sha256((u8*)ncch.data(), ncch.size());
     memcpy(&tmd[0xB04 + 0x10], conHash.data(), 0x20);
@@ -729,6 +741,23 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     wr64be(tik, 0x1DC, tid);
     std::string tmd = tpl.substr(tmdOff, tmdSize);
     wr64be(tmd, 0x18C, tid);
+    // HOME caches title icons per (tid, version): bump the version past the
+    // installed one on rebuilds or a Change-art icon never shows on HOME
+    {
+        u16 ver = 1;
+        AM_TitleEntry te;
+        u64 id = tid;
+        if (titleInstalledOn(MEDIATYPE_SD, tid) &&
+            R_SUCCEEDED(AM_GetTitleInfo(MEDIATYPE_SD, 1, &id, &te)))
+            ver = (u16)(te.version + 1);
+        tmd[0x1DC] = (char)(ver >> 8);
+        tmd[0x1DD] = (char)(ver & 0xFF);
+        tik[0x1E6] = (char)(ver >> 8);
+        tik[0x1E7] = (char)(ver & 0xFF);
+        char vbuf[48];
+        snprintf(vbuf, sizeof(vbuf), "gba: title version %u", ver);
+        ctrLogger.info(vbuf);
+    }
     // AM creates the SD save image from the TMD save size; must match the
     // exheader's demand (192K for GBA VC) or the title dies at launch with
     // an ErrDisp from the HOME menu.

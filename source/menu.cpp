@@ -234,6 +234,15 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
             if (piecesOut.icon48.empty()) piecesOut.icon48 = re.icon48;
             if (piecesOut.bannerTex.empty()) piecesOut.bannerTex = re.bannerTex;
         }
+        // a stored piece that can't be rebuilt must never bake the template:
+        // fall to the cover rather than losing the installed art
+        if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty()) {
+            ArtPieces cov;
+            artFromRommCover(gSgdb, gRomm, coverPath,
+                             piecesOut.icon48.empty(), piecesOut.bannerTex.empty(), cov);
+            if (piecesOut.icon48.empty()) piecesOut.icon48 = cov.icon48;
+            if (piecesOut.bannerTex.empty()) piecesOut.bannerTex = cov.bannerTex;
+        }
         if (iCh || bCh) entryOut.weak = false;   // the user picked -> ⚠ cleared
         return;
     }
