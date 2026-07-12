@@ -831,7 +831,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (this->type == MENU_MANAGE) {
             drawBottomFrame("A Manage    B Back    START Quit");
             if (this->entries.empty()) {
-                drawText(160, 110, 0.55f, 0.5f, COL_SURFACE, COL_TEXT_DIM, "No roms in sd:/roms/nds", C2D_AlignCenter);
+                const char* empty = (this->platformSlug == ROMM_SLUG_3DS) ? "No installed 3DS titles."
+                                  : (this->platformSlug == ROMM_SLUG_GBA) ? "No roms in sd:/roms/gba"
+                                  :                                          "No roms in sd:/roms/nds";
+                drawText(160, 110, 0.55f, 0.5f, COL_SURFACE, COL_TEXT_DIM, empty, C2D_AlignCenter);
                 return;
             }
             MenuSelection* sel = *this->selection;
@@ -893,7 +896,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 "Address of your RomM instance, e.g. http://192.168.0.17 or http://host:8080.",
                 "RomM account used to browse and download.",
                 "Password for the account. Stored on the SD card.",
-                "Checks the server and looks for the NDS platform."
+                "Checks the server connection and that RomM is reachable."
             };
             if (!this->entries.empty()) {
                 MenuSelection* sel = *this->selection;
@@ -920,10 +923,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (!gRomm.host.empty())
                 drawText(160, 124, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
         } else if (this->type == MENU_SYSTEMS) {
-            drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT, "RomM Library", C2D_AlignCenter);
+            bool manage = (this->heading.rfind("Manage", 0) == 0);
+            drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT,
+                     manage ? "Manage Installed" : "RomM Library", C2D_AlignCenter);
             drawWrapped(48, 108, 224, 14, 0.45f, COL_TEXT_DIM,
-                        "Pick a system to browse and install games. "
-                        "Search all systems looks across all three.", 4);
+                        manage ? "Pick a system to see what's installed, and uninstall or change art."
+                               : "Pick a system to browse and install games. "
+                                 "Search all systems looks across all three.", 4);
             if (!gRomm.host.empty())
                 drawText(160, 172, 0.5f, 0.42f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
         } else {
@@ -1681,7 +1687,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Testing...",gRomm.host},{},0).handle();
                                 int pid = gRomm.findNdsPlatform();
                                 if (pid >= 0)
-                                    Dialog(target,0,0,320,240,{"Connected.","NDS platform found."},{"OK"}).handle();
+                                    Dialog(target,0,0,320,240,{"Connected.","RomM is reachable."},{"OK"}).handle();
                                 else
                                     Dialog(target,0,0,320,240,{"Connection failed",gRomm.lastError},{"OK"}).handle();
                                 break;
@@ -1787,6 +1793,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (needDownload) {
                         std::error_code ec;
                         std::filesystem::create_directories(std::filesystem::path(dir), ec);
+                        showLoading(target, {"Downloading...", entry.fsName});
                         u64 lastDrawn = 0;
                         RommRom dlRom;
                         dlRom.id = entry.rommId;
@@ -1845,6 +1852,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string ierr;
                         u64 lastI = 0;
                         rlog.info("cia install start: " + dest);
+                        showLoading(target, {"Installing...", entry.fsName});
                         installed = installCiaFromFile(dest, ierr, config->forceInstall,
                             [&](unsigned long long done, unsigned long long total) -> bool {
                                 hidScanInput();
@@ -1908,6 +1916,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string n3 = entry.title;
                         if (Dialog(target,0,0,320,240,{n3,"Installed"},{"Uninstall","Back"}).handle()!=0) break;
                         if (Dialog(target,0,0,320,240,{"Uninstall game?",n3},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        showLoading(target, {"Uninstalling...", n3});
                         Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
                         AM_DeleteTicket(entry.tid);
                         if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
@@ -1958,6 +1967,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (c!=1) break;
                             // single-pass: uninstall removes the inject AND the ROM file
                             if (Dialog(target,0,0,320,240,{"Uninstall game?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                            showLoading(target, {"Uninstalling...", ng});
                             Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
                             AM_DeleteTicket(entry.tid);
                             if (R_FAILED(dr)) {
@@ -1998,6 +2008,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 delete gr;
                             } else if (c==1) {
                                 if (Dialog(target,0,0,320,240,{"Delete ROM file?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                                showLoading(target, {"Deleting..."});
                                 std::error_code ec;
                                 std::filesystem::remove(entry.path, ec);
                             } else break;
@@ -2112,6 +2123,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool delRom = true;
                     if (Dialog(target,0,0,320,240,{"Uninstall game?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                         break;
+                    showLoading(target, {"Uninstalling...", name});
                     bool err=false;
                     if (delFwd && entry.installed && entry.tid!=0) {
                         if (R_FAILED(deleteForwarder(entry.tid))) {
