@@ -477,6 +477,118 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
     return out;
 }
 
+// ---- Manage helpers (single-item + batch share these) --------------------
+
+// change art for one GBA inject in place (same TID keeps HOME slot + saves).
+// Returns 1 = updated, 0 = skipped (B / nothing chosen), -1 = failed.
+// interactive=true shows the per-item result dialog (single); batch passes
+// false and reports in its own summary. The picker + progress always show.
+static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
+                            const std::string& romBase, const std::string& title,
+                            const std::string& coverPath, const std::string& romPath,
+                            bool interactive) {
+    if (!ensureCtrBuilder(target)) return -1;
+    ArtEntry ae;
+    ArtPieces pieces;
+    resolveGbaArtInteractive(target, config, romBase, title, coverPath, ae, pieces, true);
+    if (pieces.icon48.empty() && pieces.bannerTex.empty()) return 0;   // picker cancelled
+    u64 gtid = gCtr.allocateGbaTID(romBase);
+    if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
+    Dialog(target,0,0,320,240,{"Updating art...",title},{},0).handle();
+    u64 lastG = 0;
+    ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid,
+                                        pieces.icon48, pieces.bannerTex,
+                                        config->gbaScreen,
+        [&](u64 done, u64 total) -> bool {
+            hidScanInput();
+            if (hidKeysDown() & KEY_B) return false;
+            if (done - lastG < (2<<20) && done != total) return true;
+            lastG = done;
+            int pct = (total>0)?(int)(done*100/total):0;
+            Dialog(target,0,0,320,240,{"Installing... (B = cancel)",title,std::to_string(pct)+"%"},{},0).handle();
+            return true;
+        });
+    int rc;
+    if (gr->isSuccess()) {
+        artStorePut(romBase, ae);
+        if (interactive) Dialog(target,0,0,320,240,{"Art updated!",title},{"OK"}).handle();
+        rc = 1;
+    } else {
+        if (interactive) Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Art update failed",gr->message},{"OK"}).handle();
+        rc = -1;
+    }
+    delete gr;
+    return rc;
+}
+
+// change art for one romm3ds NDS forwarder in place (same rtid). Banner page
+// only — the SMDH icon stays the ROM's own DS icon. 1 / 0 / -1 like above.
+static int changeArtNdsRommItem(C3D_RenderTarget* target, Config* config,
+                                const std::string& name, const std::string& title,
+                                const std::string& coverPath, const std::string& romPath,
+                                u64 rtid, bool interactive) {
+    (void)config;
+    if (!ensureCtrBuilder(target)) return -1;
+    ensureSgdb();
+    ArtEntry ae = artStoreGet(name);
+    if (ae.query.empty()) {
+        std::vector<std::string> qs = artQueriesFor(name, title);
+        ae.query = qs.empty() ? artSanitizeQuery(name) : qs[0];
+    }
+    ArtPieces pieces;
+    bool bCh = false;
+    artPickerRun(target, name, title, coverPath, ROMM_SLUG_NDS,
+                 ae, pieces, false, true, nullptr, &bCh);
+    if (!bCh) return 0;                                  // picker cancelled
+    ae.weak = false;
+    Dialog(target,0,0,320,240,{"Fetching sound...",title},{},0).handle();
+    std::string gameCwav = fetchGameSound(gRomm, romPath);
+    Dialog(target,0,0,320,240,{"Updating art...",title},{},0).handle();
+    ReturnResult* r = gCtr.buildCIA(romPath, title, rtid, pieces.bannerTex, gameCwav);
+    int rc;
+    if (r->isSuccess()) {
+        artStorePut(name, ae);
+        if (interactive) Dialog(target,0,0,320,240,{"Art updated!",title},{"OK"}).handle();
+        rc = 1;
+    } else {
+        if (interactive) Dialog(target,0,0,320,240,{"Art update failed",r->message},{"OK"}).handle();
+        rc = -1;
+    }
+    delete r;
+    return rc;
+}
+
+// uninstall one Manage item (mirrors the single-item deletion paths). Returns
+// true on success; decrements config->dsiwareCount for a deleted TWL forwarder.
+static bool uninstallManageItem(Config* config, const MenuSelection& it) {
+    if (it.platformSlug == ROMM_SLUG_3DS) {
+        Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
+        AM_DeleteTicket(it.tid);
+        return R_SUCCEEDED(dr);
+    }
+    if (it.platformSlug == ROMM_SLUG_GBA) {
+        Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
+        AM_DeleteTicket(it.tid);
+        if (R_FAILED(dr)) return false;
+        std::error_code ec;
+        std::filesystem::remove(it.path, ec);          // single-pass: inject + ROM
+        return true;
+    }
+    // NDS: remove every forwarder type present, then the ROM file
+    bool err = false;
+    if (it.installed && it.tid != 0) {
+        if (R_FAILED(deleteForwarder(it.tid))) err = true;
+        else if (config->dsiwareCount > 0) config->dsiwareCount--;
+    }
+    if (it.ytid != 0 && R_FAILED(deleteYanbfForwarder(it.ytid))) err = true;
+    if (it.rtid != 0 && R_FAILED(deleteRommCtrForwarder(it.rtid))) err = true;
+    if (!err) {
+        std::error_code ec;
+        if (!std::filesystem::remove(it.path, ec)) err = true;
+    }
+    return !err;
+}
+
 RommClient gRomm;
 
 // selected-game cover (shared by top rail + tick loader)
@@ -999,9 +1111,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             return;
         }
         if (this->type == MENU_MANAGE) {
-            drawBottomFrame(this->entries.empty()
-                ? "A Manage    B Back    START Quit"
-                : "A Manage   Y Select   B Back   START Quit");
+            int nsel = this->selectedCount();
+            std::string mhint = this->entries.empty()
+                ? std::string("A Manage    B Back    START Quit")
+                : ("A Manage   Y Select   B Back" +
+                   std::string(nsel > 0 ? "   START Batch " + std::to_string(nsel) : "   START Quit"));
+            drawBottomFrame(mhint.c_str());
             if (this->entries.empty()) {
                 const char* empty = (this->platformSlug == ROMM_SLUG_3DS) ? "No installed 3DS titles."
                                   : (this->platformSlug == ROMM_SLUG_GBA) ? "No roms in sd:/roms/gba"
@@ -1617,10 +1732,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // START: queue a batch action for the selected rows. Returns false when
     // there's nothing to batch here, so the caller quits the app instead.
     bool Menu::startBatch() {
-        if (this->type != MENU_ROMM) return false;
         if (this->selectedCount() == 0) return false;
         MenuSelection m;
-        m.action = BatchRommInstall;
+        if (this->type == MENU_ROMM)        m.action = BatchRommInstall;
+        else if (this->type == MENU_MANAGE) m.action = BatchManage;
+        else return false;
         this->queue.push(m);
         return true;
     }
@@ -2096,33 +2212,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (c==0) {
                                 // rebuild in place: same TID keeps the HOME
                                 // position and save data, only the art changes
-                                if (!ensureCtrBuilder(target)) break;
-                                ArtEntry ae;
-                                ArtPieces pieces;
-                                resolveGbaArtInteractive(target, config, romBase, ng,
-                                                         entry.coverPath, ae, pieces, true);
-                                if (pieces.icon48.empty() && pieces.bannerTex.empty()) break;
-                                u64 gtid = gCtr.allocateGbaTID(romBase);
-                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); break; }
-                                Dialog(target,0,0,320,240,{"Updating art...",ng},{},0).handle();
-                                u64 lastG = 0;
-                                ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
-                                                                    pieces.icon48, pieces.bannerTex,
-                                                                    config->gbaScreen,
-                                    [&](u64 done, u64 total) -> bool {
-                                        hidScanInput();
-                                        if (hidKeysDown() & KEY_B) return false;
-                                        if (done - lastG < (2<<20) && done != total) return true;
-                                        lastG = done;
-                                        int pct = (total>0)?(int)(done*100/total):0;
-                                        Dialog(target,0,0,320,240,{"Installing... (B = cancel)",ng,std::to_string(pct)+"%"},{},0).handle();
-                                        return true;
-                                    });
-                                if (gr->isSuccess()) {
-                                    artStorePut(romBase, ae);
-                                    Dialog(target,0,0,320,240,{"Art updated!",ng},{"OK"}).handle();
-                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Art update failed",gr->message},{"OK"}).handle();
-                                delete gr;
+                                int rc = changeArtGbaItem(target, config, romBase, ng,
+                                                          entry.coverPath, entry.path.generic_string(), true);
+                                if (rc == 0) break;   // picker cancelled — stay put
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
@@ -2250,29 +2342,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (c==0) {
                             // picker (banner page only — the icon stays the DS
                             // icon), then rebuild in place: same TID
-                            if (!ensureCtrBuilder(target)) break;
-                            ensureSgdb();
-                            ArtEntry ae = artStoreGet(name);
-                            if (ae.query.empty()) {
-                                std::vector<std::string> qs = artQueriesFor(name, entry.title);
-                                ae.query = qs.empty() ? artSanitizeQuery(name) : qs[0];
-                            }
-                            ArtPieces pieces;
-                            bool bCh = false;
-                            artPickerRun(target, name, entry.title, entry.coverPath, ROMM_SLUG_NDS,
-                                         ae, pieces, false, true, nullptr, &bCh);
-                            if (!bCh) break;
-                            ae.weak = false;
-                            Dialog(target,0,0,320,240,{"Fetching sound...",entry.title},{},0).handle();
-                            std::string gameCwav = fetchGameSound(gRomm, entry.path.generic_string());
-                            Dialog(target,0,0,320,240,{"Updating art...",entry.title},{},0).handle();
-                            ReturnResult* r = gCtr.buildCIA(entry.path.generic_string(), entry.title,
-                                                            entry.rtid, pieces.bannerTex, gameCwav);
-                            if (r->isSuccess()) {
-                                artStorePut(name, ae);
-                                Dialog(target,0,0,320,240,{"Art updated!",entry.title},{"OK"}).handle();
-                            } else Dialog(target,0,0,320,240,{"Art update failed",r->message},{"OK"}).handle();
-                            delete r;
+                            int rc = changeArtNdsRommItem(target, config, name, entry.title,
+                                                          entry.coverPath, entry.path.generic_string(),
+                                                          entry.rtid, true);
+                            if (rc == 0) break;   // picker cancelled — stay put
                             while (this->queue.size() > 0) this->queue.pop();
                             gFwdReady = false; invalidateYanbfCache();
                             showLoading(target, {"Refreshing..."});
@@ -2322,6 +2395,81 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     gFwdReady = false; invalidateYanbfCache();
                     showLoading(target, {"Refreshing..."});
                     return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                }
+                case BatchManage: {
+                    // the selected manage rows, straight from the live menu
+                    std::vector<MenuSelection*> items;
+                    for (auto e : this->entries)
+                        if (e->selected && e->action == ManageRom)
+                            items.push_back(e);
+                    if (items.empty()) break;
+                    int M = (int)items.size();
+                    std::string slug = this->platformSlug;
+                    bool is3ds = (slug == ROMM_SLUG_3DS);
+                    // rebuildable = Change-art applies: GBA injects + romm3ds NDS forwarders
+                    int rebuildable = 0;
+                    for (auto e : items)
+                        if ((slug == ROMM_SLUG_GBA && e->installed) || (slug == ROMM_SLUG_NDS && e->rtid))
+                            rebuildable++;
+                    // action dialog (3DS: uninstall only; others add Change art when
+                    // any selected item is one of ours)
+                    enum { A_UNINSTALL, A_CHANGEART, A_BACK } act = A_BACK;
+                    if (is3ds || rebuildable == 0) {
+                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
+                                       {"Uninstall selected","Back"}).handle();
+                        act = (c==0) ? A_UNINSTALL : A_BACK;
+                    } else {
+                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
+                                       {"Uninstall selected","Change art selected","Back"}).handle();
+                        act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
+                    }
+                    if (act == A_BACK) break;
+                    if (act == A_UNINSTALL) {
+                        if (Dialog(target,0,0,320,240,{"Uninstall "+std::to_string(M)+" games?"},
+                                   {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                            break;
+                        int okCount = 0;
+                        std::vector<std::string> failed;
+                        for (int i = 0; i < M; i++) {
+                            showLoading(target, {"Uninstalling "+std::to_string(i+1)+"/"+std::to_string(M), items[i]->title});
+                            if (uninstallManageItem(config, *items[i])) okCount++;
+                            else failed.push_back(items[i]->title);
+                        }
+                        std::vector<std::string> msg;
+                        msg.push_back("Uninstalled "+std::to_string(okCount)+" of "+std::to_string(M));
+                        int shown = 0;
+                        for (auto& f : failed) { if (shown++ >= 4) break; msg.push_back("x "+shorten(f,28)); }
+                        if ((int)failed.size() > 4) msg.push_back("...and "+std::to_string((int)failed.size()-4)+" more");
+                        Dialog(target,0,0,320,240, msg, {"OK"}).handle();
+                    } else {   // A_CHANGEART: sequential picker per rebuildable item
+                        int okCount = 0, skipped = 0, done = 0;
+                        std::vector<std::string> failed;
+                        for (int i = 0; i < M; i++) {
+                            MenuSelection* it = items[i];
+                            bool rb = (slug == ROMM_SLUG_GBA && it->installed) || (slug == ROMM_SLUG_NDS && it->rtid);
+                            if (!rb) continue;
+                            done++;
+                            showLoading(target, {"Art "+std::to_string(done)+"/"+std::to_string(rebuildable), it->title});
+                            std::string base = it->path.filename().generic_string();
+                            int rc = (slug == ROMM_SLUG_GBA)
+                                ? changeArtGbaItem(target, config, base, it->title, it->coverPath, it->path.generic_string(), false)
+                                : changeArtNdsRommItem(target, config, base, it->title, it->coverPath, it->path.generic_string(), it->rtid, false);
+                            if (rc == 1) okCount++;
+                            else if (rc == 0) skipped++;
+                            else failed.push_back(it->title);
+                        }
+                        std::vector<std::string> msg;
+                        msg.push_back("Updated art for "+std::to_string(okCount)+" of "+std::to_string(rebuildable));
+                        if (skipped > 0) msg.push_back(std::to_string(skipped)+" skipped");
+                        int shown = 0;
+                        for (auto& f : failed) { if (shown++ >= 3) break; msg.push_back("x "+shorten(f,28)); }
+                        if ((int)failed.size() > 3) msg.push_back("...and "+std::to_string((int)failed.size()-3)+" more");
+                        Dialog(target,0,0,320,240, msg, {"OK"}).handle();
+                    }
+                    while (this->queue.size() > 0) this->queue.pop();
+                    if (!is3ds) { gFwdReady = false; invalidateYanbfCache(); invalidateManagedRoms(); }
+                    showLoading(target, {"Refreshing..."});
+                    return generateManageMenu(this,config->dsiwareCount,slug);
                 }
                 default:
                     break;
