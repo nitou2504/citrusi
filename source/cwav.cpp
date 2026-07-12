@@ -123,6 +123,34 @@ std::string wavToCwav(const std::string& wav) {
     return out;
 }
 
+// A short buffer of PCM16 silence, run through the same CWAV writer as every
+// other banner sound. bannertool (and wavToCwav) lay the sample data out at
+// DATA payload offset 0x18 — byte-for-byte the layout of the romfs GBA banner
+// template — so HOME treats this exactly like a normal (but silent) banner.
+std::string silentCwav() {
+    const u16 channels = 1, bits = 16;
+    const u32 rate = 22050;
+    const u32 samples = 512;                 // ~23 ms, plenty short, all zeros
+    const u32 dataSize = samples * channels * (bits / 8);
+    std::string wav(44 + dataSize, '\0');    // header + already-zero PCM = silence
+    auto w16 = [&](u32 o, u16 v) { memcpy(&wav[o], &v, 2); };
+    auto w32 = [&](u32 o, u32 v) { memcpy(&wav[o], &v, 4); };
+    memcpy(&wav[0], "RIFF", 4);
+    w32(4, 36 + dataSize);
+    memcpy(&wav[8], "WAVE", 4);
+    memcpy(&wav[12], "fmt ", 4);
+    w32(16, 16);
+    w16(20, 1);                              // PCM
+    w16(22, channels);
+    w32(24, rate);
+    w32(28, rate * channels * (bits / 8));   // byte rate
+    w16(32, channels * (bits / 8));          // block align
+    w16(34, bits);
+    memcpy(&wav[36], "data", 4);
+    w32(40, dataSize);
+    return wavToCwav(wav);
+}
+
 std::string fetchGameSound(RommClient& client, const std::string& romPath) {
     FILE* f = fopen(romPath.c_str(), "rb");
     if (!f) return "";

@@ -13,6 +13,7 @@
 #include "lz11.hpp"
 #include "logger.hpp"
 #include "settings.hpp"
+#include "cwav.hpp"
 
 static Logger ctrLogger("CtrBuilder");
 
@@ -659,8 +660,12 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         if (dbg) { fwrite(smdh.data(), 1, smdh.size(), dbg); fclose(dbg); }
     }
 
-    // --- banner (reuse the CBMD patcher; template sound is silent)
-    std::string banner = buildBanner(bnrT, bannerTex, "");
+    // --- banner (reuse the CBMD patcher). Force an explicit, code-generated
+    // silent CWAV rather than trusting the romfs template's embedded sound, so
+    // the injected title never plays a jingle when highlighted on HOME. Falls
+    // back to the template sound if the generator ever fails (returns "").
+    std::string silent = silentCwav();
+    std::string banner = buildBanner(bnrT, bannerTex, silent);
 
     // --- ExeFS header: .code, banner, icon, logo (official VC order; logo
     // is required or AGB_FIRM refuses to boot)
