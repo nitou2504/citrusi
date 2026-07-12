@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <functional>
 #include "romm.hpp"
 #include "sgdb.hpp"
 #include "artstore.hpp"
@@ -69,8 +70,11 @@ bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& cov
 // resolved pieces; missing pieces stay "" and entry.weak reflects them only
 // after the caller applies a fallback. entry.valid is NOT set (caller
 // persists after install).
+// status (optional) gets short progress lines ("Searching SteamGridDB...")
+// for the caller to put on screen between the blocking network steps.
 void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName,
-                   const std::string& title, ArtEntry& entry, ArtPieces& out);
+                   const std::string& title, ArtEntry& entry, ArtPieces& out,
+                   std::function<void(const std::string&)> status = nullptr);
 
 // rebuild pieces from a persisted entry (cache-first). false if a piece that
 // the entry names can't be produced anymore.

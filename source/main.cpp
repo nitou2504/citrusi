@@ -21,6 +21,7 @@ extern "C" {
 #include "covercache.hpp"
 #include "librefresh.hpp"
 #include "dialog.hpp"
+#include "sgdb.hpp"
 namespace fs = std::filesystem;
 
 // default 3dsx main-thread stack is 32KB; http/json/dialog paths need headroom
@@ -44,6 +45,7 @@ inline bool isSystemApp(u64 tid) {
 	return false;
 }
 void denit() {
+	sgdbNetExit();
 	httpcExit();
 	amExit();
 	cfguExit();
@@ -114,6 +116,9 @@ Result init() {
 	if (R_FAILED(httpcInit(0))) {
 		return failWait("Failed to init httpc\n");
 	}
+	// soc:u + curl for the SGDB art client — at boot, never lazily mid-UI
+	// (a first-use socInit alongside live httpc/gsp hard-froze the console)
+	sgdbNetBoot();
 	if (!fileExists(FORWARDER_DIR)) {
 		std::filesystem::create_directories(std::filesystem::path(FORWARDER_DIR));
 	}

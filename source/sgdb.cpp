@@ -13,20 +13,41 @@ static Logger sgdbLogger("SGDB");
 
 #define SOC_BUFFERSIZE 0x100000
 static u32* socBuffer = nullptr;
+static bool gNetReady = false;
+static bool gNetTried = false;
+// one shared easy handle: keep-alive to the same hosts skips a full TLS
+// handshake per request (seconds of CPU each on the 3DS)
+static CURL* gCurl = nullptr;
 
-bool SgdbClient::ensureSoc() {
-    if (socReady) return true;
+// called once from main() init, BEFORE any UI/network runs: soc:u + curl.
+// Lazy init mid-flow (first SGDB use) hard-froze the console.
+bool sgdbNetBoot() {
+    if (gNetTried) return gNetReady;
+    gNetTried = true;
     socBuffer = (u32*)memalign(0x1000, SOC_BUFFERSIZE);
-    if (!socBuffer) { lastError = "soc buffer alloc failed"; return false; }
+    if (!socBuffer) { sgdbLogger.error("soc buffer alloc failed"); return false; }
     Result r = socInit(socBuffer, SOC_BUFFERSIZE);
     if (R_FAILED(r)) {
         free(socBuffer); socBuffer = nullptr;
-        lastError = "socInit failed";
+        char b[48];
+        snprintf(b, sizeof(b), "socInit failed %08lX", (unsigned long)r);
+        sgdbLogger.error(b);
         return false;
     }
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    socReady = true;
+    gNetReady = true;
+    sgdbLogger.info("soc+curl ready");
     return true;
+}
+
+void sgdbNetExit() {
+    if (!gNetReady) return;
+    if (gCurl) { curl_easy_cleanup(gCurl); gCurl = nullptr; }
+    curl_global_cleanup();
+    socExit();
+    free(socBuffer);
+    socBuffer = nullptr;
+    gNetReady = false;
 }
 
 bool SgdbClient::loadKey() {
@@ -55,9 +76,14 @@ static size_t writeCb(char* ptr, size_t size, size_t nmemb, void* ud) {
 }
 
 bool SgdbClient::get(const std::string& url, std::string& out) {
-    if (!ensureSoc()) return false;
+    if (!sgdbNetBoot()) { lastError = "network not ready"; return false; }
     out.clear();
-    CURL* c = curl_easy_init();
+    // log a compact form of the url (no query keys carry secrets — auth is a header)
+    std::string shortUrl = url.substr(0, 100);
+    sgdbLogger.info("GET " + shortUrl);
+    u64 t0 = osGetTime();
+    if (!gCurl) gCurl = curl_easy_init();
+    CURL* c = gCurl;
     if (!c) { lastError = "curl init failed"; return false; }
     struct curl_slist* hdrs = nullptr;
     if (!key.empty() && url.find("steamgriddb.com/api/") != std::string::npos)
@@ -68,8 +94,9 @@ bool SgdbClient::get(const std::string& url, std::string& out) {
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
     curl_easy_setopt(c, CURLOPT_USERAGENT, "romm3ds/0.1");
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 12L);
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
     // matches the app's httpc SSLCOPT_DisableVerify posture; pinned roots TODO
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
@@ -77,9 +104,16 @@ bool SgdbClient::get(const std::string& url, std::string& out) {
     long status = 0;
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
     curl_slist_free_all(hdrs);
-    curl_easy_cleanup(c);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, nullptr);
+    char done[96];
+    snprintf(done, sizeof(done), "GET done res=%d http=%ld %ums %uB",
+             (int)res, status, (unsigned)(osGetTime() - t0), (unsigned)out.size());
+    sgdbLogger.info(done);
     if (res != CURLE_OK) {
         lastError = curl_easy_strerror(res);
+        // drop the handle: a timed-out connection shouldn't poison reuse
+        curl_easy_cleanup(gCurl);
+        gCurl = nullptr;
         return false;
     }
     if (status != 200) {

@@ -163,6 +163,9 @@ std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pic
     if (!sgdb.icons(gameId, list) || list.empty()) return "";
     int pick = pickIconAsset(list);
     if (pick < 0) return "";
+    aflog.info("icons: " + std::to_string(list.size()) + " assets, picked id=" +
+               std::to_string(list[pick].id) + " " + std::to_string(list[pick].width) +
+               "x" + std::to_string(list[pick].height));
     std::string bytes;
     if (!artGetUrl(sgdb, romm, list[pick].url,
                    "sgdb-icon-" + std::to_string(list[pick].id), bytes)) return "";
@@ -256,6 +259,7 @@ int artSgdbStrongMatch(SgdbClient& sgdb, const std::vector<std::string>& queries
         ArtConfidence conf = artConfidence(q, names, &best);
         if (conf == ART_MATCH_STRONG) {
             if (usedQuery) *usedQuery = q;
+            aflog.info("sgdb strong id=" + std::to_string(games[best].id) + " for '" + q + "'");
             return games[best].id;
         }
         aflog.info("sgdb match " + std::to_string((int)conf) + " for '" + q + "'");
@@ -276,10 +280,14 @@ std::vector<std::string> artQueriesFor(const std::string& fsName,
 }
 
 void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName,
-                   const std::string& title, ArtEntry& entry, ArtPieces& out) {
+                   const std::string& title, ArtEntry& entry, ArtPieces& out,
+                   std::function<void(const std::string&)> status) {
+    aflog.info("resolve start: " + fsName);
     // icon: SGDB, only on a strong (auto-pick) match — title tier, then file name
+    if (status) status("Searching SteamGridDB...");
     entry.sgdbGameId = artSgdbStrongMatch(sgdb, artQueriesFor(fsName, title), &entry.query);
     if (entry.sgdbGameId) {
+        if (status) status("Fetching icon...");
         int pickedId = 0;
         out.icon48 = artSgdbIcon(sgdb, romm, entry.sgdbGameId, &pickedId);
         if (!out.icon48.empty()) {
@@ -289,12 +297,15 @@ void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName
     }
 
     // banner: libretro exact-name logo (+ tag-stripped retry)
+    if (status) status("Fetching banner logo...");
     std::string usedName;
     out.bannerTex = artLibretroBanner(sgdb, romm, fsName, &usedName);
     if (!out.bannerTex.empty()) {
         entry.bannerSource = "libretro";
         entry.bannerName = usedName;
     }
+    aflog.info(std::string("resolve done: icon=") + (out.icon48.empty() ? "miss" : "ok") +
+               " banner=" + (out.bannerTex.empty() ? "miss" : "ok"));
 }
 
 bool artBuildFromEntry(SgdbClient& sgdb, RommClient& romm, const std::string& fsName,

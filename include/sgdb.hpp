@@ -21,11 +21,14 @@ struct SgdbIcon {
 // logos share the same shape (id/dims/url/thumb)
 typedef SgdbIcon SgdbAsset;
 
+// init soc:u + curl once, at app boot (doing it lazily mid-UI froze the
+// console alongside the app's other services). false = SGDB disabled.
+bool sgdbNetBoot();
+void sgdbNetExit();
+
 class SgdbClient {
     private:
     std::string key;      // Bearer token from sgdb.env
-    bool socReady = false;
-    bool ensureSoc();
     bool get(const std::string& url, std::string& out);
     bool assets(const char* category, int gameId, std::vector<SgdbAsset>& out);
     public:

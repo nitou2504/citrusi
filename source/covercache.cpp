@@ -24,6 +24,8 @@ struct CoverJob { int id; std::string url; };
 static Thread gWorkers[COVER_WORKERS] = {nullptr};
 static std::atomic<bool> gRun(false);
 static std::atomic<int> gWantId(-1);
+static std::atomic<int> gPauseCount(0);
+static std::atomic<bool> gBusy(false);
 static LightLock gJobsLock;
 static std::vector<CoverJob> gJobs;         // guarded by gJobsLock
 static std::vector<int> gClaimed;           // ids currently being fetched, guarded by gJobsLock
@@ -83,6 +85,10 @@ static void processJob(const CoverJob& job) {
 
 static void workerMain(void*) {
     while (gRun) {
+        if (gPauseCount > 0) {                       // foreground owns the network
+            svcSleepThread(50 * 1000 * 1000LL);
+            continue;
+        }
         CoverJob job = {-1, ""};
         int want = gWantId.exchange(-1);
         LightLock_Lock(&gJobsLock);
@@ -107,7 +113,9 @@ static void workerMain(void*) {
             svcSleepThread(150 * 1000 * 1000LL); // idle: 150ms
             continue;
         }
+        gBusy = true;
         processJob(job);
+        gBusy = false;
         LightLock_Lock(&gJobsLock);
         for (auto it = gClaimed.begin(); it != gClaimed.end(); ++it)
             if (*it == job.id) { gClaimed.erase(it); break; }
@@ -185,6 +193,15 @@ void coverCacheClearMisses() {
         if (e.path().extension() == ".none") { remove(e.path().c_str()); n++; }
     }
     cclog.info("cleared " + std::to_string(n) + " cover misses");
+}
+
+void coverCachePause() {
+    gPauseCount++;
+    while (gBusy) svcSleepThread(10 * 1000 * 1000LL);   // drain the in-flight job
+}
+
+void coverCacheResume() {
+    if (gPauseCount > 0) gPauseCount--;
 }
 
 void coverCacheStop() {

@@ -86,6 +86,7 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
                               const std::string& romPath, const std::string& title,
                               const std::string& coverPath) {
     if (!ensureCtrBuilder(target)) return false;
+    CoverCachePause coverPause;   // own httpc + SD while fetching art/sound
     std::string romBase = std::filesystem::path(romPath).filename().generic_string();
     ensureSgdb();
 
@@ -179,6 +180,9 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
                                      const std::string& coverPath,
                                      ArtEntry& entryOut, ArtPieces& piecesOut,
                                      bool forcePicker = false) {
+    // own the network while art resolves: the cover prefetch worker shares
+    // httpc and the SD card with us
+    CoverCachePause coverPause;
     ensureSgdb();
     ArtEntry ae = artStoreGet(fsName);
     if (ae.valid && !forcePicker) {   // F6: reinstall reuses silently, cache-first
@@ -206,8 +210,8 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
         if (iCh || bCh) entryOut.weak = false;   // the user picked -> ⚠ cleared
         return;
     }
-    showLoading(target, {"Looking up art...", title});
-    artResolveGba(gSgdb, gRomm, fsName, title, entryOut, piecesOut);
+    artResolveGba(gSgdb, gRomm, fsName, title, entryOut, piecesOut,
+                  [&](const std::string& msg) { showLoading(target, {msg, title}); });
     if (forcePicker) {
         artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
                      entryOut, piecesOut, true, true);

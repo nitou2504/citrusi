@@ -22,3 +22,12 @@ bool coverCacheUnavailable(int rommId);
 // forget "no art" misses so covers added later re-fetch (call on library refresh)
 void coverCacheClearMisses();
 void coverCacheStop();
+
+// pause the worker (blocks until its in-flight job finishes) so foreground
+// network/SD work doesn't share httpc with it. Nestable (counted).
+void coverCachePause();
+void coverCacheResume();
+struct CoverCachePause {
+    CoverCachePause() { coverCachePause(); }
+    ~CoverCachePause() { coverCacheResume(); }
+};

@@ -4,6 +4,7 @@
 #include <vector>
 #include "artpicker.hpp"
 #include "artquery.hpp"
+#include "covercache.hpp"
 #include "dialog.hpp"
 #include "teximg.hpp"
 #include "helpers.hpp"
@@ -46,6 +47,7 @@ void freeCands(std::vector<Cand>& v) {
 int resolveGame(const std::string& query, std::string* gameName, bool* offline) {
     if (offline) *offline = false;
     if (!gSgdb.hasKey()) return 0;
+    aplog.info("resolve game: '" + query + "'");
     std::vector<SgdbGame> games;
     if (!gSgdb.search(query, games)) {
         if (offline) *offline = true;
@@ -90,6 +92,7 @@ void buildIconCands(int gameId, const std::string& coverPath,
             }
         } else if (offline) *offline = true;
     }
+    aplog.info("icon cands: " + std::to_string(out.size()));
 }
 
 // candidate libretro names: fsName-derived variants, plus (after a refine)
@@ -145,6 +148,7 @@ void buildBannerCands(int gameId, const std::string& fsName,
         c.name = "RomM cover";
         out.push_back(c);
     }
+    aplog.info("banner cands: " + std::to_string(out.size()));
 }
 
 // fetch + decode ONE pending thumb (called once per frame; blocking but short)
@@ -161,6 +165,7 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
             if (ok && !bytes.empty()) artCacheWrite(c.thumbKey, bytes);
         }
         c.state = (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) ? 1 : 2;
+        if (c.state == 2) aplog.error("thumb fail: " + c.thumbKey);
         return;
     }
 }
@@ -186,6 +191,8 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
     if (iconChosen) *iconChosen = false;
     if (bannerChosen) *bannerChosen = false;
     if (!wantIcon && !wantBanner) return false;
+    CoverCachePause coverPause;   // picker thumbs own the network
+    aplog.info("open: " + fsName);
 
     std::string query = entry.query.empty() ? artSanitizeQuery(fsName) : entry.query;
     std::string gameName;
