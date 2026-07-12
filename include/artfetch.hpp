@@ -68,6 +68,26 @@ int artSgdbStrongMatch(SgdbClient& sgdb, const std::vector<std::string>& queries
 bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& coverPath,
                       bool wantIcon, bool wantBanner, ArtPieces& out);
 
+// ---- iiSU community asset server (assets.iisu.community) ------------------
+// Open JSON API, no key. iisu_box_art = square launcher icons; logo/hero =
+// banner-shaped. Downloads 302 to storage.googleapis.com PNGs (curl follows).
+struct IisuAsset {
+    int id = 0;
+    std::string type;        // "iisu_box_art" | "logo" | "hero"
+    int width = 0, height = 0;
+    std::string gameName;
+    std::string url;         // /api/assets/<id>/download
+};
+// server-side filtered search (q + platform from the RomM slug)
+bool iisuSearch(SgdbClient& net, const std::string& query, const std::string& slug,
+                std::vector<IisuAsset>& out);
+// fetch + render by asset id (download url is deterministic — reinstall safe)
+std::string artIisuIcon48ById(SgdbClient& sgdb, RommClient& romm, int assetId);
+std::string artIisuBannerById(SgdbClient& sgdb, RommClient& romm, int assetId);
+// auto icon tier: box art whose name norm-matches the query exactly
+std::string artIisuIconAuto(SgdbClient& sgdb, RommClient& romm, const std::string& query,
+                            const std::string& slug, ArtEntry& entry);
+
 // ---- auto resolution (tier 1) ---------------------------------------------
 
 // GBA auto path: SGDB search (strong match -> icon; title tier then file

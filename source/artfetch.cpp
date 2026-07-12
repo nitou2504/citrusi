@@ -5,6 +5,7 @@
 #include "artfetch.hpp"
 #include "teximg.hpp"
 #include "helpers.hpp"
+#include "json.hpp"
 #include "logger.hpp"
 
 // stb_image implementation lives in boxart.cpp
@@ -377,6 +378,79 @@ bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& cov
     return ok;
 }
 
+// ---- iiSU community asset server -------------------------------------------
+
+#define IISU_BASE "https://assets.iisu.community"
+
+static const char* iisuPlatformFor(const std::string& slug) {
+    if (slug == ROMM_SLUG_GBA) return "Game Boy Advance";
+    if (slug == ROMM_SLUG_3DS) return "Nintendo 3DS";
+    return "Nintendo DS";
+}
+
+bool iisuSearch(SgdbClient& net, const std::string& query, const std::string& slug,
+                std::vector<IisuAsset>& out) {
+    out.clear();
+    std::string body;
+    std::string url = std::string(IISU_BASE) + "/api/explorer/all-assets/list?limit=40&platform=" +
+                      urlEncodePath(iisuPlatformFor(slug)) + "&q=" + urlEncodePath(query);
+    if (!net.fetchUrl(url, body)) return false;      // search results: never disk-cached
+    try {
+        nlohmann::json j = nlohmann::json::parse(body);
+        for (auto& a : j["assets"]) {
+            IisuAsset ia;
+            ia.id = a.value("id", 0);
+            ia.type = a.value("asset_type", "");
+            ia.width = a.value("width", 0);
+            ia.height = a.value("height", 0);
+            ia.gameName = a.value("game_name", "");
+            ia.url = std::string(IISU_BASE) + "/api/assets/" + std::to_string(ia.id) + "/download";
+            if (ia.id) out.push_back(ia);
+        }
+    } catch (...) {
+        aflog.error("bad JSON from iisu");
+        return false;
+    }
+    aflog.info("iisu: " + std::to_string(out.size()) + " assets for '" + query + "'");
+    return true;
+}
+
+static std::string iisuFetch(SgdbClient& sgdb, RommClient& romm, int assetId, std::string& bytes) {
+    std::string url = std::string(IISU_BASE) + "/api/assets/" + std::to_string(assetId) + "/download";
+    artGetUrl(sgdb, romm, url, "iisu-" + std::to_string(assetId), bytes);
+    return bytes;
+}
+
+std::string artIisuIcon48ById(SgdbClient& sgdb, RommClient& romm, int assetId) {
+    std::string bytes;
+    iisuFetch(sgdb, romm, assetId, bytes);
+    return bytes.empty() ? "" : artIcon48FromImage(bytes);
+}
+
+std::string artIisuBannerById(SgdbClient& sgdb, RommClient& romm, int assetId) {
+    std::string bytes;
+    iisuFetch(sgdb, romm, assetId, bytes);
+    return bytes.empty() ? "" : artBannerFromImage(bytes);
+}
+
+std::string artIisuIconAuto(SgdbClient& sgdb, RommClient& romm, const std::string& query,
+                            const std::string& slug, ArtEntry& entry) {
+    std::vector<IisuAsset> assets;
+    if (!iisuSearch(sgdb, query, slug, assets)) return "";
+    std::string qn = artNorm(query);
+    for (auto& a : assets) {
+        if (a.type != "iisu_box_art" || artNorm(a.gameName) != qn) continue;
+        std::string icon = artIisuIcon48ById(sgdb, romm, a.id);
+        if (!icon.empty()) {
+            aflog.info("iisu icon hit id=" + std::to_string(a.id) + " '" + a.gameName + "'");
+            entry.iconSource = "iisu";
+            entry.iconId = a.id;
+            return icon;
+        }
+    }
+    return "";
+}
+
 // ---- auto resolution ---------------------------------------------------------
 
 int artSgdbStrongMatch(SgdbClient& sgdb, const std::vector<std::string>& queries,
@@ -432,6 +506,13 @@ void artResolveGba(SgdbClient& sgdb, RommClient& romm, const std::string& fsName
             entry.iconId = pickedId;
         }
     }
+    if (out.icon48.empty()) {   // iiSU box art on an exact name match
+        if (status) status("Searching iiSU...");
+        for (const std::string& q : artQueriesFor(fsName, title)) {
+            out.icon48 = artIisuIconAuto(sgdb, romm, q, ROMM_SLUG_GBA, entry);
+            if (!out.icon48.empty()) { entry.query = q; break; }
+        }
+    }
 
     // banner: libretro exact-name logo (+ tag-stripped retry)
     if (status) status("Fetching banner logo...");
@@ -451,6 +532,9 @@ bool artBuildFromEntry(SgdbClient& sgdb, RommClient& romm, const std::string& fs
     if (entry.iconSource == "sgdb") {
         out.icon48 = artSgdbIconById(sgdb, romm, entry.sgdbGameId, entry.iconId);
         if (out.icon48.empty()) ok = false;
+    } else if (entry.iconSource == "iisu") {
+        out.icon48 = artIisuIcon48ById(sgdb, romm, entry.iconId);
+        if (out.icon48.empty()) ok = false;
     } else if (entry.iconSource == "romm-cover") {
         ArtPieces cov;
         if (artFromRommCover(sgdb, romm, coverPath, true, false, cov))
@@ -468,6 +552,9 @@ bool artBuildFromEntry(SgdbClient& sgdb, RommClient& romm, const std::string& fs
         if (out.bannerTex.empty()) ok = false;
     } else if (entry.bannerSource == "sgdb-grid") {
         out.bannerTex = artSgdbGridById(sgdb, romm, entry.sgdbGameId, entry.bannerId);
+        if (out.bannerTex.empty()) ok = false;
+    } else if (entry.bannerSource == "iisu") {
+        out.bannerTex = artIisuBannerById(sgdb, romm, entry.bannerId);
         if (out.bannerTex.empty()) ok = false;
     } else if (entry.bannerSource == "romm-cover") {
         ArtPieces cov;

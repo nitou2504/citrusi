@@ -66,8 +66,9 @@ int resolveGame(const std::string& query, std::string* gameName, bool* offline) 
 }
 
 // same preference order as the auto path: SGDB icons first (smallest
-// adequate first), the RomM cover tile last (it's the fallback)
-void buildIconCands(int gameId, const std::string& coverPath,
+// adequate first), then iiSU box arts, the RomM cover tile last (fallback)
+void buildIconCands(int gameId, const std::string& query, const std::string& slug,
+                    const std::string& coverPath,
                     std::vector<Cand>& out, bool* offline) {
     freeCands(out);
     if (gameId && gSgdb.hasKey()) {
@@ -87,6 +88,26 @@ void buildIconCands(int gameId, const std::string& coverPath,
             }
         } else if (offline) *offline = true;
     }
+    // iiSU community box arts (square launcher icons); exact matches first
+    std::vector<IisuAsset> iisu;
+    if (iisuSearch(gSgdb, query, slug, iisu)) {
+        std::string qn = artNorm(query);
+        std::stable_sort(iisu.begin(), iisu.end(), [&](const IisuAsset& a, const IisuAsset& b) {
+            return (artNorm(a.gameName) == qn) > (artNorm(b.gameName) == qn);
+        });
+        for (auto& a : iisu) {
+            if (a.type != "iisu_box_art") continue;
+            Cand c;
+            c.source = "iisu";
+            c.id = a.id;
+            c.w = a.width; c.h = a.height;
+            c.url = a.url;
+            c.name = a.gameName;
+            c.cacheKey = "iisu-" + std::to_string(a.id);
+            c.thumbKey = c.cacheKey;   // their thumbnails are webp; reuse the PNG
+            out.push_back(c);
+        }
+    }
     if (!coverPath.empty()) {
         Cand c;
         c.source = "romm-cover";
@@ -101,7 +122,7 @@ void buildIconCands(int gameId, const std::string& coverPath,
 
 // candidate libretro names: fsName-derived variants, plus (after a refine)
 // the corrected query text itself
-void buildBannerCands(int gameId, const std::string& fsName,
+void buildBannerCands(int gameId, const std::string& query, const std::string& fsName,
                       const std::string& refineName, const std::string& coverPath,
                       const std::string& slug, std::vector<Cand>& out, bool* offline) {
     freeCands(out);
@@ -152,6 +173,26 @@ void buildBannerCands(int gameId, const std::string& fsName,
                 c.thumbKey = "sgdb-grid-th-" + std::to_string(g.id);
                 out.push_back(c);
             }
+        }
+    }
+    // iiSU logos + heroes (banner-shaped community art); exact matches first
+    std::vector<IisuAsset> iisu;
+    if (iisuSearch(gSgdb, query, slug, iisu)) {
+        std::string qn = artNorm(query);
+        std::stable_sort(iisu.begin(), iisu.end(), [&](const IisuAsset& a, const IisuAsset& b) {
+            return (artNorm(a.gameName) == qn) > (artNorm(b.gameName) == qn);
+        });
+        for (auto& a : iisu) {
+            if (a.type != "logo" && a.type != "hero") continue;
+            Cand c;
+            c.source = "iisu";
+            c.id = a.id;
+            c.w = a.width; c.h = a.height;
+            c.url = a.url;
+            c.name = a.gameName + " (" + a.type + ")";
+            c.cacheKey = "iisu-" + std::to_string(a.id);
+            c.thumbKey = c.cacheKey;
+            out.push_back(c);
         }
     }
     if (!coverPath.empty()) {
@@ -226,12 +267,12 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
     auto ensureCands = [&]() {
         if (page == 0 && !iconLoaded) {
             showLoading(target, {"Searching art...", query});
-            buildIconCands(gameId, coverPath, iconCands, &offline);
+            buildIconCands(gameId, query, slug, coverPath, iconCands, &offline);
             iconLoaded = true;
         }
         if (page == 1 && !bannerLoaded) {
             showLoading(target, {"Searching art...", query});
-            buildBannerCands(gameId, fsName, refineName, coverPath, slug, bannerCands, &offline);
+            buildBannerCands(gameId, query, fsName, refineName, coverPath, slug, bannerCands, &offline);
             bannerLoaded = true;
         }
     };
@@ -327,7 +368,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
                 if (gameId) entry.sgdbGameId = gameId;
                 if (page == 0) {
                     pieces.icon48 = piece;
-                    entry.iconSource = (c.source == "sgdb") ? "sgdb" : "romm-cover";
+                    entry.iconSource = c.source;   // "sgdb" | "iisu" | "romm-cover"
                     entry.iconId = c.id;
                     pickedIcon = true;
                     if (iconChosen) *iconChosen = true;
@@ -389,6 +430,8 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
                 snprintf(info, sizeof(info), "SteamGridDB  ico (native sizes)");
             else if (c.source == "sgdb-grid")
                 snprintf(info, sizeof(info), "SteamGridDB grid  %dx%d", c.w, c.h);
+            else if (c.source == "iisu")
+                snprintf(info, sizeof(info), "iiSU  %dx%d  %s", c.w, c.h, c.name.c_str());
             else if (c.source == "sgdb" && c.w)
                 snprintf(info, sizeof(info), "SteamGridDB  %dx%d", c.w, c.h);
             else if (c.source == "libretro")
