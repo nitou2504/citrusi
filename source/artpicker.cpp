@@ -26,7 +26,7 @@ extern SgdbClient gSgdb;
 namespace {
 
 struct Cand {
-    std::string source;      // "sgdb" | "romm-cover" | "libretro"
+    std::string source;      // "sgdb" | "sgdb-grid" | "iisu" | "romm-cover" | "libretro"
     int id = 0;
     int w = 0, h = 0;        // native dims (0 = unknown)
     std::string url;         // full-res url
@@ -36,6 +36,7 @@ struct Cand {
     std::string name;        // libretro No-Intro name / short label
     C2D_Image img = {nullptr, nullptr};
     int state = 0;           // 0 pending, 1 loaded, 2 failed
+    int tries = 0;           // thumb fetch attempts (cdn timeouts get a retry)
 };
 
 void freeCands(std::vector<Cand>& v) {
@@ -216,8 +217,15 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
         std::string bytes;
         artGetUrl(gSgdb, gRomm, c.thumbUrl.empty() ? c.url : c.thumbUrl, c.thumbKey, bytes);
         aplog.info("thumb bytes: " + std::to_string(bytes.size()));
-        c.state = (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) ? 1 : 2;
-        if (c.state == 2) aplog.error("thumb fail: " + c.thumbKey);
+        if (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) {
+            c.state = 1;
+        } else if (++c.tries < 2 && bytes.empty()) {
+            // cdn timeout: leave pending, retried on a later frame
+            aplog.error("thumb retry: " + c.thumbKey);
+        } else {
+            c.state = 2;
+            aplog.error("thumb fail: " + c.thumbKey);
+        }
         return;
     }
 }
@@ -352,12 +360,8 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
                         ok = !piece.empty();
                     }
                 } else {
-                    std::string bytes;
-                    if (artGetUrl(gSgdb, gRomm, c.url.empty() ? "" : c.url, c.cacheKey, bytes) ||
-                        !(bytes = artCacheRead(c.cacheKey)).empty()) {
-                        piece = (page == 0) ? artIcon48FromImage(bytes) : artBannerFromImage(bytes);
-                        ok = !piece.empty();
-                    }
+                    piece = artFetchRender(gSgdb, gRomm, c.url, c.cacheKey, page == 0);
+                    ok = !piece.empty();
                 }
                 if (!ok) {
                     Dialog(target, 0, 0, 320, 240, {"Couldn't fetch that one.",

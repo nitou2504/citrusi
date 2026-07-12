@@ -30,6 +30,10 @@ std::string artBannerFromImage(const std::string& bytes);
 // -> RomM httpc) with the on-disk raw cache. cacheKey names the cache slot.
 bool artGetUrl(SgdbClient& sgdb, RommClient& romm, const std::string& url,
                const std::string& cacheKey, std::string& bytes);
+// cached fetch + render (icon48 or bannerTex); purges the cache slot and
+// refetches once when the render fails (corrupt cached bytes)
+std::string artFetchRender(SgdbClient& sgdb, RommClient& romm, const std::string& url,
+                           const std::string& key, bool asIcon);
 
 // ---- source fetchers -----------------------------------------------------
 

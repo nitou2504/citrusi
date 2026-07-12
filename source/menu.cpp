@@ -84,7 +84,7 @@ static bool ensureCtrBuilder(C3D_RenderTarget* target) {
 // The SMDH icon is always the ROM's own DS icon. Shows its own progress.
 static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
                               const std::string& romPath, const std::string& title,
-                              const std::string& coverPath) {
+                              const std::string& coverPath, bool pickArt = false) {
     if (!ensureCtrBuilder(target)) return false;
     CoverCachePause coverPause;   // own httpc + SD while fetching art/sound
     std::string romBase = std::filesystem::path(romPath).filename().generic_string();
@@ -93,7 +93,24 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
     ArtEntry ae = artStoreGet(romBase);
     std::string boxart;
     bool persist = false;
-    if (ae.valid && !ae.bannerSource.empty()) {   // F6: reuse silently
+    if (pickArt) {                                // "Change art": banner picker first
+        ArtEntry pe = ae;
+        if (pe.query.empty()) {
+            std::vector<std::string> qs = artQueriesFor(romBase, title);
+            pe.query = qs.empty() ? artSanitizeQuery(romBase) : qs[0];
+        }
+        ArtPieces picked;
+        bool bCh = false;
+        artPickerRun(target, romBase, title, coverPath, ROMM_SLUG_NDS,
+                     pe, picked, false, true, nullptr, &bCh);
+        if (bCh) {
+            boxart = picked.bannerTex;
+            pe.weak = false;
+            ae = pe;
+            persist = true;
+        }
+    }
+    if (boxart.empty() && ae.valid && !ae.bannerSource.empty()) {   // F6: reuse silently
         showLoading(target, {"Preparing art...", title});
         ArtPieces p;
         if (artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, p))
@@ -1730,15 +1747,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     std::string romPath = rommLocalPath(entry.fsName, entry.platformSlug); // playable file
                     bool onSD = fileExists(is3ds ? dest : romPath);
                     bool needDownload = true;
-                    bool gbaPickArt = false;    // S1 "+ Art": pick before installing
-                    if (onSD) {
-                        int c = Dialog(target,0,0,320,240,{is3ds?"Already downloaded:":"Already on SD:",entry.fsName},{isNds?"Install fwd":"Install","Redownload","Cancel"}).handle();
+                    bool pickArt = false;    // "+ Art"/"Change art": picker before the (re)install
+                    if (onSD && is3ds) {
+                        int c = Dialog(target,0,0,320,240,{"Already downloaded:",entry.fsName},{"Install","Redownload","Cancel"}).handle();
                         if (c==2 || c==-1) break;
                         needDownload = (c==1);
+                    } else if (onSD) {
+                        int c = Dialog(target,0,0,320,240,{"Already on SD:",entry.fsName},{isNds?"Install fwd":"Install","Change art","Back"}).handle();
+                        if (c==2 || c==-1) break;
+                        pickArt = (c==1);
+                        needDownload = false;
                     } else if (isGba) {
                         int c = Dialog(target,0,0,320,240,{"Download for GBA inject?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),"+ Art",gLang.getString("menu_no")}).handle();
                         if (c==2 || c==-1) break;
-                        gbaPickArt = (c==1);
+                        pickArt = (c==1);
                     } else {
                         const char* q = is3ds ? "Download + install?" :
                                                 "Download + install forwarder?";
@@ -1752,7 +1774,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     ArtPieces gbaArt;
                     if (isGba)
                         resolveGbaArtInteractive(target, config, entry.fsName, entry.title,
-                                                 entry.coverPath, gbaArtEntry, gbaArt, gbaPickArt);
+                                                 entry.coverPath, gbaArtEntry, gbaArt, pickArt);
                     rlog.info("install: pre-download needDownload=" + std::string(needDownload?"1":"0") + " dest=" + dest);
                     if (needDownload) {
                         std::error_code ec;
@@ -1861,7 +1883,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Inject failed",gr->message,gLang.parseString("format_hex",(u32)gr->code)},{"OK"}).handle();
                         delete gr;
                     } else {
-                        installed = buildForwarderFor(target, config, romPath, entry.title, entry.coverPath);
+                        installed = buildForwarderFor(target, config, romPath, entry.title, entry.coverPath, pickArt);
                         if (installed) { gFwdReady = false; invalidateManagedRoms(); }   // refresh forwarder detection
                     }
                     if (installed) {

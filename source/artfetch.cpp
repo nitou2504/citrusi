@@ -225,25 +225,28 @@ bool artGetUrl(SgdbClient& sgdb, RommClient& romm, const std::string& url,
 
 // ---- source fetchers --------------------------------------------------------
 
+// cached fetch + render; on a render failure the cache slot is purged (a
+// corrupt cached download poisons it forever otherwise) and fetched once more
+std::string artFetchRender(SgdbClient& sgdb, RommClient& romm, const std::string& url,
+                           const std::string& key, bool asIcon) {
+    std::string bytes, piece;
+    if (artGetUrl(sgdb, romm, url, key, bytes))
+        piece = asIcon ? artIcon48FromImage(bytes) : artBannerFromImage(bytes);
+    if (piece.empty()) {
+        aflog.error("render fail (" + std::to_string(bytes.size()) + "B), refetch: " + key);
+        remove(artCachePath(key).c_str());
+        bytes.clear();
+        if (artGetUrl(sgdb, romm, url, key, bytes))
+            piece = asIcon ? artIcon48FromImage(bytes) : artBannerFromImage(bytes);
+    }
+    return piece;
+}
+
 std::string artLibretroBanner(SgdbClient& sgdb, RommClient& romm,
                               const std::string& fsName, std::string* usedName) {
     for (const std::string& name : libretroNameVariants(fsName)) {
-        std::string url = LIBRETRO_GBA_LOGOS + urlEncodePath(name) + ".png";
-        std::string key = "libretro-gba-" + name;
-        std::string bytes;
-        if (!artGetUrl(sgdb, romm, url, key, bytes))
-            continue;
-        std::string tex = artBannerFromImage(bytes);
-        if (tex.empty()) {
-            // a truncated download may have been cached (e.g. by the freeze
-            // session): purge the slot and refetch once
-            aflog.error("libretro decode fail (" + std::to_string(bytes.size()) +
-                        "B cached), refetching: " + name);
-            remove(artCachePath(key).c_str());
-            bytes.clear();
-            if (artGetUrl(sgdb, romm, url, key, bytes))
-                tex = artBannerFromImage(bytes);
-        }
+        std::string tex = artFetchRender(sgdb, romm, LIBRETRO_GBA_LOGOS + urlEncodePath(name) + ".png",
+                                         "libretro-gba-" + name, false);
         if (!tex.empty()) {
             aflog.info("libretro logo hit: " + name);
             if (usedName) *usedName = name;
@@ -283,10 +286,8 @@ std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pic
     int tries = 0;
     for (auto& a : list) {
         if (++tries > 4) break;       // a bad asset shouldn't stall the install
-        std::string bytes;
-        if (!artGetUrl(sgdb, romm, a.url, "sgdb-icon-" + std::to_string(a.id), bytes))
-            continue;
-        std::string icon = artIcon48FromImage(bytes);
+        std::string icon = artFetchRender(sgdb, romm, a.url,
+                                          "sgdb-icon-" + std::to_string(a.id), true);
         if (!icon.empty()) {
             aflog.info("icon picked id=" + std::to_string(a.id) + " " +
                        (artAssetIsIco(a) ? "ico" : std::to_string(a.width) + "x" + std::to_string(a.height)));
@@ -297,49 +298,37 @@ std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pic
     return "";
 }
 
-std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId) {
-    std::string bytes = artCacheRead("sgdb-icon-" + std::to_string(assetId));
-    if (bytes.empty()) {
-        std::vector<SgdbIcon> list;
-        if (!sgdb.icons(gameId, list)) return "";
-        for (auto& a : list)
-            if (a.id == assetId) {
-                artGetUrl(sgdb, romm, a.url, "sgdb-icon-" + std::to_string(assetId), bytes);
-                break;
-            }
-        if (bytes.empty()) return "";
+// cache-first render; on corrupt cache, re-lists the category to recover the
+// asset url and refetches once (shared by the three ById lookups)
+static std::string sgdbById(SgdbClient& sgdb, RommClient& romm, const char* prefix,
+                            bool asIcon, int gameId, int assetId,
+                            bool (SgdbClient::*lister)(int, std::vector<SgdbAsset>&)) {
+    std::string key = std::string(prefix) + std::to_string(assetId);
+    std::string bytes = artCacheRead(key);
+    if (!bytes.empty()) {
+        std::string piece = asIcon ? artIcon48FromImage(bytes) : artBannerFromImage(bytes);
+        if (!piece.empty()) return piece;
+        aflog.error("corrupt cache purged: " + key);
+        remove(artCachePath(key).c_str());
     }
-    return artIcon48FromImage(bytes);
+    std::vector<SgdbAsset> list;
+    if (!(sgdb.*lister)(gameId, list)) return "";
+    for (auto& a : list)
+        if (a.id == assetId)
+            return artFetchRender(sgdb, romm, a.url, key, asIcon);
+    return "";
+}
+
+std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId) {
+    return sgdbById(sgdb, romm, "sgdb-icon-", true, gameId, assetId, &SgdbClient::icons);
 }
 
 std::string artSgdbLogoById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId) {
-    std::string bytes = artCacheRead("sgdb-logo-" + std::to_string(assetId));
-    if (bytes.empty()) {
-        std::vector<SgdbAsset> list;
-        if (!sgdb.logos(gameId, list)) return "";
-        for (auto& a : list)
-            if (a.id == assetId) {
-                artGetUrl(sgdb, romm, a.url, "sgdb-logo-" + std::to_string(assetId), bytes);
-                break;
-            }
-        if (bytes.empty()) return "";
-    }
-    return artBannerFromImage(bytes);
+    return sgdbById(sgdb, romm, "sgdb-logo-", false, gameId, assetId, &SgdbClient::logos);
 }
 
 std::string artSgdbGridById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId) {
-    std::string bytes = artCacheRead("sgdb-grid-" + std::to_string(assetId));
-    if (bytes.empty()) {
-        std::vector<SgdbAsset> list;
-        if (!sgdb.grids(gameId, list)) return "";
-        for (auto& a : list)
-            if (a.id == assetId) {
-                artGetUrl(sgdb, romm, a.url, "sgdb-grid-" + std::to_string(assetId), bytes);
-                break;
-            }
-        if (bytes.empty()) return "";
-    }
-    return artBannerFromImage(bytes);
+    return sgdbById(sgdb, romm, "sgdb-grid-", false, gameId, assetId, &SgdbClient::grids);
 }
 
 std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
@@ -348,10 +337,8 @@ std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
     if (!gameId) return "";
     std::vector<SgdbAsset> logos;
     if (!sgdb.logos(gameId, logos) || logos.empty()) return "";
-    std::string bytes;
-    if (!artGetUrl(sgdb, romm, logos[0].url,
-                   "sgdb-logo-" + std::to_string(logos[0].id), bytes)) return "";
-    std::string tex = artBannerFromImage(bytes);
+    std::string tex = artFetchRender(sgdb, romm, logos[0].url,
+                                     "sgdb-logo-" + std::to_string(logos[0].id), false);
     if (!tex.empty()) {
         entry.sgdbGameId = gameId;
         entry.bannerSource = "sgdb";
@@ -364,15 +351,13 @@ std::string artSgdbLogoAuto(SgdbClient& sgdb, RommClient& romm,
 bool artFromRommCover(SgdbClient& sgdb, RommClient& romm, const std::string& coverPath,
                       bool wantIcon, bool wantBanner, ArtPieces& out) {
     if (coverPath.empty()) return false;
-    std::string bytes;
-    if (!artGetUrl(sgdb, romm, coverPath, "cover-" + coverPath, bytes)) return false;
     bool ok = true;
     if (wantIcon) {
-        out.icon48 = artIcon48FromImage(bytes);
+        out.icon48 = artFetchRender(sgdb, romm, coverPath, "cover-" + coverPath, true);
         ok = ok && !out.icon48.empty();
     }
     if (wantBanner) {
-        out.bannerTex = artBannerFromImage(bytes);
+        out.bannerTex = artFetchRender(sgdb, romm, coverPath, "cover-" + coverPath, false);
         ok = ok && !out.bannerTex.empty();
     }
     return ok;
@@ -415,22 +400,16 @@ bool iisuSearch(SgdbClient& net, const std::string& query, const std::string& sl
     return true;
 }
 
-static std::string iisuFetch(SgdbClient& sgdb, RommClient& romm, int assetId, std::string& bytes) {
-    std::string url = std::string(IISU_BASE) + "/api/assets/" + std::to_string(assetId) + "/download";
-    artGetUrl(sgdb, romm, url, "iisu-" + std::to_string(assetId), bytes);
-    return bytes;
-}
-
 std::string artIisuIcon48ById(SgdbClient& sgdb, RommClient& romm, int assetId) {
-    std::string bytes;
-    iisuFetch(sgdb, romm, assetId, bytes);
-    return bytes.empty() ? "" : artIcon48FromImage(bytes);
+    return artFetchRender(sgdb, romm,
+        std::string(IISU_BASE) + "/api/assets/" + std::to_string(assetId) + "/download",
+        "iisu-" + std::to_string(assetId), true);
 }
 
 std::string artIisuBannerById(SgdbClient& sgdb, RommClient& romm, int assetId) {
-    std::string bytes;
-    iisuFetch(sgdb, romm, assetId, bytes);
-    return bytes.empty() ? "" : artBannerFromImage(bytes);
+    return artFetchRender(sgdb, romm,
+        std::string(IISU_BASE) + "/api/assets/" + std::to_string(assetId) + "/download",
+        "iisu-" + std::to_string(assetId), false);
 }
 
 std::string artIisuIconAuto(SgdbClient& sgdb, RommClient& romm, const std::string& query,
