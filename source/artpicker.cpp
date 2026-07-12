@@ -73,15 +73,7 @@ void buildIconCands(int gameId, const std::string& coverPath,
     if (gameId && gSgdb.hasKey()) {
         std::vector<SgdbIcon> icons;
         if (gSgdb.icons(gameId, icons)) {
-            // sort like the auto pick: adequate (>=48px) by ascending area,
-            // then the too-small ones by descending area
-            std::sort(icons.begin(), icons.end(), [](const SgdbIcon& a, const SgdbIcon& b) {
-                bool aFit = std::min(a.width, a.height) >= 48;
-                bool bFit = std::min(b.width, b.height) >= 48;
-                if (aFit != bFit) return aFit;
-                long aa = (long)a.width * a.height, ba = (long)b.width * b.height;
-                return aFit ? aa < ba : aa > ba;
-            });
+            artSortIconAssets(icons);   // same preference as the auto pick
             for (auto& i : icons) {
                 Cand c;
                 c.source = "sgdb";
@@ -377,7 +369,10 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
         if (count > 0 && cursor < count) {
             Cand& c = cands[cursor];
             char info[96];
-            if (c.source == "sgdb" && c.w)
+            if (c.source == "sgdb" && c.url.size() > 4 &&
+                c.url.compare(c.url.size() - 4, 4, ".ico") == 0)
+                snprintf(info, sizeof(info), "SteamGridDB  ico (native sizes)");
+            else if (c.source == "sgdb" && c.w)
                 snprintf(info, sizeof(info), "SteamGridDB  %dx%d", c.w, c.h);
             else if (c.source == "libretro")
                 snprintf(info, sizeof(info), "libretro logo");

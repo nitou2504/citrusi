@@ -144,9 +144,12 @@ bool SgdbClient::search(const std::string& query, std::vector<SgdbGame>& out) {
 
 bool SgdbClient::assets(const char* category, int gameId, std::vector<SgdbAsset>& out) {
     out.clear();
+    // icons come unfiltered: the .ico assets often carry native 48x48/24x24
+    // frames (exactly the SMDH sizes); logos stay PNG-only
+    std::string filter = (strcmp(category, "icons") == 0) ? "" : "?mimes=image/png";
     std::string body;
     if (!get("https://www.steamgriddb.com/api/v2/" + std::string(category) +
-             "/game/" + std::to_string(gameId) + "?mimes=image/png", body)) return false;
+             "/game/" + std::to_string(gameId) + filter, body)) return false;
     try {
         nlohmann::json j = nlohmann::json::parse(body);
         if (!j.value("success", false)) { lastError = "api error"; return false; }

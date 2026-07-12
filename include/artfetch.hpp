@@ -38,9 +38,12 @@ bool artGetUrl(SgdbClient& sgdb, RommClient& romm, const std::string& url,
 std::string artLibretroBanner(SgdbClient& sgdb, RommClient& romm,
                               const std::string& fsName, std::string* usedName);
 
-// pick + fetch + render an SGDB icon for a game (smallest asset >= 48px).
-// Returns icon48; *pickedId = asset id.
+// pick + fetch + render an SGDB icon for a game. Preference: .ico assets
+// (native 48px frames), then smallest PNG >= 48px. *pickedId = asset id.
 std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pickedId);
+// shared preference order (auto pick + picker grid)
+void artSortIconAssets(std::vector<SgdbIcon>& list);
+bool artAssetIsIco(const SgdbAsset& a);
 // same for a specific asset id (reinstall path); "" if the id vanished
 std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId);
 // SGDB logo (banner source) by asset id

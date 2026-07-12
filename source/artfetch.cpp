@@ -54,54 +54,143 @@ std::string artBannerFromImage(const std::string& bytes) {
     return tile4444(canvas);
 }
 
+// ---- .ico container -------------------------------------------------------
+// SGDB icon assets are often .ico with native 48x48/24x24 frames — exactly
+// the SMDH sizes, so they beat downscaled PNGs when present.
+
+static inline u16 icoRd16(const u8* p) { return p[0] | (p[1] << 8); }
+static inline u32 icoRd32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((u32)p[3] << 24); }
+
+bool artIsIco(const std::string& b) {
+    return b.size() >= 6 && b[0] == 0 && b[1] == 0 && b[2] == 1 && b[3] == 0;
+}
+
+// decodes one ico frame (PNG or 32/24/8bpp BMP + AND mask) to RGBA
+static std::vector<u8> icoFrameRGBA(const u8* d, u32 size, int* w, int* h) {
+    std::vector<u8> out;
+    if (size >= 8 && memcmp(d, "\x89PNG", 4) == 0) {
+        int comp = 0;
+        u8* px = stbi_load_from_memory(d, size, w, h, &comp, 4);
+        if (!px) return out;
+        out.assign(px, px + (size_t)*w * *h * 4);
+        stbi_image_free(px);
+        return out;
+    }
+    if (size < 40 || icoRd32(d) != 40) return out;          // BITMAPINFOHEADER only
+    int bw = (int)icoRd32(d + 4);
+    int bh = (int)icoRd32(d + 8) / 2;                        // height counts XOR+AND
+    u16 bpp = icoRd16(d + 14);
+    if (icoRd32(d + 16) != 0) return out;                    // BI_RGB only
+    if (bw <= 0 || bh <= 0 || bw > 512 || bh > 512) return out;
+    u32 palN = (bpp == 8) ? (icoRd32(d + 32) ? icoRd32(d + 32) : 256) : 0;
+    const u8* pal = d + 40;
+    const u8* xorD = pal + palN * 4;
+    u32 xorStride = ((u32)bw * bpp + 31) / 32 * 4;
+    u32 andStride = ((u32)bw + 31) / 32 * 4;
+    const u8* andD = xorD + xorStride * bh;
+    if ((u32)(andD - d) + andStride * bh > size) return out;
+    out.resize((size_t)bw * bh * 4);
+    bool anyAlpha = false;
+    for (int y = 0; y < bh; y++) {
+        const u8* row = xorD + xorStride * (bh - 1 - y);     // bottom-up
+        const u8* mrow = andD + andStride * (bh - 1 - y);
+        for (int x = 0; x < bw; x++) {
+            u8* o = &out[((size_t)y * bw + x) * 4];
+            if (bpp == 32) {
+                o[0] = row[x*4+2]; o[1] = row[x*4+1]; o[2] = row[x*4]; o[3] = row[x*4+3];
+                if (o[3]) anyAlpha = true;
+            } else if (bpp == 24) {
+                o[0] = row[x*3+2]; o[1] = row[x*3+1]; o[2] = row[x*3]; o[3] = 255;
+            } else if (bpp == 8) {
+                const u8* c = &pal[(u32)row[x] * 4];
+                o[0] = c[2]; o[1] = c[1]; o[2] = c[0]; o[3] = 255;
+            } else return std::vector<u8>();                 // 4/1bpp: unsupported
+            if ((mrow[x >> 3] >> (7 - (x & 7))) & 1) o[3] = 0;   // AND mask = transparent
+        }
+    }
+    // 32bpp icons with an all-zero alpha channel rely on the AND mask alone
+    if (bpp == 32 && !anyAlpha)
+        for (int y = 0; y < bh; y++) {
+            const u8* mrow = andD + andStride * (bh - 1 - y);
+            for (int x = 0; x < bw; x++)
+                out[((size_t)y * bw + x) * 4 + 3] =
+                    ((mrow[x >> 3] >> (7 - (x & 7))) & 1) ? 0 : 255;
+        }
+    *w = bw; *h = bh;
+    return out;
+}
+
+// best frame for the 48px target: smallest frame >= 48, else the largest
+static std::vector<u8> icoBestRGBA(const std::string& bytes, int* w, int* h) {
+    const u8* d = (const u8*)bytes.data();
+    u32 n = icoRd16(d + 4);
+    int best = -1, bestDim = 0;
+    for (u32 i = 0; i < n && 6 + i * 16 + 16 <= bytes.size(); i++) {
+        const u8* e = d + 6 + i * 16;
+        int fw = e[0] ? e[0] : 256, fh = e[1] ? e[1] : 256;
+        int dim = std::min(fw, fh);
+        bool better = (best < 0) ||
+                      (dim >= ICON_DIM && (bestDim < ICON_DIM || dim < bestDim)) ||
+                      (dim < ICON_DIM && bestDim < ICON_DIM && dim > bestDim);
+        if (better) { best = (int)i; bestDim = dim; }
+    }
+    if (best < 0) return std::vector<u8>();
+    const u8* e = d + 6 + best * 16;
+    u32 fsize = icoRd32(e + 8), foff = icoRd32(e + 12);
+    if (foff + fsize > bytes.size()) return std::vector<u8>();
+    return icoFrameRGBA(d + foff, fsize, w, h);
+}
+
 std::string artIcon48FromImage(const std::string& bytes) {
-    int sw = 0, sh = 0, comp = 0;
-    u8* probe = stbi_load_from_memory((const u8*)bytes.data(), bytes.size(), &sw, &sh, &comp, 4);
-    if (!probe) {
+    // source pixels: .ico container (best frame) or any stbi format
+    std::vector<u8> rgba;
+    int sw = 0, sh = 0;
+    if (artIsIco(bytes)) {
+        rgba = icoBestRGBA(bytes, &sw, &sh);
+        if (!rgba.empty()) aflog.info("ico frame " + std::to_string(sw) + "x" + std::to_string(sh));
+    } else {
+        int comp = 0;
+        u8* px = stbi_load_from_memory((const u8*)bytes.data(), bytes.size(), &sw, &sh, &comp, 4);
+        if (px) {
+            rgba.assign(px, px + (size_t)sw * sh * 4);
+            stbi_image_free(px);
+        }
+    }
+    if (rgba.empty() || sw <= 0 || sh <= 0) {
         aflog.error("icon decode fail, " + std::to_string(bytes.size()) + "B");
         return "";
     }
 
-    // white 48x48 canvas, contain-fit centered
+    // white 48x48 canvas, contain-fit centered: area average when shrinking,
+    // nearest when growing (degenerate 1x1 box) — never bilinear on pixel art
     static u8 canvas[ICON_DIM * ICON_DIM * 4];
     for (int i = 0; i < ICON_DIM * ICON_DIM; i++) {
         canvas[i*4] = canvas[i*4+1] = canvas[i*4+2] = 255;
         canvas[i*4+3] = 255;
     }
-    if (sw >= ICON_DIM && sh >= ICON_DIM) {
-        stbi_image_free(probe);
-        // box-filtered downscale via the shared decoder
-        int w = 0, h = 0;
-        std::vector<unsigned char> rgba = decodeImageRGBA(bytes, ICON_DIM, ICON_DIM, &w, &h);
-        if (rgba.empty()) return "";
-        int ox = (ICON_DIM - w) / 2, oy = (ICON_DIM - h) / 2;
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                const u8* s = &rgba[(y * w + x) * 4];
-                u8* d = &canvas[((oy + y) * ICON_DIM + ox + x) * 4];
-                u32 a = s[3];
-                d[0] = (u8)((s[0]*a + 255*(255-a)) / 255);
-                d[1] = (u8)((s[1]*a + 255*(255-a)) / 255);
-                d[2] = (u8)((s[2]*a + 255*(255-a)) / 255);
-            }
-    } else {
-        // small source: nearest upscale, never bilinear on pixel art
-        float scale = std::min((float)ICON_DIM / sw, (float)ICON_DIM / sh);
-        int dw = (int)(sw * scale), dh = (int)(sh * scale);
-        if (dw < 1) dw = 1;
-        if (dh < 1) dh = 1;
-        int ox = (ICON_DIM - dw) / 2, oy = (ICON_DIM - dh) / 2;
-        for (int y = 0; y < dh; y++)
-            for (int x = 0; x < dw; x++) {
-                const u8* s = &probe[((y * sh / dh) * sw + (x * sw / dw)) * 4];
-                u8* d = &canvas[((oy + y) * ICON_DIM + ox + x) * 4];
-                u32 a = s[3];
-                d[0] = (u8)((s[0]*a + 255*(255-a)) / 255);
-                d[1] = (u8)((s[1]*a + 255*(255-a)) / 255);
-                d[2] = (u8)((s[2]*a + 255*(255-a)) / 255);
-            }
-        stbi_image_free(probe);
-    }
+    float scale = std::min((float)ICON_DIM / sw, (float)ICON_DIM / sh);
+    int dw = std::max(1, (int)(sw * scale)), dh = std::max(1, (int)(sh * scale));
+    if (dw > ICON_DIM) dw = ICON_DIM;
+    if (dh > ICON_DIM) dh = ICON_DIM;
+    int ox = (ICON_DIM - dw) / 2, oy = (ICON_DIM - dh) / 2;
+    for (int y = 0; y < dh; y++)
+        for (int x = 0; x < dw; x++) {
+            int x0 = x * sw / dw, x1 = std::max(x0 + 1, (x + 1) * sw / dw);
+            int y0 = y * sh / dh, y1 = std::max(y0 + 1, (y + 1) * sh / dh);
+            if (x1 > sw) x1 = sw;
+            if (y1 > sh) y1 = sh;
+            u32 acc[4] = {0, 0, 0, 0};
+            u32 cnt = (u32)((x1 - x0) * (y1 - y0));
+            for (int sy = y0; sy < y1; sy++)
+                for (int sx = x0; sx < x1; sx++)
+                    for (int c = 0; c < 4; c++)
+                        acc[c] += rgba[((size_t)sy * sw + sx) * 4 + c];
+            u32 a = acc[3] / cnt;
+            u8* dpx = &canvas[((oy + y) * ICON_DIM + ox + x) * 4];
+            dpx[0] = (u8)(((acc[0] / cnt) * a + 255 * (255 - a)) / 255);
+            dpx[1] = (u8)(((acc[1] / cnt) * a + 255 * (255 - a)) / 255);
+            dpx[2] = (u8)(((acc[2] / cnt) * a + 255 * (255 - a)) / 255);
+        }
     // linear RGB565
     std::string out(ICON_DIM * ICON_DIM * 2, '\0');
     u16* px = (u16*)&out[0];
@@ -163,38 +252,48 @@ std::string artLibretroBanner(SgdbClient& sgdb, RommClient& romm,
     return "";
 }
 
-// smallest asset whose smaller side still covers 48px; else the largest one
-static int pickIconAsset(const std::vector<SgdbIcon>& list) {
-    int best = -1, bestBig = -1;
-    long bestArea = 0, bestBigArea = 0;
-    for (size_t i = 0; i < list.size(); i++) {
-        long area = (long)list[i].width * list[i].height;
-        if (area <= 0) continue;
-        if (std::min(list[i].width, list[i].height) >= ICON_DIM) {
-            if (best < 0 || area < bestArea) { best = (int)i; bestArea = area; }
-        } else {
-            if (bestBig < 0 || area > bestBigArea) { bestBig = (int)i; bestBigArea = area; }
-        }
-    }
-    if (best >= 0) return best;
-    if (bestBig >= 0) return bestBig;
-    return list.empty() ? -1 : 0;   // no dims reported: take the first
+bool artAssetIsIco(const SgdbAsset& a) {
+    return a.url.size() > 4 && a.url.compare(a.url.size() - 4, 4, ".ico") == 0;
+}
+
+// preference order shared by the auto pick and the picker grid: .ico assets
+// first (they usually hold native 48px frames), then adequate PNGs by
+// ascending area, then the too-small ones by descending area
+void artSortIconAssets(std::vector<SgdbIcon>& list) {
+    auto rank = [](const SgdbIcon& a) -> int {
+        if (artAssetIsIco(a)) return 0;
+        return (std::min(a.width, a.height) >= ICON_DIM) ? 1 : 2;
+    };
+    std::stable_sort(list.begin(), list.end(), [&](const SgdbIcon& a, const SgdbIcon& b) {
+        int ra = rank(a), rb = rank(b);
+        if (ra != rb) return ra < rb;
+        long aa = (long)a.width * a.height, ba = (long)b.width * b.height;
+        if (ra == 1) return aa < ba;
+        if (ra == 2) return aa > ba;
+        return false;                 // icos keep the api (score) order
+    });
 }
 
 std::string artSgdbIcon(SgdbClient& sgdb, RommClient& romm, int gameId, int* pickedId) {
     std::vector<SgdbIcon> list;
     if (!sgdb.icons(gameId, list) || list.empty()) return "";
-    int pick = pickIconAsset(list);
-    if (pick < 0) return "";
-    aflog.info("icons: " + std::to_string(list.size()) + " assets, picked id=" +
-               std::to_string(list[pick].id) + " " + std::to_string(list[pick].width) +
-               "x" + std::to_string(list[pick].height));
-    std::string bytes;
-    if (!artGetUrl(sgdb, romm, list[pick].url,
-                   "sgdb-icon-" + std::to_string(list[pick].id), bytes)) return "";
-    std::string icon = artIcon48FromImage(bytes);
-    if (!icon.empty() && pickedId) *pickedId = list[pick].id;
-    return icon;
+    artSortIconAssets(list);
+    aflog.info("icons: " + std::to_string(list.size()) + " assets");
+    int tries = 0;
+    for (auto& a : list) {
+        if (++tries > 4) break;       // a bad asset shouldn't stall the install
+        std::string bytes;
+        if (!artGetUrl(sgdb, romm, a.url, "sgdb-icon-" + std::to_string(a.id), bytes))
+            continue;
+        std::string icon = artIcon48FromImage(bytes);
+        if (!icon.empty()) {
+            aflog.info("icon picked id=" + std::to_string(a.id) + " " +
+                       (artAssetIsIco(a) ? "ico" : std::to_string(a.width) + "x" + std::to_string(a.height)));
+            if (pickedId) *pickedId = a.id;
+            return icon;
+        }
+    }
+    return "";
 }
 
 std::string artSgdbIconById(SgdbClient& sgdb, RommClient& romm, int gameId, int assetId) {
