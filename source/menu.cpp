@@ -53,7 +53,7 @@ static Logger rlog("romm");
 #define SETTING_SHOW_3DS 7
 #define SETTING_ART_NOTIFY 8
 #define SETTING_SGDB_KEY 9
-#define SETTING_GBA_SCREEN 14
+#define SETTING_GBA_SCREEN 20   // outside the server-row range (10-13)
 
 static CtrBuilder gCtr;
 static bool gCtrReady = false;
@@ -2190,7 +2190,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     return generateSettingsMenu(this, config);
                 case SettingToggle: {
-                    if (entry.rommId >= SETTING_SRV_HOST) {
+                    if (entry.rommId >= SETTING_SRV_HOST && entry.rommId <= SETTING_SRV_TEST) {
                         switch (entry.rommId) {
                             case SETTING_SRV_HOST:
                                 if (gRomm.promptOne(0)) invalidateAllCaches();
@@ -2351,6 +2351,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     // for each item. B cancels the current item and stops the rest;
                     // failures don't stop the run.
                     int okCount = 0;
+                    u64 okBytes = 0;
                     std::vector<std::string> failed;
                     bool stopped = false;
                     for (int i = 0; i < M; i++) {
@@ -2364,6 +2365,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                                            artEntries[i], arts[i], false, false);
                         if (io.ok) {
                             okCount++;
+                            okBytes += it->sizeBytes;
                             it->selected = false;
                             if (it->display.size() >= 2 && it->display.rfind("* ",0)!=0)
                                 it->display = "* " + it->display.substr(2);
@@ -2374,14 +2376,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     std::vector<std::string> msg;
                     msg.push_back("Installed " + std::to_string(okCount) + " of " + std::to_string(M) +
+                                  (okBytes ? " - " + humanSize(okBytes) : "") +
                                   (stopped ? " (stopped)" : ""));
-                    int shownFail = 0;
-                    for (auto& f : failed) {
-                        if (shownFail++ >= 4) break;
-                        msg.push_back("x " + shorten(f, 28));
+                    if (!failed.empty()) {
+                        msg.push_back("Could not install:");
+                        int shownFail = 0;
+                        for (auto& f : failed) {          // Dialog word-wraps: full names
+                            if (shownFail++ >= 3) break;
+                            msg.push_back(f);
+                        }
+                        if ((int)failed.size() > 3)
+                            msg.push_back("...and " + std::to_string((int)failed.size()-3) + " more");
                     }
-                    if ((int)failed.size() > 4)
-                        msg.push_back("...and " + std::to_string((int)failed.size()-4) + " more");
                     Dialog(target,0,0,320,240, msg, {"OK"}).handle();
                     // rebuild the library so fresh install markers show and marks clear
                     while (this->queue.size() > 0) this->queue.pop();
@@ -2675,7 +2681,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (cancelled) break;
                     }
 
-                    std::string summary = "Installed "+std::to_string(okCount)+" of "+std::to_string(items.size())+".";
+                    u64 okBytes = 0;
+                    for (size_t i = 0; i < items.size(); i++)
+                        if (items[i]->installed) okBytes += items[i]->sizeBytes;
+                    std::string summary = "Installed "+std::to_string(okCount)+" of "+std::to_string(items.size())
+                                        + (okBytes ? " - " + humanSize(okBytes) : "");
                     std::string sub = cancelled ? "Cancelled - remaining skipped."
                                     : fails.empty() ? "All installed." : "Could not install:";
                     std::string failsJoined;
@@ -2814,7 +2824,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         msg.push_back("Updated art for "+std::to_string(okCount)+" of "+std::to_string(rebuildable));
                         if (skipped > 0) msg.push_back(std::to_string(skipped)+" skipped");
                         int shown = 0;
-                        for (auto& f : failed) { if (shown++ >= 3) break; msg.push_back("x "+shorten(f,28)); }
+                        for (auto& f : failed) { if (shown++ >= 3) break; msg.push_back(f); }
                         if ((int)failed.size() > 3) msg.push_back("...and "+std::to_string((int)failed.size()-3)+" more");
                         Dialog(target,0,0,320,240, msg, {"OK"}).handle();
                     }
