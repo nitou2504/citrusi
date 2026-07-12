@@ -600,6 +600,13 @@ static int changeArtNdsRommItem(C3D_RenderTarget* target, Config* config,
 
 // uninstall one Manage item (mirrors the single-item deletion paths). Returns
 // true on success; decrements config->dsiwareCount for a deleted TWL forwarder.
+// a manage row counts as installed when its system's title/forwarder exists
+static bool manageItemInstalled(const std::string& slug, const MenuSelection& it) {
+    if (slug == ROMM_SLUG_GBA) return it.installed;
+    if (slug == ROMM_SLUG_NDS) return it.rtid || it.installed || it.ytid;
+    return true;   // the 3DS tab only lists installed titles
+}
+
 static bool uninstallManageItem(Config* config, const MenuSelection& it) {
     if (it.platformSlug == ROMM_SLUG_3DS) {
         Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
@@ -2789,10 +2796,22 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     for (auto e : items)
                         if ((slug == ROMM_SLUG_GBA && e->installed) || (slug == ROMM_SLUG_NDS && e->rtid))
                             rebuildable++;
-                    // action dialog (3DS: uninstall only; others add Change art when
-                    // any selected item is one of ours)
-                    enum { A_UNINSTALL, A_CHANGEART, A_BACK } act = A_BACK;
-                    if (is3ds || rebuildable == 0) {
+                    // rows on SD without a title yet: these can be installed
+                    int notInstalled = 0;
+                    for (auto e : items)
+                        if (!is3ds && !manageItemInstalled(slug, *e)) notInstalled++;
+                    // action dialog: what's offered follows what's selected
+                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_BACK } act = A_BACK;
+                    if (!is3ds && notInstalled == M) {
+                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
+                                       {"Install selected","Delete ROMs","Back"}).handle();
+                        act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
+                    } else if (notInstalled > 0) {
+                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected",
+                                       std::to_string(notInstalled)+" not installed"},
+                                       {"Install","Uninstall","Back"}).handle();
+                        act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
+                    } else if (is3ds || rebuildable == 0) {
                         int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
                                        {"Uninstall selected","Back"}).handle();
                         act = (c==0) ? A_UNINSTALL : A_BACK;
@@ -2802,6 +2821,53 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
                     }
                     if (act == A_BACK) break;
+                    if (act == A_INSTALL) {
+                        if (!ensureCtrBuilder(target)) break;
+                        std::vector<MenuSelection*> todo;
+                        for (auto e : items)
+                            if (!manageItemInstalled(slug, *e)) todo.push_back(e);
+                        int N = (int)todo.size();
+                        CoverCachePause coverPause;
+                        // PHASE 1: GBA art up front (prompts here, not mid-install)
+                        std::vector<ArtEntry> aes(N);
+                        std::vector<ArtPieces> pcs(N);
+                        if (slug == ROMM_SLUG_GBA) {
+                            ensureSgdb();
+                            for (int i = 0; i < N; i++) {
+                                showLoading(target, {"Art "+std::to_string(i+1)+"/"+std::to_string(N), todo[i]->title});
+                                resolveGbaArtInteractive(target, config, todo[i]->path.filename().generic_string(),
+                                                         todo[i]->title, todo[i]->coverPath, aes[i], pcs[i], false);
+                            }
+                        }
+                        // PHASE 2: unattended build + install
+                        int okCount = 0;
+                        std::vector<std::string> failed;
+                        for (int i = 0; i < N; i++) {
+                            MenuSelection* it = todo[i];
+                            showLoading(target, {"Installing "+std::to_string(i+1)+"/"+std::to_string(N), it->title});
+                            bool ok;
+                            if (slug == ROMM_SLUG_GBA)
+                                ok = installGbaInject(target, config, it->path.generic_string(), it->title,
+                                                      it->path.filename().generic_string(), aes[i], pcs[i]);
+                            else
+                                ok = buildForwarderFor(target, config, it->path.generic_string(), it->title,
+                                                       it->coverPath, false);
+                            if (ok) okCount++;
+                            else failed.push_back(it->title);
+                        }
+                        std::vector<std::string> msg;
+                        msg.push_back("Installed "+std::to_string(okCount)+" of "+std::to_string(N));
+                        if (!failed.empty()) {
+                            msg.push_back("Could not install:");
+                            int shown = 0;
+                            for (auto& f : failed) { if (shown++ >= 3) break; msg.push_back(f); }
+                        }
+                        Dialog(target,0,0,320,240, msg, {"OK"}).handle();
+                        while (this->queue.size() > 0) this->queue.pop();
+                        gFwdReady = false; invalidateYanbfCache(); invalidateManagedRoms();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount,slug);
+                    }
                     if (act == A_UNINSTALL) {
                         if (Dialog(target,0,0,320,240,{"Uninstall "+std::to_string(M)+" games?"},
                                    {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
