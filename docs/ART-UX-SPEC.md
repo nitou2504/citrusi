@@ -29,7 +29,7 @@ then asks the user.
 | piece | GBA | NDS |
 |---|---|---|
 | HOME icon (48×48 SMDH) | **SGDB icons** (ico-first: native 48px frames; then smallest PNG ≥48) → **iiSU box art** (exact match) → RomM cover tile → template | **ROM's own DS icon** (always exists, never network) |
-| banner (256×128) | **libretro Named_Logos** → tag-stripped retry → **iiSU logo** (exact match) → RomM cover centered → template | SD assets → YANBF → GameTDB → **SGDB logo** (strong) → **iiSU logo** (exact) → notify → RomM cover → DS-icon stamp |
+| banner (256×128) | **libretro Named_Logos** → tag-stripped retry → **iiSU logo** (exact match) → RomM cover centered → template | SD assets → YANBF → **SGDB logo** (strong) → **iiSU logo** (exact) → GameTDB box → notify → RomM cover → DS-icon stamp |
 | banner sound | bundled silent WAV | existing YANBF jingle path |
 
 Picker-only extras (never auto): SGDB grid capsules (460×215/920×430),

@@ -179,30 +179,36 @@ std::string fetchBoxart(RommClient& client, const std::string& romPath,
             if (sourceOut) *sourceOut = "yanbf";
             return tileRgba4444(canvas);
         }
-        // 3) GameTDB box art fallback — same as YANBF's generator. Region from
-        //    the 4th game-code letter; art.gametdb.com serves plain http.
-        const char* region = "EN";
-        switch (gc[3]) {
-            case 'D': region = "DE"; break; case 'E': region = "US"; break;
-            case 'F': region = "FR"; break; case 'H': region = "NL"; break;
-            case 'I': region = "IT"; break; case 'J': region = "JA"; break;
-            case 'K': region = "KO"; break; case 'R': region = "RU"; break;
-            case 'S': region = "ES"; break; case 'T': region = "US"; break;
-            case 'U': region = "AU"; break;
-        }
-        std::string tdb = "http://art.gametdb.com/ds/coverM/";
-        if (client.fetchUrl(tdb + region + "/" + gc4 + ".jpg", img) && renderImage(img, canvas)) {
-            boxLogger.info("banner art: GameTDB " + std::string(region) + "/" + gc4);
-            if (sourceOut) *sourceOut = "gametdb";
-            return tileRgba4444(canvas);
-        }
-        if (client.fetchUrl(tdb + "EN/" + gc4 + ".jpg", img) && renderImage(img, canvas)) {
-            boxLogger.info("banner art: GameTDB EN/" + gc4);
-            if (sourceOut) *sourceOut = "gametdb";
-            return tileRgba4444(canvas);
-        }
-        boxLogger.info("no asset/GameTDB art for " + gc4);
+        boxLogger.info("no banner asset for " + gc4);
     }
-    // miss: the caller continues with SGDB logos -> RomM cover -> DS-icon stamp
+    // miss: the caller continues with the logo tiers, GameTDB, then fallbacks
+    return "";
+}
+
+std::string gametdbBoxart(RommClient& client, const std::string& romPath) {
+    static u8 canvas[BA_W * BA_H * 4];
+    char gc[5] = {0};
+    if (!readGamecode(romPath, gc)) return "";
+    std::string gc4(gc, 4), img;
+    // same source as YANBF's generator. Region from the 4th game-code letter;
+    // art.gametdb.com serves plain http.
+    const char* region = "EN";
+    switch (gc[3]) {
+        case 'D': region = "DE"; break; case 'E': region = "US"; break;
+        case 'F': region = "FR"; break; case 'H': region = "NL"; break;
+        case 'I': region = "IT"; break; case 'J': region = "JA"; break;
+        case 'K': region = "KO"; break; case 'R': region = "RU"; break;
+        case 'S': region = "ES"; break; case 'T': region = "US"; break;
+        case 'U': region = "AU"; break;
+    }
+    std::string tdb = "http://art.gametdb.com/ds/coverM/";
+    if (client.fetchUrl(tdb + region + "/" + gc4 + ".jpg", img) && renderImage(img, canvas)) {
+        boxLogger.info("banner art: GameTDB " + std::string(region) + "/" + gc4);
+        return tileRgba4444(canvas);
+    }
+    if (client.fetchUrl(tdb + "EN/" + gc4 + ".jpg", img) && renderImage(img, canvas)) {
+        boxLogger.info("banner art: GameTDB EN/" + gc4);
+        return tileRgba4444(canvas);
+    }
     return "";
 }
