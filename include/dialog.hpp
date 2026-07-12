@@ -15,6 +15,8 @@ class Dialog {
     int handle();
     Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, std::string message, std::initializer_list<std::string> options, int defaultChoice=0);
     Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, std::initializer_list<std::string> message, std::initializer_list<std::string> options, int defaultChoice=0);
+    // dynamic-length message (batch summaries); each string is one line, wrapped
+    Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, const std::vector<std::string>& message, std::initializer_list<std::string> options, int defaultChoice=0);
 
 };
 

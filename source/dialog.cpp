@@ -153,4 +153,14 @@ Dialog::Dialog(C3D_RenderTarget* target, float x, float y, float width, float he
     this->height=height;
     for (auto m : message) this->wrapText(m);
 }
+Dialog::Dialog(C3D_RenderTarget* target, float x, float y, float width, float height, const std::vector<std::string>& message, std::initializer_list<std::string> options, int defaultChoice) {
+    this->options = std::vector(options.begin(),options.end());
+    this->target=target;
+    this->selected=defaultChoice;
+    this->x=x;
+    this->y=y;
+    this->width=width;
+    this->height=height;
+    for (auto& m : message) this->wrapText(m);
+}
 

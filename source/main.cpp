@@ -166,7 +166,7 @@ int main()
 		
 			// Button Handling
 
-		// START quits, except on Install-from-SD with games marked: begin the batch
+		// START quits, except when a screen has marked rows: begin the batch
 		if (kDown & KEY_START) { if (!menu->startBatch()) break; }
 
 		{
@@ -183,7 +183,12 @@ int main()
 
 			else if(kDown & KEY_X) menu->scrollDesc(1);
 
-			else if(kDown & KEY_Y) menu->toggleMark();
+			else if(kDown & KEY_L) menu->scrollDesc(-1); // desc scroll up (Y toggles selection)
+
+			else if(kDown & KEY_Y) {
+				if (menu->type == MENU_ROMM || menu->type == MENU_MANAGE) menu->toggleSelect();
+				else menu->toggleMark();   // Install-from-SD marks; other screens scroll
+			}
 
 			else if(kDown & KEY_SELECT) menu = menu->searchPrompt();
 

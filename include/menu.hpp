@@ -18,6 +18,8 @@ enum MenuAction {
     OpenSearchAll,
     RefreshLibraries,
     RommInstall,
+    BatchRommInstall,   // START in the library: install every [x]-selected game
+    BatchManage,         // START in Manage: uninstall / change art for selected
     OpenManage,
     ManageRom,
     OpenSDBrowser,
@@ -65,8 +67,8 @@ class MenuSelection {
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;
-        bool selected=false;         // "Install from SD": Y-marked for batch install
         std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
+        bool selected=false;         // Y-marked for a batch (library/manage/Install-from-SD)
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
     MenuSelection* setPath(std::filesystem::path p);
@@ -112,8 +114,13 @@ class Menu {
         void up();
         void pageUp();
         void action();
-        // START on the Install-from-SD screen: queue a batch of the marked
-        // rows. Returns false (nothing marked / other screen) so START quits.
+        // batch multiselect: Install-from-SD rows via toggleMark (Y), RomM
+        // library + Manage rows via toggleSelect (Y). START queues the batch.
+        void toggleSelect();     // Y: mark/unmark the current row (skips rows that can't batch)
+        int  selectedCount();    // how many rows are [x]-selected
+        void clearSelection();   // drop all marks (menu rebuild / after a batch)
+        // START: queue a batch for the marked rows. Returns false when there
+        // is nothing to batch here, so the caller quits the app instead.
         bool startBatch();
         Menu* back();
         Menu* handleQueue(Builder* builder, C3D_RenderTarget* target=nullptr, Config* config =nullptr);
