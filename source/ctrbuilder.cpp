@@ -613,18 +613,23 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         // games that have one (NSUI sleep-patch default); harmless otherwise
         u16 sleepBtns = (1 << 9) | (1 << 8) | (1 << 2);
         memcpy(&cfg[0x0E], &sleepBtns, 2);
-        if (screenMode == GBA_SCREEN_GAMMA) {
-            // AGS-101 look (open_agb_firm/agb_edit preset): gamma 2.2 -> 1.54.
-            // White stays 255; the template's flat 60% darken crushed it to 153.
+        if (screenMode != GBA_SCREEN_ORIGINAL) {
+            // gamma curve y = x^(gIn/gOut), per agb_edit/open_agb_firm; the
+            // donor's LUT was a flat 60% darken that crushed white to 153.
+            double e = 1.0;                       // RAW: identity
+            if (screenMode == GBA_SCREEN_GAMMA || screenMode == GBA_SCREEN_NIGHT)
+                e = 2.2 / 1.54;                   // AGS-101 look
+            else if (screenMode == GBA_SCREEN_BRIGHT)
+                e = 2.2 / 1.7;                    // gentler correction
+            // NIGHT adds a 3400K whitepoint (redshift table, via Luma3DS)
+            double wp[3] = {1.0, 1.0, 1.0};
+            if (screenMode == GBA_SCREEN_NIGHT) { wp[1] = 0.769; wp[2] = 0.524; }
             for (int i = 0; i < 256; i++) {
-                u8 v = (u8)(255.0 * pow(i / 255.0, 2.2 / 1.54) + 0.5);
-                cfg[0x24 + i*3] = cfg[0x24 + i*3 + 1] = cfg[0x24 + i*3 + 2] = v;
+                double y = pow(i / 255.0, e);
+                for (int c = 0; c < 3; c++)
+                    cfg[0x24 + i*3 + c] = (u8)(255.0 * wp[c] * y + 0.5);
             }
-        } else if (screenMode == GBA_SCREEN_RAW) {
-            for (int i = 0; i < 256; i++)   // identity: no filter at all
-                cfg[0x24 + i*3] = cfg[0x24 + i*3 + 1] = cfg[0x24 + i*3 + 2] = (u8)i;
         }
-        // GBA_SCREEN_ORIGINAL keeps the donor's dark filter untouched
     }
 
     // --- pass 1: SHA1 (for the save DB) + signature scan in one read

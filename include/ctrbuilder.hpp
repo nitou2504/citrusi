@@ -13,12 +13,16 @@
 #define GBA_UID_BASE  0xFFC00
 #define GBA_UID_COUNT 0x400
 #define GBA_TPL_DIR   std::string("romfs:/gba/")
-// GBA video LUT (the config block's "dark filter"):
-// GAMMA = AGS-101 gamma correction 2.2->1.54 (bright, corrected colors)
-// ORIGINAL = donor's linear 60% darken; RAW = no filter (washed but brightest)
+// GBA video LUT presets (the config block's "dark filter"):
+// GAMMA = AGS-101 gamma correction 2.2->1.54 (agb_edit/open_agb_firm preset)
+// ORIGINAL = donor's linear 60% darken; RAW = no filter (brightest, washed)
+// BRIGHT = gentler gamma 2.2->1.7; NIGHT = AGS-101 + 3400K blue-light filter
 #define GBA_SCREEN_GAMMA    0
 #define GBA_SCREEN_ORIGINAL 1
 #define GBA_SCREEN_RAW      2
+#define GBA_SCREEN_BRIGHT   3
+#define GBA_SCREEN_NIGHT    4
+#define GBA_SCREEN_COUNT    5
 
 class CtrBuilder {
     private:
