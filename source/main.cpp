@@ -182,7 +182,12 @@ int main()
 
 			else if(kDown & KEY_X) menu->scrollDesc(1);
 
-			else if(kDown & KEY_Y) menu->scrollDesc(-1);
+			else if(kDown & KEY_L) menu->scrollDesc(-1); // desc scroll up (Y toggles selection)
+
+			else if(kDown & KEY_Y) {
+				if (menu->type == MENU_ROMM || menu->type == MENU_MANAGE) menu->toggleSelect();
+				else menu->scrollDesc(-1);
+			}
 
 			else if(kDown & KEY_SELECT) menu = menu->searchPrompt();
 

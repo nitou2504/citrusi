@@ -705,11 +705,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             C2D_DrawRectSolid(0, 0, 0, 400, 240, COL_BG);
             drawText(12, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
             if (!this->entries.empty() && this->type != MENU_MAIN && this->type != MENU_SETTINGS && this->type != MENU_SERVER) {
+                int nsel = this->selectedCount();
                 char pos[24];
-                snprintf(pos, sizeof(pos), "%d/%d",
-                         (int)(this->selection - this->entries.begin()) + 1,
-                         (int)this->entries.size());
-                drawText(390, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, pos, C2D_AlignRight);
+                if (nsel > 0) {          // multiselect: show the count in the accent color
+                    snprintf(pos, sizeof(pos), "%d selected", nsel);
+                    drawText(390, 7, 0.5f, 0.5f, COL_BG, COL_ACCENT, pos, C2D_AlignRight);
+                } else {
+                    snprintf(pos, sizeof(pos), "%d/%d",
+                             (int)(this->selection - this->entries.begin()) + 1,
+                             (int)this->entries.size());
+                    drawText(390, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, pos, C2D_AlignRight);
+                }
             }
             C2D_DrawRectSolid(0, MENU_HEADING_HEIGHT-1, 0.1f, 400, 1, COL_ELEV);
 
@@ -734,6 +740,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (body[0] == '*')
                         C2D_DrawRectSolid(15, ry + ENTRY_HEIGHT/2 - 3, 0.4f, 6, 6, COL_ACCENT);
                     body = body.substr(2);
+                }
+                // batch multiselect mark: bright-bordered accent checkbox in the
+                // left gutter (sits left of the on-SD dot; only when selected)
+                if ((*entry)->selected) {
+                    float bw = 10, bx = 4, by = ry + ENTRY_HEIGHT/2 - bw/2;
+                    C2DExtra_DrawRectHollow(bx, by, 0.4f, bw, bw, 2, COL_TEXT);
+                    C2D_DrawRectSolid(bx+3, by+3, 0.4f, bw-6, bw-6, COL_ACCENT);
                 }
                 std::string rowText = isSel
                     ? tickerWindow(body, textMax, scale, gTick - selTick)
@@ -978,14 +991,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (gDescScroll < maxScroll)
                     drawArrow(CARD_X + CARD_W - 12, BAR_Y - 12, 0.56f, 7, 7, COL_ACCENT, true);
             }
-            const char* hint = (maxScroll > 0)
-                ? "A Install    B Back    X/Y Scroll    START Quit"
-                : "A Install    B Back    START Quit";
-            drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint, C2D_AlignCenter);
+            std::string hint = "A Install   Y Select   B Back";
+            if (maxScroll > 0) hint += "   X/L Scroll";
+            hint += "   START Quit";
+            drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
             return;
         }
         if (this->type == MENU_MANAGE) {
-            drawBottomFrame("A Manage    B Back    START Quit");
+            drawBottomFrame(this->entries.empty()
+                ? "A Manage    B Back    START Quit"
+                : "A Manage   Y Select   B Back   START Quit");
             if (this->entries.empty()) {
                 const char* empty = (this->platformSlug == ROMM_SLUG_3DS) ? "No installed 3DS titles."
                                   : (this->platformSlug == ROMM_SLUG_GBA) ? "No roms in sd:/roms/gba"
@@ -1579,6 +1594,24 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     void Menu::action() {
         if (this->entries.size()==0) return;
         this->queue.push(MenuSelection(*this->selection));
+    }
+    // Y: toggle the batch mark on the current row. Only the installable
+    // library rows and the manage rows can be selected; a non-installable
+    // 3DS .3ds row is skipped (nothing to install).
+    void Menu::toggleSelect() {
+        if (this->entries.empty()) return;
+        MenuSelection* sel = *this->selection;
+        if (sel->action != RommInstall && sel->action != ManageRom) return;
+        if (sel->action == RommInstall && sel->platformSlug == ROMM_SLUG_3DS && !sel->installable) return;
+        sel->selected = !sel->selected;
+    }
+    int Menu::selectedCount() {
+        int n = 0;
+        for (auto e : this->entries) if (e->selected) n++;
+        return n;
+    }
+    void Menu::clearSelection() {
+        for (auto e : this->entries) e->selected = false;
     }
     void Menu::pageDown() {
         if (this->entries.size()==0) return;

@@ -18,6 +18,8 @@ enum MenuAction {
     OpenSearchAll,
     RefreshLibraries,
     RommInstall,
+    BatchRommInstall,   // START in the library: install every [x]-selected game
+    BatchManage,         // START in Manage: uninstall / change art for selected
     OpenManage,
     ManageRom,
     OpenSDBrowser,
@@ -62,6 +64,7 @@ class MenuSelection {
         u64 rtid=0;
         bool installed=false;
         std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
+        bool selected=false;         // batch multiselect mark (Y); reset on menu rebuild
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
     MenuSelection* setPath(std::filesystem::path p);
@@ -105,6 +108,13 @@ class Menu {
         void up();
         void pageUp();
         void action();
+        // batch multiselect (RomM library + Manage lists)
+        void toggleSelect();     // Y: mark/unmark the current row (skips rows that can't batch)
+        int  selectedCount();    // how many rows are [x]-selected
+        void clearSelection();   // drop all marks (menu rebuild / after a batch)
+        // START: queue a batch for the selected rows. false = nothing selected
+        // (caller falls back to quitting the app).
+        bool startBatch();
         Menu* back();
         Menu* handleQueue(Builder* builder, C3D_RenderTarget* target=nullptr, Config* config =nullptr);
         bool hasQueue();
