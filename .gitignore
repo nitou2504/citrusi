@@ -4,6 +4,7 @@
 *.smdh
 *.elf
 *.bin
+!romfs/**/*.bin
 *.3ds
 .vscode/
 build/
