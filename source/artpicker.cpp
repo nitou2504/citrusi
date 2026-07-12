@@ -152,8 +152,10 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
     for (size_t i = first; i < last && i < cands.size(); i++) {
         Cand& c = cands[i];
         if (c.state != 0) continue;
+        aplog.info("thumb fetch: " + c.thumbKey);
         std::string bytes;
         artGetUrl(gSgdb, gRomm, c.thumbUrl.empty() ? c.url : c.thumbUrl, c.thumbKey, bytes);
+        aplog.info("thumb bytes: " + std::to_string(bytes.size()));
         c.state = (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) ? 1 : 2;
         if (c.state == 2) aplog.error("thumb fail: " + c.thumbKey);
         return;
@@ -227,6 +229,8 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
     };
 
     ensureCands();
+    aplog.info("loop enter");
+    bool firstFrame = true;
 
     while (aptMainLoop()) {
         std::vector<Cand>& cands = (page == 0) ? iconCands : bannerCands;
@@ -374,6 +378,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
         drawText(160, 222, 0, 0.45f, COL_BG, COL_TEXT_DIM,
                  "A use   X search   B skip   L/R pages", C2D_AlignCenter);
         C3D_FrameEnd(0);
+        if (firstFrame) { firstFrame = false; aplog.info("first frame drawn"); }
     }
 
     freeCands(iconCands);

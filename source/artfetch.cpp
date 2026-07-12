@@ -1,4 +1,5 @@
 #include <3ds.h>
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include "artfetch.hpp"
@@ -41,7 +42,10 @@ static std::string tile4444(const u8* canvas /*BNR_W*BNR_H*4 linear RGBA*/) {
 std::string artBannerFromImage(const std::string& bytes) {
     int w = 0, h = 0;
     std::vector<unsigned char> rgba = decodeImageRGBA(bytes, BNR_W, BNR_H, &w, &h);
-    if (rgba.empty()) return "";
+    if (rgba.empty()) {
+        aflog.error("banner decode fail, " + std::to_string(bytes.size()) + "B");
+        return "";
+    }
     static u8 canvas[BNR_W * BNR_H * 4];
     memset(canvas, 0, sizeof(canvas));
     int ox = (BNR_W - w) / 2, oy = (BNR_H - h) / 2;
@@ -53,7 +57,10 @@ std::string artBannerFromImage(const std::string& bytes) {
 std::string artIcon48FromImage(const std::string& bytes) {
     int sw = 0, sh = 0, comp = 0;
     u8* probe = stbi_load_from_memory((const u8*)bytes.data(), bytes.size(), &sw, &sh, &comp, 4);
-    if (!probe) return "";
+    if (!probe) {
+        aflog.error("icon decode fail, " + std::to_string(bytes.size()) + "B");
+        return "";
+    }
 
     // white 48x48 canvas, contain-fit centered
     static u8 canvas[ICON_DIM * ICON_DIM * 4];
@@ -131,11 +138,22 @@ bool artGetUrl(SgdbClient& sgdb, RommClient& romm, const std::string& url,
 std::string artLibretroBanner(SgdbClient& sgdb, RommClient& romm,
                               const std::string& fsName, std::string* usedName) {
     for (const std::string& name : libretroNameVariants(fsName)) {
+        std::string url = LIBRETRO_GBA_LOGOS + urlEncodePath(name) + ".png";
+        std::string key = "libretro-gba-" + name;
         std::string bytes;
-        if (!artGetUrl(sgdb, romm, LIBRETRO_GBA_LOGOS + urlEncodePath(name) + ".png",
-                       "libretro-gba-" + name, bytes))
+        if (!artGetUrl(sgdb, romm, url, key, bytes))
             continue;
         std::string tex = artBannerFromImage(bytes);
+        if (tex.empty()) {
+            // a truncated download may have been cached (e.g. by the freeze
+            // session): purge the slot and refetch once
+            aflog.error("libretro decode fail (" + std::to_string(bytes.size()) +
+                        "B cached), refetching: " + name);
+            remove(artCachePath(key).c_str());
+            bytes.clear();
+            if (artGetUrl(sgdb, romm, url, key, bytes))
+                tex = artBannerFromImage(bytes);
+        }
         if (!tex.empty()) {
             aflog.info("libretro logo hit: " + name);
             if (usedName) *usedName = name;
