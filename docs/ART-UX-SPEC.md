@@ -28,9 +28,14 @@ then asks the user.
 
 | piece | GBA | NDS |
 |---|---|---|
-| HOME icon (48×48 SMDH) | **SGDB icons** → RomM cover tile → plain tile | **ROM's own DS icon** (always exists); SGDB icons as optional override |
-| banner (256×128) | **libretro Named_Logos** → tag-stripped retry → SGDB logos → RomM cover centered → tile | existing chain: SD assets → GameTDB → **SGDB logos (new)** → RomM cover centered → DS-icon stamp |
+| HOME icon (48×48 SMDH) | **SGDB icons** (ico-first: native 48px frames; then smallest PNG ≥48) → **iiSU box art** (exact match) → RomM cover tile → template | **ROM's own DS icon** (always exists, never network) |
+| banner (256×128) | **libretro Named_Logos** → tag-stripped retry → **iiSU logo** (exact match) → RomM cover centered → template | SD assets → YANBF → GameTDB → **SGDB logo** (strong) → **iiSU logo** (exact) → notify → RomM cover → DS-icon stamp |
 | banner sound | bundled silent WAV | existing YANBF jingle path |
+
+Picker-only extras (never auto): SGDB grid capsules (460×215/920×430),
+iiSU heroes and box-art-as-banner. iiSU = assets.iisu.community, open
+JSON API, no key; assets are Wii U-sized (0.2–1.9 MB) so it sits one
+tier above the cover, not first.
 
 Notes:
 - libretro Named_Logos is **empty for NDS** (verified: even Mario Kart DS
