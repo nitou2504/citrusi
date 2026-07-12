@@ -991,9 +991,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (gDescScroll < maxScroll)
                     drawArrow(CARD_X + CARD_W - 12, BAR_Y - 12, 0.56f, 7, 7, COL_ACCENT, true);
             }
+            int nsel = this->selectedCount();
             std::string hint = "A Install   Y Select   B Back";
             if (maxScroll > 0) hint += "   X/L Scroll";
-            hint += "   START Quit";
+            hint += nsel > 0 ? "   START Install " + std::to_string(nsel) : "   START Quit";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
             return;
         }
@@ -1613,6 +1614,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     void Menu::clearSelection() {
         for (auto e : this->entries) e->selected = false;
     }
+    // START: queue a batch action for the selected rows. Returns false when
+    // there's nothing to batch here, so the caller quits the app instead.
+    bool Menu::startBatch() {
+        if (this->type != MENU_ROMM) return false;
+        if (this->selectedCount() == 0) return false;
+        MenuSelection m;
+        m.action = BatchRommInstall;
+        this->queue.push(m);
+        return true;
+    }
     void Menu::pageDown() {
         if (this->entries.size()==0) return;
         if (this->entries.size() <= MAX_ENTRY_COUNT || this->top+MAX_ENTRY_COUNT == this->entries.end()) {
@@ -1991,6 +2002,76 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                     }
                     break;
+                }
+                case BatchRommInstall: {
+                    // the selected installable rows, taken straight from the live menu
+                    std::vector<MenuSelection*> items;
+                    for (auto e : this->entries)
+                        if (e->selected && e->action == RommInstall &&
+                            !(e->platformSlug == ROMM_SLUG_3DS && !e->installable))
+                            items.push_back(e);
+                    if (items.empty()) break;
+                    int M = (int)items.size();
+                    u64 total = 0; for (auto e : items) total += e->sizeBytes;
+                    if (Dialog(target,0,0,320,240,
+                               {"Install " + std::to_string(M) + " games?", "Total download: " + humanSize(total)},
+                               {gLang.getString("menu_yes"), gLang.getString("menu_no")}).handle() != 0)
+                        break;
+                    bool anyCtr = false;
+                    for (auto e : items) if (e->platformSlug != ROMM_SLUG_3DS) { anyCtr = true; break; }
+                    if (anyCtr && !ensureCtrBuilder(target)) break;   // shared CIA shell template
+                    // PHASE 1 (interactive): resolve GBA art up front — correcting a
+                    // bad name is cheapest before the long downloads. 3DS/NDS need
+                    // nothing here (NDS art resolves silently at build time — its
+                    // sources key on the ROM's gamecode, only known post-download).
+                    std::vector<ArtEntry> artEntries(M);
+                    std::vector<ArtPieces> arts(M);
+                    for (int i = 0; i < M; i++) {
+                        if (items[i]->platformSlug != ROMM_SLUG_GBA) continue;
+                        showLoading(target, {"Art " + std::to_string(i+1) + "/" + std::to_string(M), items[i]->title});
+                        resolveGbaArtInteractive(target, config, items[i]->fsName, items[i]->title,
+                                                 items[i]->coverPath, artEntries[i], arts[i], false);
+                    }
+                    // PHASE 2 (unattended): download -> extract -> install/inject/build
+                    // for each item. B cancels the current item and stops the rest;
+                    // failures don't stop the run.
+                    int okCount = 0;
+                    std::vector<std::string> failed;
+                    bool stopped = false;
+                    for (int i = 0; i < M; i++) {
+                        MenuSelection* it = items[i];
+                        showLoading(target, {"Installing " + std::to_string(i+1) + "/" + std::to_string(M), it->title});
+                        bool is3ds = (it->platformSlug == ROMM_SLUG_3DS);
+                        std::string romPath = rommLocalPath(it->fsName, it->platformSlug);
+                        std::string dest = rommDirFor(it->platformSlug) + it->fsName;
+                        bool onSD = fileExists(is3ds ? dest : romPath);
+                        InstallOutcome io = installOneRomm(target, config, *it, !onSD,
+                                                           artEntries[i], arts[i], false, false);
+                        if (io.ok) {
+                            okCount++;
+                            it->selected = false;
+                            if (it->display.size() >= 2 && it->display.rfind("* ",0)!=0)
+                                it->display = "* " + it->display.substr(2);
+                        } else {
+                            failed.push_back(it->title);
+                        }
+                        if (io.cancelled) { stopped = true; break; }
+                    }
+                    std::vector<std::string> msg;
+                    msg.push_back("Installed " + std::to_string(okCount) + " of " + std::to_string(M) +
+                                  (stopped ? " (stopped)" : ""));
+                    int shownFail = 0;
+                    for (auto& f : failed) {
+                        if (shownFail++ >= 4) break;
+                        msg.push_back("x " + shorten(f, 28));
+                    }
+                    if ((int)failed.size() > 4)
+                        msg.push_back("...and " + std::to_string((int)failed.size()-4) + " more");
+                    Dialog(target,0,0,320,240, msg, {"OK"}).handle();
+                    // rebuild the library so fresh install markers show and marks clear
+                    while (this->queue.size() > 0) this->queue.pop();
+                    const std::vector<RommRom>& src = this->crossSystem ? gCombined : gCache[this->platformSlug];
+                    return buildRommMenu(this, this->filter, src, this->platformSlug, this->crossSystem);
                 }
                 case ManageRom: {
                     if (entry.platformSlug == ROMM_SLUG_3DS) {   // installed 3DS title -> uninstall

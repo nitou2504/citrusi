@@ -166,7 +166,9 @@ int main()
 		
 			// Button Handling
 
-		if (kDown & KEY_START) break; // break in order to return to hbmenu
+		// START runs a batch on the selected rows (library/manage); with nothing
+		// selected it quits to hbmenu as before.
+		if (kDown & KEY_START) { if (!menu->startBatch()) break; }
 
 		{
 
