@@ -808,13 +808,17 @@ static bool settle3dsFilePick(MenuSelection& e) {
 }
 
 // loads a platform's library into gCache[slug] once; returns false on error (sets gRomm.lastError)
-static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* target = nullptr) {
+// quiet = a screen only wants the cached names/metadata (Manage -> 3DS): no
+// background refresh, no cover prefetch — those fight the SMDH/tally SD reads.
+static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* target = nullptr,
+                                 bool quiet = false) {
     if (gCacheOk[slug]) { rlog.info(" cache hit " + slug); return true; }
     // fast path: on-SD json cache (instant, no network), then refresh the
     // list from the server in the background ("updating..." in the heading)
     if (loadLibCache(slug, gCache[slug])) {
         gCacheOk[slug] = true;
         rlog.info(" loaded " + std::to_string(gCache[slug].size()) + " roms from SD cache " + slug);
+        if (quiet) return true;
         resolveTitleIds(slug, target);          // fill in any missing tids (older cache)
         libRefreshStart(gRomm, slug, gCache[slug], saveLibCache);
         // covers wait for the refresh (single httpc user); resumed on take
@@ -831,6 +835,7 @@ static bool ensurePlatformLoaded(const std::string& slug, C3D_RenderTarget* targ
     rlog.info(" listRoms ok: " + std::to_string(gCache[slug].size()) + " roms");
     resolveTitleIds(slug, target);              // resolve tids BEFORE covers (no concurrent httpc)
     saveLibCache(slug, gCache[slug]);
+    if (quiet) return true;
     coverCacheStart(gRomm, gCache[slug]);       // background art prefetch (async, cached)
     rlog.info(" cover prefetch started");
     return true;
@@ -1999,10 +2004,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
         }
         // 3DS: EVERY installed app on SD (not just the ones on RomM). Titles
-        // that match a library entry keep its cover + metadata; the rest are
-        // named from their SMDH. Biggest first — this screen is about space.
+        // that match a library entry borrow its display name/year; art is
+        // always the title's own HOME icon (never the RomM cover — cover
+        // loads fought the SMDH reads and made this screen crawl). Biggest
+        // first — this screen is about space. quiet=true: no refresh/cover
+        // worker while the scan owns the SD card.
         if (!gCacheOk[ROMM_SLUG_3DS] && gRomm.loadConfig() && gRomm.hasConfig())
-            ensurePlatformLoaded(ROMM_SLUG_3DS);
+            ensurePlatformLoaded(ROMM_SLUG_3DS, nullptr, true);
         installed3dsRefresh();
         std::map<u64, const RommRom*> libByTid;
         for (auto& cr : gCache[ROMM_SLUG_3DS])
@@ -2029,10 +2037,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (hit != libByTid.end()) {
                 const RommRom* cr = hit->second;
                 if (!cr->name.empty()) name = utf8FoldLatin(cr->name);
-                e->rommId = cr->id;
-                e->coverPath = cr->coverPath;
-                e->coverSmallPath = cr->coverSmallPath;
                 e->year = cr->year;
+                // no rommId/coverPath on purpose: rommId<=0 makes the rail
+                // show the title's own icon instead of fetching the cover
             }
             if (name.empty()) name = "Unknown title";
             e->title = name;
