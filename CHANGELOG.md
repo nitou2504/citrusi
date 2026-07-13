@@ -23,6 +23,23 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   the first open pays the one-FS-open-per-title pass ("Reading titles…", with
   the cover worker paused so it doesn't fight for the card).
 
+### Added — Manage every installed 3DS title + storage (`feat/manage-3ds`)
+- **Manage → 3DS now lists every installed title**, not just RomM matches:
+  names come from each title's own SMDH (ExeFS `icon`, English short title),
+  cached on SD (`smdhnames.json`, keyed tid+version), sizes from a batched
+  `AM_GetTitleInfo`. Sorted **biggest first** — the tab is for reclaiming
+  space. Library matches keep their cover/metadata and get an "on RomM" chip.
+  Our own forwarders/injects, DSiWare, system titles and the app itself are
+  filtered out (they have their own tabs, and deleting them would be a foot-gun).
+- **Uninstall any title**, with protected titles refused; when a game has an
+  update (`0004000E`) or DLC (`0004008C`) installed, a `+ extras` button
+  removes those too and shows their size.
+- **Per-system storage panel** on the Manage system picker: count + size per
+  system (Nintendo DS forwarders incl. YANBF/DSiWare, GBA injects, 3DS apps),
+  updates/DLC when present, and SD free.
+- First open reads uncached SMDHs behind "Reading titles… n/N" (later opens
+  are instant); both Manage screens hold a `CoverCachePause` while scanning.
+
 ### Added — batch operations (`feat/batch-ops`, merged into `feat/integration`)
 - **Multiselect with Y** on the RomM library and Manage lists (non-installable
   3DS rows are skipped); the header shows "N selected". Details-panel

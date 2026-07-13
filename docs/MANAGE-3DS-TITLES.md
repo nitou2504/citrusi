@@ -91,3 +91,19 @@ Steps (see conversation log / agent report for full detail):
 6. Sort by size desc (default) with A-Z toggle.
 Effort ~12-17h. Pitfalls documented: no-SMDH titles, media types, DSiWare has
 banners not SMDH, orphaned updates/DLC, cover-worker SD contention (pause it).
+
+
+---
+
+## Status: implemented (2026-07-12, branch feat/manage-3ds -> feat/integration)
+
+Built as planned: `installedtitles.{hpp,cpp}` (enumerate + classify + SMDH
+names + `smdhnames.json` cache + storage tally), Manage->3DS listing every
+installed app biggest-first, uninstall with protection and an optional
+`+ extras` (update/DLC) step, and the storage panel on the Manage system
+picker. Build-verified; not yet exercised on hardware.
+
+Deferred:
+- A-Z sort toggle (size-desc is the only order today).
+- Batch uninstall doesn't offer the `+ extras` step (single uninstall does).
+- Orphaned update/DLC cleanup for games that are no longer installed.
