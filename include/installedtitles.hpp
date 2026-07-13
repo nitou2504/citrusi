@@ -65,13 +65,31 @@ struct StorageTally {
     // they point at are not — so a DS row that omits them is meaningless
     u64 ndsRomBytes = 0;   u32 ndsRomCount = 0;
     u64 gbaRomBytes = 0;   u32 gbaRomCount = 0;
+    // .cia installer files left on the card (sd:/cias, sd:/cia): once the
+    // title is installed the file is a duplicate of it
+    u64 ciaBytes = 0;      u32 ciaCount = 0;
+    u64 ciaDoneBytes = 0;  u32 ciaDoneCount = 0;   // ...whose title IS installed
     u64 sdFreeBytes = 0;
     // "Nintendo DS" as the Manage tab sees it: every kind of DS forwarder
     u64 dsBytes() const { return ndsFwdBytes + yanbfBytes + dsiwareBytes + ndsRomBytes; }
     u32 dsCount() const { return ndsFwdCount + yanbfCount + dsiwareCount; }
     u64 gbaTotalBytes() const { return gbaBytes + gbaRomBytes; }
 };
+
+// a .cia sitting on the card; installed=true means its title is on the console
+// already, so the file is a pure duplicate and safe to delete.
+struct CiaFile {
+    std::string path;
+    std::string name;
+    u64 sizeBytes = 0;
+    u64 tid = 0;
+    bool installed = false;
+
+};
 StorageTally computeStorageTally();
 
 // drop the cached tally (and reload the name cache) after an install/uninstall
 void installedTitlesInvalidate();
+
+// every .cia still sitting in sd:/cias or sd:/cia, with its install state
+std::vector<CiaFile> listCiaFiles();

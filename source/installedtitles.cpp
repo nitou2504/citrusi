@@ -7,6 +7,8 @@
 #include <map>
 #include "installedtitles.hpp"
 #include "romm.hpp"        // ROMM_NDS_DIR / ROMM_GBA_DIR
+#include "ciainstall.hpp"  // ciaFileTitleId
+#include "installed3ds.hpp"
 #include "ctrbuilder.hpp"   // CTR_UID_BASE / GBA_UID_BASE
 #include "helpers.hpp"      // utf8FoldLatin, toLowerCase
 #include "settings.hpp"     // FORWARDER_DIR
@@ -34,7 +36,12 @@ static void loadNameCache() {
     try {
         nlohmann::json j; in >> j;
         for (auto it = j.begin(); it != j.end(); ++it)
-            gNames[it.key()] = it.value().get<std::string>();
+        {
+            std::string v = it.value().get<std::string>();
+            // drop the fallbacks the first build cached (CTR-P-XXXX / raw tid)
+            bool looksLikeCode = (v.size() == 10 && v[3] == '-' && v[5] == '-') || v.size() == 16;
+            if (!looksLikeCode) gNames[it.key()] = v;
+        }
     } catch (...) { gNames.clear(); }
 }
 
@@ -178,9 +185,12 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos, bool sortBySize
         if (progress) progress(done, need);
         done++;
         std::string name;
-        if (!readSmdhName(t.tid, t.media, name)) name = fallbackName(t.tid, t.media);
-        gNames[key] = name;
-        gNamesDirty = true;
+        if (readSmdhName(t.tid, t.media, name)) {
+            gNames[key] = name;         // only real names are cached: a product-code
+            gNamesDirty = true;         // fallback must never become permanent
+        } else {
+            name = fallbackName(t.tid, t.media);
+        }
         t.name = name;
     }
     if (gNamesDirty) {
@@ -224,6 +234,31 @@ static StorageTally gTally;
 // keyed by tid|version, so a new/updated title simply misses the cache.
 void installedTitlesInvalidate() { gTallyOk = false; }
 
+std::vector<CiaFile> listCiaFiles() {
+    std::vector<CiaFile> out;
+    static const char* dirs[] = {"sdmc:/cias", "sdmc:/cia"};
+    std::error_code ec;
+    for (const char* d : dirs) {
+        for (auto& de : std::filesystem::directory_iterator(d, ec)) {
+            if (!de.is_regular_file(ec)) continue;
+            std::string p = de.path().generic_string();
+            std::string ext = de.path().extension().generic_string();
+            for (auto& c : ext) c = (char)tolower((unsigned char)c);
+            if (ext != ".cia") continue;
+            CiaFile f;
+            f.path = p;
+            f.name = de.path().stem().generic_string();
+            f.sizeBytes = (u64)de.file_size(ec);
+            f.tid = ciaFileTitleId(p);                 // header+TMD only
+            f.installed = f.tid && installed3dsHasTitle(f.tid);
+            out.push_back(f);
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const CiaFile& a, const CiaFile& b) { return a.sizeBytes > b.sizeBytes; });
+    return out;
+}
+
 StorageTally computeStorageTally() {
     if (gTallyOk) return gTally;
     StorageTally s;
@@ -256,6 +291,11 @@ StorageTally computeStorageTally() {
     };
     sumRoms(ROMM_NDS_DIR, s.ndsRomBytes, s.ndsRomCount);
     sumRoms(ROMM_GBA_DIR, s.gbaRomBytes, s.gbaRomCount);
+    for (auto& c : listCiaFiles()) {
+        s.ciaBytes += c.sizeBytes;
+        s.ciaCount++;
+        if (c.installed) { s.ciaDoneBytes += c.sizeBytes; s.ciaDoneCount++; }
+    }
     FS_ArchiveResource sd = {};
     if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
         s.sdFreeBytes = (u64)sd.freeClusters * sd.clusterSize;

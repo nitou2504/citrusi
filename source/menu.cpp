@@ -1400,9 +1400,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 row("Game Boy Advance", s.gbaCount, s.gbaTotalBytes());
                 row("Nintendo 3DS", s.appCount, s.appBytes);
                 if (s.extraCount > 0) row("Updates and DLC", s.extraCount, s.extraBytes);
-                if (s.ndsRomCount + s.gbaRomCount > 0)
-                    row("  of that, roms on SD", s.ndsRomCount + s.gbaRomCount,
-                        s.ndsRomBytes + s.gbaRomBytes);
+                if (s.ciaCount > 0) row("Installer files (.cia)", s.ciaCount, s.ciaBytes);
                 y += 4;
                 y = cardDivider(y) + 8;
                 drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
@@ -1870,6 +1868,21 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         CoverCachePause coverPause;   // the AM/SD scans own the card while they run
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
+        // .cia installers left on the card: once the title is installed the
+        // file is a duplicate — offer to reclaim the space
+        {
+            u64 doneBytes = 0; int doneCount = 0;
+            for (auto& c : listCiaFiles()) if (c.installed) { doneBytes += c.sizeBytes; doneCount++; }
+            if (doneCount > 0) {
+                MenuSelection* e = new MenuSelection();
+                e->action = CleanupCias;
+                e->title = "Installer files";
+                e->display = "  " + std::to_string(doneCount) + " installed .cia files - "
+                           + humanSize(doneBytes) + " to reclaim";
+                e->sizeBytes = doneBytes;
+                entries.push_back(e);
+            }
+        }
         // 3DS: EVERY installed app on SD (not just the ones on RomM). Titles
         // that match a library entry keep its cover + metadata; the rest are
         // named from their SMDH. Biggest first — this screen is about space.
@@ -2535,6 +2548,41 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     const std::vector<RommRom>& src = this->crossSystem ? gCombined : gCache[this->platformSlug];
                     return buildRommMenu(this, this->filter, src, this->platformSlug, this->crossSystem);
+                }
+                case CleanupCias: {
+                    // installer files whose title is already on the console
+                    std::vector<CiaFile> all = listCiaFiles();
+                    std::vector<CiaFile> done;
+                    u64 doneBytes = 0, otherBytes = 0;
+                    int otherCount = 0;
+                    for (auto& c : all) {
+                        if (c.installed) { done.push_back(c); doneBytes += c.sizeBytes; }
+                        else { otherBytes += c.sizeBytes; otherCount++; }
+                    }
+                    if (done.empty()) {
+                        Dialog(target,0,0,320,240,{"Nothing to reclaim.","No installer file here is already installed."},{"OK"}).handle();
+                        break;
+                    }
+                    std::vector<std::string> msg;
+                    msg.push_back(std::to_string((int)done.size()) + " installed .cia files - " + humanSize(doneBytes));
+                    msg.push_back("The games stay installed. Only the installer files are deleted.");
+                    if (otherCount > 0)
+                        msg.push_back(std::to_string(otherCount) + " not-installed files (" + humanSize(otherBytes) + ") are kept.");
+                    if (Dialog(target,0,0,320,240, msg, {"Delete","Back"}, 1).handle() != 0) break;
+                    int okCount = 0;
+                    u64 freed = 0;
+                    std::error_code ec;
+                    for (size_t i = 0; i < done.size(); i++) {
+                        showLoading(target, {"Deleting " + std::to_string(i+1) + "/" + std::to_string(done.size()),
+                                             done[i].name});
+                        if (std::filesystem::remove(done[i].path, ec)) { okCount++; freed += done[i].sizeBytes; }
+                    }
+                    installedTitlesInvalidate();
+                    Dialog(target,0,0,320,240,{"Deleted " + std::to_string(okCount) + " files",
+                                               humanSize(freed) + " reclaimed"},{"OK"}).handle();
+                    while (this->queue.size() > 0) this->queue.pop();
+                    showLoading(target, {"Refreshing..."});
+                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                 }
                 case ManageRom: {
                     if (entry.platformSlug == ROMM_SLUG_3DS) {   // installed 3DS title -> uninstall

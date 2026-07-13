@@ -28,7 +28,8 @@ enum MenuAction {
     SettingToggle,
     LocalInstall,          // "Install from SD": install one local file (.cia/.nds/.gba)
     LocalInstallSelected,  // batch-install the Y-marked rows
-    LocalInstallAll        // batch-install every not-yet-installed row
+    LocalInstallAll,       // batch-install every not-yet-installed row
+    CleanupCias            // Manage->3DS: delete .cia installers already installed
 };
 
 enum MenuType {
