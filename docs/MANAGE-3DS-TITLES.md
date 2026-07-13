@@ -107,3 +107,33 @@ Deferred:
 - A-Z sort toggle (size-desc is the only order today).
 - Batch uninstall doesn't offer the `+ extras` step (single uninstall does).
 - Orphaned update/DLC cleanup for games that are no longer installed.
+
+
+## Hardware findings (2026-07-12)
+
+- **Read the WHOLE SMDH.** FBI's `listtitles.c` reads `sizeof(SMDH)` = 0x36C0
+  and requires `bytesRead == sizeof(SMDH)`. A partial read (we tried 0x288,
+  enough to reach the English title at 0x208) *fails on retail titles* — only
+  homebrew worked, which is what made the bug look arbitrary. Offsets were
+  never the problem.
+- Pick the title by **system language** (`CFGU_GetSystemLanguage`), then
+  English, then any filled slot — FBI's `smdh_select_title`.
+- **Never cache a fallback name.** Writing `CTR-P-XXXX` into the name cache
+  pins it forever, and the cache is checked before the reader — so a later fix
+  never runs.
+- The SMDH read is also the only chance to grab the title's **48x48 icon**
+  (offset 0x24C0, RGB565, 8x8 morton tiles). Save it then; a cached *name*
+  must not short-circuit a missing *icon*.
+- **`.cia` installers are the real storage win**: 6.6 GB on the dev console,
+  all for games already installed. Scan `sd:/cias` + `sd:/cia`, match by
+  `ciaFileTitleId` against the AM set.
+- Storage rows must include the rom files on the card, not just the titles.
+
+## Still open
+
+- Cache-first + background refresh for the Manage list/tally (the librefresh
+  pattern), so the first open of a session isn't a blocking AM+SMDH sweep.
+- Managing updates/DLC individually (today: counted, shown per game, and
+  removable with their game via `+ extras`).
+- A-Z sort toggle; batch uninstall doesn't offer `+ extras`; orphaned
+  update/DLC cleanup for games that are already gone.

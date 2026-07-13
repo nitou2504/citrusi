@@ -23,6 +23,25 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   the first open pays the one-FS-open-per-title pass ("Reading titles…", with
   the cover worker paused so it doesn't fight for the card).
 
+### Added — storage cleanup + GBA screen on installed games
+- **Duplicates row** in Manage → 3DS: `.cia` installer files whose game is
+  already installed are pure duplicates of it (6.6 GB on the dev console).
+  The row is tinted, reads "Duplicates - <size>", explains itself in the
+  details panel, and deletes only those files — games are untouched. The
+  storage panel gained an "Installer files (.cia)" row so this can't hide.
+- **Storage rows now count the roms on the card** (`sd:/roms/...`): a
+  forwarder title is a few hundred KB while the rom it launches is hundreds
+  of MB, so the DS/GBA numbers were meaningless without them.
+- **Every 3DS title has art**: its own 48×48 HOME icon is untiled out of the
+  SMDH we already read, cached under `/titleicons`, and drawn on a white
+  rounded plate with nearest filtering when the game isn't in the RomM library.
+- **Per-game update/DLC sizes**: a row's size includes its update and DLC,
+  with a chip and a "Game X + N update/DLC Y" breakdown (managing them
+  individually is future work).
+- **GBA "Screen" action** on installed injects (single + batch): re-bakes the
+  title with the Settings screen preset, reusing its stored art — no picker,
+  same TID, saves kept.
+
 ### Added — Manage every installed 3DS title + storage (`feat/manage-3ds`)
 - **Manage → 3DS now lists every installed title**, not just RomM matches:
   names come from each title's own SMDH (ExeFS `icon`, English short title),
@@ -118,6 +137,20 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   GameTDB box → notify → RomM cover → DS-icon stamp (boxes are fallbacks now).
 
 ### Fixed
+- **Installed-title names were all product codes (CTR-P-AMKE)**: the SMDH read
+  asked for 0x288 bytes; FBI reads the whole 0x36C0 struct and requires the
+  full byte count — the short read fails on retail titles (homebrew happened
+  to work). Now a full read, title picked by system language with fallbacks,
+  and failures log their Result. Fallback names are no longer cached, so a
+  bad name can't become permanent.
+- **Title icons never appeared**: a cached name short-circuited the SMDH read,
+  which is also where the icon comes from. A missing icon now triggers the
+  read too (backfill).
+- **The duplicates row was unreachable**: it tested install state before
+  `installed3dsRefresh()` had run, so nothing looked installed.
+- **Backing out of a Manage tab was slow**: the storage tally was recomputed on
+  every visit; it is cached again (installs/uninstalls invalidate it), and
+  opening Manage shows "Opening Manage..." while the first sweep runs.
 - **App crash mid-batch (data abort)**: `readEntireFile` called `fseek` on a
   NULL `FILE*` when an open failed. It now returns empty and logs the path;
   the GBA template pieces are read once at `CtrBuilder::initialize()` instead
