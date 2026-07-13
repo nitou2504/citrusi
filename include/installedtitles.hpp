@@ -87,6 +87,9 @@ struct CiaFile {
 
 };
 StorageTally computeStorageTally();
+// true while computeStorageTally() would return the cached value (callers can
+// skip a CoverCachePause for the cache-hit path)
+bool storageTallyCached();
 
 // drop the cached tally (and reload the name cache) after an install/uninstall
 void installedTitlesInvalidate();

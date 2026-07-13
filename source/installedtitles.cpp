@@ -314,6 +314,7 @@ static StorageTally gTally;
 // after an install/uninstall the numbers moved. names stay valid: they are
 // keyed by tid|version, so a new/updated title simply misses the cache.
 void installedTitlesInvalidate() { gTallyOk = false; gSdEnumOk = false; }
+bool storageTallyCached() { return gTallyOk; }
 
 std::vector<CiaFile> listCiaFiles() {
     std::vector<CiaFile> out;
