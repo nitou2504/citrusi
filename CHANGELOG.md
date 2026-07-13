@@ -4,6 +4,24 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Fixed (2026-07-13, evening)
+- **0xC8E083FC root cause found and fixed**: the new write-offset logging
+  showed the cursed tid failing on the very first write with the title absent
+  from the AM db; ftpd inspection found an orphan import dir on SD
+  (`<id0>/<id1>/title/<high>/<low>` with a `00000000.ctx` import context +
+  `content/*.app`) left by an aborted import — it blocks every future install
+  of that tid. When db cleanup + retry still hits already-exists and AM
+  confirms the title is not installed, the app now removes that orphan dir
+  (the on-device equivalent of the GodMode9 folder-delete fix) and retries.
+
+### Changed (2026-07-13, evening)
+- **Manage → 3DS shows title icons only**: rows no longer borrow the RomM
+  cover — the rail always draws the title's own HOME icon, and opening the
+  screen no longer kicks the background library refresh or the cover
+  prefetch worker (their SD reads fought the SMDH/tally pass and made the
+  screen crawl once the 3DS library worked again). Names/year still come
+  from the cached library.
+
 ### Fixed (2026-07-13)
 - **3DS library empty on RomM >= 4.9.2**: the server's list response now sends
   `files: []` (file lists are no longer inlined), so every multi-file 3DS game
