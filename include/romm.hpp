@@ -25,7 +25,9 @@ struct RommRom {
     int id;
     std::string name;    // display name (metadata name or fs_name)
     std::string fsName;  // file name to download (single-file: the rom; multi-file: the chosen .cia)
-    int fileId=0;        // >0 = specific file id within a multi-file rom (download via ?file_ids=)
+    int fileId=0;        // >0 = specific file id within a multi-file rom (download via ?file_ids=);
+                         // -1 = multi-file rom whose file list is pending (RomM >= 4.9.2
+                         //      returns files:[] in the list response; resolveRomFile fills it)
     u64 titleId=0;       // 3ds: resolved from the cia's TMD (0 = not resolved) for install detection
     std::string platformSlug;   // "nds" / "3ds"
     bool installable=true;      // 3ds: true only when a .cia is available; nds: always true
@@ -63,6 +65,10 @@ class RommClient {
     int findNdsPlatform() { return findPlatform(ROMM_SLUG_NDS); } // back-compat
     // lists roms; tags each with platformSlug + installable
     bool listRoms(int platformId, std::vector<RommRom>& out, const std::string& slug = "");
+    // multi-file rom with fileId==-1: fetch /api/roms/{id} and pick the base
+    // .cia from its files. Returns false (rom untouched, fileId stays -1) on
+    // network error; on success installable reflects whether a .cia exists.
+    bool resolveRomFile(RommRom& rom);
     // downloads to destPath; progress(downloaded,total) called between chunks,
     // return false from it to cancel (sets lastError="cancelled")
     bool download(const RommRom& rom, const std::string& destPath,
