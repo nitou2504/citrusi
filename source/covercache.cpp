@@ -73,6 +73,7 @@ static void processJob(const CoverJob& job) {
     if (fileExists(legacy)) {
         bytes = readEntireFile(legacy);
     } else if (job.url.empty() || !gWorkerClient.fetchUrl(job.url, bytes) || bytes.empty()) {
+        if (gAbort) return;   // cut by pause/exit, not a real miss: retry later
         // remember the miss so we don't hammer the server
         std::ofstream o(missPath(job.id));
         o << "x";
@@ -205,7 +206,11 @@ void coverCacheClearMisses() {
 
 void coverCachePause() {
     gPauseCount++;
-    while (gBusy) svcSleepThread(10 * 1000 * 1000LL);   // drain the in-flight job
+    // cut the in-flight transfer instead of waiting it out: pressing B while a
+    // cover was downloading used to block navigation until the fetch finished
+    gAbort = true;
+    while (gBusy) svcSleepThread(10 * 1000 * 1000LL);   // drain (fast now)
+    if (gRun) gAbort = false;   // keep set when exiting (coverCacheStop)
 }
 
 void coverCacheResume() {

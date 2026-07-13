@@ -745,9 +745,9 @@ static int gCoverWantId = -1;
 static int gCoverDebounce = 0;
 // frames a selection must sit still before any art touches the SD card:
 // stepping through a list stays pure text (the NDS-manage feel everywhere).
-// 12 frames (200ms) beats a fast press cadence (~6-7 presses/sec) so even
+// 15 frames (250ms) beats a fast press cadence (~6-7 presses/sec) so even
 // repeated single steps never fire a load between presses.
-#define ART_SETTLE_FRAMES 12
+#define ART_SETTLE_FRAMES 15
 // a cover that isn't in the SD cache yet (worker still fetching): back off
 // this many frames before the next stat instead of re-trying every frame
 #define ART_MISS_BACKOFF 30
@@ -2038,10 +2038,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     Menu* generateManageSystemMenu(Menu* prev) {
         delete prev;
         // storage breakdown for the bottom panel. computeStorageTally() is
-        // cached until an install/uninstall invalidates it, so coming back from
-        // a system tab is instant instead of re-sweeping AM every time.
-        CoverCachePause coverPause;
-        gManageTally = computeStorageTally();
+        // cached until an install/uninstall invalidates it; only a recompute
+        // needs the cover worker paused — B from a system tab must be instant
+        if (storageTallyCached()) {
+            gManageTally = computeStorageTally();
+        } else {
+            CoverCachePause coverPause;
+            gManageTally = computeStorageTally();
+        }
         std::vector<MenuSelection*> entries;
         auto add = [&](const std::string& label, const std::string& slug){
             MenuSelection* e = new MenuSelection();
