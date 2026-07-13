@@ -69,6 +69,7 @@ class MenuSelection {
         bool installed=false;
         std::string fwdCia;          // uninstalled forwarder .cia on SD for this rom
         bool selected=false;         // Y-marked for a batch (library/manage/Install-from-SD)
+        bool protectedTitle=false;   // 3ds: system title / this app — never uninstall
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
     MenuSelection(MenuSelection* old);
     MenuSelection* setPath(std::filesystem::path p);
@@ -136,7 +137,8 @@ Menu* generateSystemMenu(Menu* prev);
 Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug);
 Menu* generateSearchAllMenu(Menu* prev, C3D_RenderTarget* target);
 Menu* generateManageSystemMenu(Menu* prev);
-Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug);
+Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug,
+                         C3D_RenderTarget* target=nullptr);
 Menu* generateSettingsMenu(Menu* prev, Config* config);
 bool sortMenuSelections(MenuSelection* a, MenuSelection* b);
 std::string shorten(std::string s, u16 len);

@@ -24,6 +24,7 @@ extern "C" {
 #include "ctrbuilder.hpp"
 #include "ciainstall.hpp"
 #include "installed3ds.hpp"
+#include "installedtitles.hpp"
 #include "boxart.hpp"
 #include "cwav.hpp"
 #include "teximg.hpp"
@@ -609,8 +610,10 @@ static bool manageItemInstalled(const std::string& slug, const MenuSelection& it
 
 static bool uninstallManageItem(Config* config, const MenuSelection& it) {
     if (it.platformSlug == ROMM_SLUG_3DS) {
+        if (it.protectedTitle) return false;   // this app / a system title
         Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
         AM_DeleteTicket(it.tid);
+        if (R_SUCCEEDED(dr)) installedTitlesInvalidate();
         return R_SUCCEEDED(dr);
     }
     if (it.platformSlug == ROMM_SLUG_GBA) {
@@ -1201,7 +1204,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             float cxp = drawChip(CTX, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
             if (m3ds) {
                 cxp = drawChip(cxp, y, "3DS", COL_TEXT_DIM);
-                drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+                cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+                if (sel->rommId > 0) drawChip(cxp, y, "on RomM", COL_TEXT_DIM);
             } else {
                 if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
@@ -1782,29 +1786,52 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         return menu;
     }
 
-    Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug) {
+    Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug,
+                             C3D_RenderTarget* target) {
         (void)dsiwareCount;
         delete prev;
         CoverCachePause coverPause;   // the AM/SD scans own the card while they run
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
-        // 3DS: installed titles from your library (uninstall here)
+        // 3DS: EVERY installed app on SD (not just the ones on RomM). Titles
+        // that match a library entry keep its cover + metadata; the rest are
+        // named from their SMDH. Biggest first — this screen is about space.
         if (!gCacheOk[ROMM_SLUG_3DS] && gRomm.loadConfig() && gRomm.hasConfig())
             ensurePlatformLoaded(ROMM_SLUG_3DS);
         installed3dsRefresh();
-        for (auto& cr : gCache[ROMM_SLUG_3DS]) {
-            if (cr.titleId == 0 || !installed3dsHasTitle(cr.titleId)) continue;
+        std::map<u64, const RommRom*> libByTid;
+        for (auto& cr : gCache[ROMM_SLUG_3DS])
+            if (cr.titleId) libByTid.emplace(cr.titleId, &cr);
+        // first pass reads one SMDH per title; cached on SD, so later opens
+        // don't hit the card at all
+        std::vector<InstalledTitle> titles = listInstalledApps(true, true,
+            [&](int done, int need) {
+                showLoading(target, {"Reading titles...",
+                                     std::to_string(done + 1) + "/" + std::to_string(need)});
+            });
+        for (auto& t : titles) {
+            if (t.protectedTitle) continue;                        // this app, system titles
+            if (t.kind != TK_APP && t.kind != TK_DEMO) continue;   // our forwarders/injects: own tabs
             MenuSelection* e = new MenuSelection();
-            e->display = "* " + utf8FoldLatin(cr.name);
-            e->title = utf8FoldLatin(cr.name);
+            std::string name = t.name;
             e->action = ManageRom;
             e->platformSlug = ROMM_SLUG_3DS;
-            e->tid = cr.titleId;
-            e->rommId = cr.id;
-            e->coverPath = cr.coverPath;
-            e->coverSmallPath = cr.coverSmallPath;
-            e->year = cr.year;
-            e->sizeBytes = cr.sizeBytes;
+            e->tid = t.tid;
+            e->installed = true;
+            e->protectedTitle = t.protectedTitle;
+            e->sizeBytes = t.sizeBytes;   // installed size, not the server's file size
+            auto hit = libByTid.find(t.tid);
+            if (hit != libByTid.end()) {
+                const RommRom* cr = hit->second;
+                if (!cr->name.empty()) name = utf8FoldLatin(cr->name);
+                e->rommId = cr->id;
+                e->coverPath = cr->coverPath;
+                e->coverSmallPath = cr->coverSmallPath;
+                e->year = cr->year;
+            }
+            if (name.empty()) name = "Unknown title";
+            e->title = name;
+            e->display = "* " + name + (t.kind == TK_DEMO ? " (demo)" : "");
             entries.push_back(e);
         }
       } else if (slug == ROMM_SLUG_GBA) {
@@ -2218,7 +2245,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.platformSlug.empty())          // main entry -> system pick
                         return generateManageSystemMenu(this);
                     showLoading(target, {std::string("Scanning ")+(entry.platformSlug==ROMM_SLUG_3DS?"3DS":entry.platformSlug==ROMM_SLUG_GBA?"GBA":"NDS")+" titles..."});
-                    return generateManageMenu(this,config->dsiwareCount,entry.platformSlug);
+                    return generateManageMenu(this,config->dsiwareCount,entry.platformSlug,target);
                 case EditRommConfig:
                     gRomm.loadConfig();
                     if (gRomm.promptConfig())
@@ -2435,16 +2462,49 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 case ManageRom: {
                     if (entry.platformSlug == ROMM_SLUG_3DS) {   // installed 3DS title -> uninstall
                         std::string n3 = entry.title;
-                        if (Dialog(target,0,0,320,240,{n3,"Installed"},{"Uninstall","Back"}).handle()!=0) break;
-                        if (Dialog(target,0,0,320,240,{"Uninstall game?",n3},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        if (entry.protectedTitle) {   // never touch this app or a system title
+                            Dialog(target,0,0,320,240,{n3,"System title.","This one can't be uninstalled."},{"OK"}).handle();
+                            break;
+                        }
+                        // updates (0004000E) and DLC (0004008C) of this game stay
+                        // behind unless we take them too — offer that in one go
+                        TitleExtras ex = findTitleExtras(entry.tid);
+                        int c;
+                        if (!ex.empty()) {
+                            std::string what = (ex.updates && ex.dlc) ? "update + DLC"
+                                             : ex.updates ? "update" : "DLC";
+                            c = Dialog(target,0,0,320,240,
+                                       {n3, "Installed - " + humanSize(entry.sizeBytes),
+                                        what + " also installed (" + humanSize(ex.bytes) + ")"},
+                                       {"Uninstall","+ extras","Back"}).handle();
+                        } else {
+                            c = Dialog(target,0,0,320,240,
+                                       {n3, "Installed - " + humanSize(entry.sizeBytes)},
+                                       {"Uninstall","Back"}).handle();
+                            if (c == 1) c = 2;   // "Back" is the second button here
+                        }
+                        if (c != 0 && c != 1) break;
+                        bool withExtras = (c == 1);
+                        if (Dialog(target,0,0,320,240,{withExtras?"Uninstall game + extras?":"Uninstall game?",n3},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                         showLoading(target, {"Uninstalling...", n3});
                         Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
                         AM_DeleteTicket(entry.tid);
+                        int extrasGone = 0;
+                        if (withExtras && R_SUCCEEDED(dr)) {
+                            for (u64 xt : ex.tids) {
+                                if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, xt))) extrasGone++;
+                                AM_DeleteTicket(xt);
+                            }
+                        }
+                        installedTitlesInvalidate();
                         if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
+                        else if (extrasGone > 0)
+                            Dialog(target,0,0,320,240,{"Uninstalled.",n3,
+                                   "Also removed "+std::to_string(extrasGone)+" extra"+(extrasGone>1?"s.":".")},{"OK"}).handle();
                         else Dialog(target,0,0,320,240,{"Uninstalled.",n3},{"OK"}).handle();
                         while (this->queue.size() > 0) this->queue.pop();
                         showLoading(target, {"Refreshing..."});
-                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                     }
                     if (entry.platformSlug == ROMM_SLUG_GBA) {   // GBA rom on SD +/- installed inject
                         std::string ng = entry.title;
@@ -2460,7 +2520,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 if (rc == 0) break;   // picker cancelled — stay put
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
-                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
                             if (c!=1) break;
                             // single-pass: uninstall removes the inject AND the ROM file
@@ -2514,7 +2574,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         while (this->queue.size() > 0) this->queue.pop();
                         showLoading(target, {"Refreshing..."});
-                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                     }
                     std::string name = entry.path.filename().generic_string();
                     bool hasFwd = entry.rtid || entry.installed || entry.ytid;
@@ -2534,7 +2594,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 while (this->queue.size() > 0) this->queue.pop();
                                 gFwdReady = false; invalidateYanbfCache();
                                 showLoading(target, {"Refreshing..."});
-                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             } else if (c==2) {
                                 if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
                                     std::error_code ec;
@@ -2542,7 +2602,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     while (this->queue.size() > 0) this->queue.pop();
                                     gFwdReady = false; invalidateManagedRoms();
                                     showLoading(target, {"Refreshing..."});
-                                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                                 }
                                 break;
                             } else if (c!=1) {
@@ -2564,7 +2624,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             while (this->queue.size() > 0) this->queue.pop();
                             gFwdReady = false; invalidateYanbfCache();
                             showLoading(target, {"Refreshing..."});
-                            return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                            return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                         } else if (c==1) {
                             if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
                                 std::error_code ec;
@@ -2572,7 +2632,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 while (this->queue.size() > 0) this->queue.pop();
                                 gFwdReady = false; invalidateManagedRoms();
                                 showLoading(target, {"Refreshing..."});
-                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
                         }
                         break;
@@ -2592,7 +2652,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             while (this->queue.size() > 0) this->queue.pop();
                             gFwdReady = false; invalidateYanbfCache();
                             showLoading(target, {"Refreshing..."});
-                            return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                            return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                         }
                         if (c!=1) break;
                     } else {
@@ -2637,7 +2697,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     gFwdReady = false; invalidateYanbfCache();
                     showLoading(target, {"Refreshing..."});
-                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                 }
                 case LocalInstallSelected:
                 case LocalInstallAll: {
@@ -2881,7 +2941,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         while (this->queue.size() > 0) this->queue.pop();
                         gFwdReady = false; invalidateYanbfCache(); invalidateManagedRoms();
                         showLoading(target, {"Refreshing..."});
-                        return generateManageMenu(this,config->dsiwareCount,slug);
+                        return generateManageMenu(this,config->dsiwareCount,slug,target);
                     }
                     if (act == A_UNINSTALL) {
                         if (Dialog(target,0,0,320,240,{"Uninstall "+std::to_string(M)+" games?"},
@@ -2928,7 +2988,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     if (!is3ds) { gFwdReady = false; invalidateYanbfCache(); invalidateManagedRoms(); }
                     showLoading(target, {"Refreshing..."});
-                    return generateManageMenu(this,config->dsiwareCount,slug);
+                    return generateManageMenu(this,config->dsiwareCount,slug,target);
                 }
                 default:
                     break;
