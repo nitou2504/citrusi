@@ -690,16 +690,27 @@ static bool uninstallManageItem(Config* config, const MenuSelection& it) {
 
 RommClient gRomm;
 
-// selected-game cover (shared by top rail + tick loader)
+// selected-game cover (shared by top rail + tick loader). gCover BORROWS the
+// texture from gCoverLru below — only eviction frees it.
 static C2D_Image gCover = {nullptr, nullptr};
+// small texture LRU: revisiting a cover while scrolling must cost nothing
+// (RESPONSIVENESS-PLAN: cap resident art, never re-read the SD for it)
+struct CoverSlot { int id; C2D_Image img; };
+static std::vector<CoverSlot> gCoverLru;   // front = most recent, owns textures
+#define COVER_LRU_CAP 16
 // the selected 3DS title's own HOME icon (from its SMDH) — art for games that
 // aren't in the RomM library
 static C2D_Image gTitleIcon = {nullptr, nullptr};
 static u64 gTitleIconTid = 0;
+static u64 gIconWantTid = 0;
+static int gIconDebounce = 0;
 static int gCoverForId = -1;    // rommId currently in gCover
 static int gCoverFailedId = -1; // rommId that failed to load (don't retry)
 static int gCoverWantId = -1;
 static int gCoverDebounce = 0;
+// frames a selection must sit still before any art touches the SD card:
+// stepping through a list stays pure text (the NDS-manage feel everywhere)
+#define ART_SETTLE_FRAMES 8
 static u32 gTick = 0;           // global frame counter for marquees
 
 // cached libraries per platform slug, for instant search filtering
@@ -1138,15 +1149,22 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if ((this->type != MENU_ROMM && this->type != MENU_MANAGE) || this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
         if (sel->action != RommInstall && sel->action != ManageRom) return;
-        // 3DS titles with no RomM cover: use the icon saved from their SMDH
+        // 3DS titles with no RomM cover: use the icon saved from their SMDH.
+        // Debounced like covers — an SD read on every step is what made the
+        // Manage->3DS list crawl (NDS is fast precisely because it does
+        // nothing per step).
         if (this->type == MENU_MANAGE && sel->platformSlug == ROMM_SLUG_3DS &&
-            sel->rommId <= 0 && sel->tid && sel->tid != gTitleIconTid) {
+            sel->rommId <= 0 && sel->tid) {
+            if (sel->tid != gIconWantTid) { gIconWantTid = sel->tid; gIconDebounce = 0; return; }
+            if (gTitleIconTid == sel->tid) return;
+            if (++gIconDebounce < ART_SETTLE_FRAMES) return;
             if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
             gTitleIconTid = sel->tid;
-            std::string rgba = titleIconRGBA(sel->tid);
+            std::string rgba = titleIconRGBA(sel->tid);   // RAM-cached after first read
             if (rgba.size() == 48*48*4 &&
                 texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon))
                 C3D_TexSetFilter(gTitleIcon.tex, GPU_NEAREST, GPU_NEAREST);   // pixel art
+            return;
         }
         if (sel->rommId <= 0) return;
         if (sel->rommId != gCoverWantId) {
@@ -1155,12 +1173,26 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             return;
         }
         if (gCoverForId == gCoverWantId || gCoverFailedId == gCoverWantId) return;
-        if (++gCoverDebounce < 3) return; // settle a few frames
+        // RAM LRU first: scrolling back to a seen cover never re-reads the SD
+        for (size_t i = 0; i < gCoverLru.size(); i++) {
+            if (gCoverLru[i].id != gCoverWantId) continue;
+            CoverSlot s = gCoverLru[i];
+            gCoverLru.erase(gCoverLru.begin() + i);
+            gCoverLru.insert(gCoverLru.begin(), s);
+            gCover = s.img;
+            gCoverForId = s.id;
+            return;
+        }
+        if (++gCoverDebounce < ART_SETTLE_FRAMES) return; // rapid steps: no SD at all
         // never fetch/decode here: the worker prefetches, we just upload
         coverCacheWant(gCoverWantId);
         C2D_Image img = {nullptr, nullptr};
         if (coverCacheLoad(gCoverWantId, &img)) {
-            freeTexImage(&gCover);
+            gCoverLru.insert(gCoverLru.begin(), {gCoverWantId, img});
+            while (gCoverLru.size() > COVER_LRU_CAP) {
+                freeTexImage(&gCoverLru.back().img);
+                gCoverLru.pop_back();
+            }
             gCover = img;
             gCoverForId = gCoverWantId;
         } else if (coverCacheUnavailable(gCoverWantId)) {
