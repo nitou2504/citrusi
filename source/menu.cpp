@@ -524,15 +524,50 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
 // Returns 1 = updated, 0 = skipped (B / nothing chosen), -1 = failed.
 // interactive=true shows the per-item result dialog (single); batch passes
 // false and reports in its own summary. The picker + progress always show.
-// five-preset picker, preselected on the Settings default; returns the
-// GBA_SCREEN_* index or -1 on B/cancel
+// five-preset picker: vertical list with a plain-words explanation of the
+// highlighted preset underneath. Preselected on the Settings default;
+// returns the GBA_SCREEN_* index or -1 on B/cancel.
+static float drawWrapped(float x, float y, float maxW, float lineH, float scale,
+                         u32 color, const std::string& text, int maxLines);
 static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
                                const std::string& title) {
-    static const char* names[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
-    int cur = config->gbaScreen % GBA_SCREEN_COUNT;
-    return Dialog(target,0,0,320,240,
-                  {"Screen filter",title,std::string("default: ")+names[cur]},
-                  {"AGS-101","Original","Raw","Bright","Night"},cur).handle();
+    static const char* names[GBA_SCREEN_COUNT] = {
+        "AGS-101 colors", "Original dark filter", "Unfiltered",
+        "Brighter gamma", "Night (warm)"};
+    static const char* descs[GBA_SCREEN_COUNT] = {
+        "Gamma-corrected to match the backlit AGS-101 screen. Vivid colors without the dark cast. Recommended.",
+        "Nintendo's own Virtual Console filter. Authentic, but noticeably dark and muted.",
+        "The raw palette, no filter at all. Brightest picture; colors look washed out.",
+        "A gentler gamma correction - halfway between AGS-101 and unfiltered.",
+        "AGS-101 colors plus a warm 3400K tint - easier on the eyes in the dark."};
+    int def = config->gbaScreen % GBA_SCREEN_COUNT;
+    int sel = def;
+    while (aptMainLoop()) {
+        hidScanInput();
+        u32 kd = hidKeysDown();
+        if (kd & KEY_UP)   sel = (sel + GBA_SCREEN_COUNT - 1) % GBA_SCREEN_COUNT;
+        if (kd & KEY_DOWN) sel = (sel + 1) % GBA_SCREEN_COUNT;
+        if (kd & (KEY_A | KEY_START)) return sel;
+        if (kd & KEY_B) return -1;
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        C2D_TargetClear(target, COL_BG);
+        C2D_SceneBegin(target);
+        drawText(160, 16, 0.5f, 0.55f, 0, COL_TEXT, "Screen filter", C2D_AlignCenter);
+        drawText(160, 34, 0.5f, 0.42f, 0, COL_TEXT_DIM, title.c_str(), C2D_AlignCenter);
+        float y = 50;
+        for (int i = 0; i < GBA_SCREEN_COUNT; i++, y += 24) {
+            bool hot = (i == sel);
+            if (hot) C2D_DrawRectSolid(12, y, 0.4f, 296, 22, COL_ACCENT);
+            std::string label = std::string(names[i]) + (i == def ? "  (default)" : "");
+            drawText(22, y + 11, 0.5f, 0.5f, 0,
+                     hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, label.c_str(), 0);
+        }
+        C2D_DrawRectSolid(12, y + 4, 0.4f, 296, 1, COL_ELEV);
+        drawWrapped(16, y + 12, 288, 13, 0.42f, COL_TEXT_DIM, descs[sel], 3);
+        drawText(160, 230, 0.5f, 0.4f, 0, COL_TEXT_DIM, "A apply    B cancel", C2D_AlignCenter);
+        C3D_FrameEnd(0);
+    }
+    return -1;
 }
 
 // re-bakes an installed inject with the given screen preset, reusing the
