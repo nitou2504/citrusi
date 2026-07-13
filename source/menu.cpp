@@ -987,6 +987,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     #define COVER_CACHE_DIR (FORWARDER_DIR + std::string("/cache/"))
 
+    // storage breakdown for the Manage system picker: AM enumeration is too
+    // slow to redo every frame, so it's computed once in generateManageSystemMenu
+    static StorageTally gManageTally;
+
     // description scroll state
     static int gDescForId = -1;
     static std::vector<std::string> gDescLines;
@@ -1337,12 +1341,37 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 drawText(160, 124, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
         } else if (this->type == MENU_SYSTEMS) {
             bool manage = (this->heading.rfind("Manage", 0) == 0);
-            drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT,
-                     manage ? "Manage Installed" : "RomM Library", C2D_AlignCenter);
+            if (manage) {
+                // what the installed titles actually cost, per system.
+                // gManageTally is filled once, when this menu is generated.
+                const StorageTally& s = gManageTally;
+                float y = CARD_Y + PAD;
+                drawLineTop(CTX, y, 17, 0.58f, COL_TEXT, "Installed");
+                y += 17 + 4;
+                y = cardDivider(y) + 6;
+                auto row = [&](const char* label, u32 count, u64 bytes) {
+                    drawLineTop(CTX, y, 15, 0.45f, COL_TEXT, label);
+                    char v[64];
+                    snprintf(v, sizeof(v), "%lu - %s", (unsigned long)count, humanSize(bytes).c_str());
+                    drawText(CARD_X + CARD_W - PAD, y + 7.5f, 0.55f, 0.45f, 0, COL_TEXT_DIM, v, C2D_AlignRight);
+                    y += 18;
+                };
+                row("Nintendo DS", s.dsCount(), s.dsBytes());
+                row("Game Boy Advance", s.gbaCount, s.gbaBytes);
+                row("Nintendo 3DS", s.appCount, s.appBytes);
+                if (s.extraCount > 0) row("Updates and DLC", s.extraCount, s.extraBytes);
+                y += 4;
+                y = cardDivider(y) + 8;
+                drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
+                y += CHIP_H + 8;
+                drawWrapped(CTX, y, CTW, 14, 0.42f, COL_TEXT_DIM,
+                            "Pick a system to see what's installed, and uninstall or change art.", 3);
+                return;
+            }
+            drawText(160, 84, 0.5f, 0.5f, COL_SURFACE, COL_TEXT, "RomM Library", C2D_AlignCenter);
             drawWrapped(48, 108, 224, 14, 0.45f, COL_TEXT_DIM,
-                        manage ? "Pick a system to see what's installed, and uninstall or change art."
-                               : "Pick a system to browse and install games. "
-                                 "Search all systems looks across all three.", 4);
+                        "Pick a system to browse and install games. "
+                        "Search all systems looks across all three.", 4);
             if (!gRomm.host.empty())
                 drawText(160, 172, 0.5f, 0.42f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
         } else {
@@ -1769,6 +1798,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // Manage system-selection screen (NDS / 3DS), mirrors the library flow
     Menu* generateManageSystemMenu(Menu* prev) {
         delete prev;
+        // storage breakdown for the bottom panel: fresh on every visit (an
+        // install/uninstall may have just happened), then read from the static
+        CoverCachePause coverPause;   // the AM sweep owns the card while it runs
+        installedTitlesInvalidate();
+        gManageTally = computeStorageTally();
         std::vector<MenuSelection*> entries;
         auto add = [&](const std::string& label, const std::string& slug){
             MenuSelection* e = new MenuSelection();
