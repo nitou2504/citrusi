@@ -5,6 +5,11 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
 ### Fixed (2026-07-14)
+- **B goes back instantly**: every screen rebuild paused the cover worker by
+  draining its in-flight download — B mid-fetch waited for the whole
+  transfer. The pause now cuts the transfer (the job retries later, no false
+  miss), and B to the Manage system picker skips the pause when the storage
+  tally is cached. Art settle raised to 15 frames.
 - **Manage → 3DS scroll**: the real culprit — a FULL AM enumeration of every
   SD title ran on each selection change (the update/DLC chip lookup). The SD
   title list is now RAM-cached (invalidated with the storage tally); the
