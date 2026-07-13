@@ -4,6 +4,9 @@
 #include <vector>
 #include <sys/stat.h>
 #include "ciainstall.hpp"
+#include "logger.hpp"
+
+static Logger cilog("ciainst");
 
 // Parse the title id out of a CIA's TMD (big-endian u64 at TMD header +0x4C).
 static u64 readCiaTitleId(FILE* f) {
@@ -70,6 +73,67 @@ unsigned long long ciaBufferTitleId(const std::string& b) {
     return tid;
 }
 
+// AM "already exists": the title db still holds a title/ticket/pending import
+// for this tid. Seen on rebuild-over-a-just-installed inject (GBA Change art
+// twice in a row) — the fix is to clear every trace and stream again.
+#define AM_ERR_ALREADY_EXISTS 0xC8E083FCu
+
+static bool amTitleExists(FS_MediaType media, u64 tid) {
+    AM_TitleEntry te;
+    u64 id = tid;
+    return tid && R_SUCCEEDED(AM_GetTitleInfo(media, 1, &id, &te));
+}
+
+// one full streaming pass; 0 = installed, 1 = fatal, 2 = "already exists"
+// (worth a cleanup + one retry). overwrite = reinstall in place, keeps the
+// SD save data — required when the tid is still installed or AM rejects the
+// ticket/TMD import with AM_ERR_ALREADY_EXISTS.
+static int installAttempt(FILE* f, long long sz, FS_MediaType media, bool overwrite,
+                          std::string& err,
+                          std::function<bool(unsigned long long, unsigned long long)>& progress) {
+    fseek(f, 0, SEEK_SET);
+    Handle h = 0;
+    Result r = overwrite ? AM_StartCiaInstallOverwrite(&h, media)
+                         : AM_StartCiaInstall(media, &h);
+    if (R_FAILED(r)) {
+        char b[64]; snprintf(b, sizeof(b), "StartCiaInstall%s 0x%08lX",
+                             overwrite ? "Overwrite" : "", (unsigned long)r);
+        err = b;
+        return ((u32)r == AM_ERR_ALREADY_EXISTS) ? 2 : 1;
+    }
+
+    std::vector<unsigned char> buf(256 * 1024);
+    u64 off = 0;
+    int rc = 0;
+    while (off < (u64)sz) {
+        size_t rd = fread(buf.data(), 1, buf.size(), f);
+        if (rd == 0) break;
+        u32 written = 0;
+        r = FSFILE_Write(h, &written, off, buf.data(), (u32)rd, FS_WRITE_FLUSH);
+        if (R_FAILED(r)) {
+            char b[96]; snprintf(b, sizeof(b), "write 0x%08lX", (unsigned long)r);
+            err = b;
+            char lb[128]; snprintf(lb, sizeof(lb), "write failed 0x%08lX at offset %llu/%lld ovw=%d",
+                                   (unsigned long)r, (unsigned long long)off, sz, overwrite ? 1 : 0);
+            cilog.error(lb);
+            rc = ((u32)r == AM_ERR_ALREADY_EXISTS) ? 2 : 1;
+            break;
+        }
+        off += rd;
+        if (progress && !progress(off, (u64)sz)) { err = "cancelled"; rc = 1; break; }
+    }
+
+    if (rc != 0) { AM_CancelCIAInstall(h); return rc; }
+
+    r = AM_FinishCiaInstall(h);
+    if (R_FAILED(r)) {
+        char b[64]; snprintf(b, sizeof(b), "FinishCiaInstall 0x%08lX", (unsigned long)r);
+        err = b;
+        return ((u32)r == AM_ERR_ALREADY_EXISTS) ? 2 : 1;
+    }
+    return 0;
+}
+
 bool installCiaFromFile(const std::string& path, std::string& err, bool force,
                         std::function<bool(unsigned long long, unsigned long long)> progress) {
     struct stat stt;
@@ -80,48 +144,28 @@ bool installCiaFromFile(const std::string& path, std::string& err, bool force,
     if (!f) { err = "open failed"; return false; }
 
     u64 tid = readCiaTitleId(f);
-    fseek(f, 0, SEEK_SET);
     u32 high = (u32)(tid >> 32);
     // game/update/dlc -> SD; everything else (system, TWL) -> NAND
     FS_MediaType media = (high == 0x00040000 || high == 0x0004000E || high == 0x0004008C)
                          ? MEDIATYPE_SD : MEDIATYPE_NAND;
+    (void)force;   // an installed tid always takes the overwrite path (keeps the save)
 
-    if (force && tid) {
-        AM_DeleteTitle(media, tid);
-        AM_DeleteTicket(tid);
-    }
-
-    Handle h = 0;
-    Result r = AM_StartCiaInstall(media, &h);
-    if (R_FAILED(r)) {
-        fclose(f);
-        char b[64]; snprintf(b, sizeof(b), "StartCiaInstall 0x%08lX", (unsigned long)r);
-        err = b; return false;
-    }
-
-    std::vector<unsigned char> buf(256 * 1024);
-    u64 off = 0;
-    bool ok = true;
-    while (off < (u64)sz) {
-        size_t rd = fread(buf.data(), 1, buf.size(), f);
-        if (rd == 0) break;
-        u32 written = 0;
-        r = FSFILE_Write(h, &written, off, buf.data(), (u32)rd, FS_WRITE_FLUSH);
-        if (R_FAILED(r)) {
-            char b[64]; snprintf(b, sizeof(b), "write 0x%08lX", (unsigned long)r);
-            err = b; ok = false; break;
-        }
-        off += rd;
-        if (progress && !progress(off, (u64)sz)) { err = "cancelled"; ok = false; break; }
+    bool overwrite = amTitleExists(media, tid);
+    int rc = installAttempt(f, sz, media, overwrite, err, progress);
+    if (rc == 2 && tid) {
+        // stale title/ticket/pending import in the AM db: clear all three and
+        // stream once more (fresh install — the save data is already gone or
+        // was never there if we land here on a non-overwrite path)
+        Result dt = AM_DeleteTitle(media, tid);
+        Result dk = AM_DeleteTicket(tid);
+        Result dp = AM_DeletePendingTitle(media, tid);
+        char lb[128];
+        snprintf(lb, sizeof(lb), "already-exists cleanup tid=%016llX delTitle=%08lX delTicket=%08lX delPending=%08lX",
+                 (unsigned long long)tid, (unsigned long)dt, (unsigned long)dk, (unsigned long)dp);
+        cilog.warn(lb);
+        rc = installAttempt(f, sz, media, false, err, progress);
+        if (rc == 0) cilog.info("retry after cleanup: installed ok");
     }
     fclose(f);
-
-    if (!ok) { AM_CancelCIAInstall(h); return false; }
-
-    r = AM_FinishCiaInstall(h);
-    if (R_FAILED(r)) {
-        char b[64]; snprintf(b, sizeof(b), "FinishCiaInstall 0x%08lX", (unsigned long)r);
-        err = b; return false;
-    }
-    return true;
+    return rc == 0;
 }

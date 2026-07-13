@@ -370,25 +370,33 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
         if (freeBytes < cia.size())
             return new ReturnResult(ERROR_NOT_ENOUGH_SPACE, "SD full");
     }
-    if (titleInstalledOn(MEDIATYPE_SD, tid)) {
+    // overwrite-install when the tid is already there: keeps the save data
+    // and dodges AM's "already exists" (0xC8E083FC) on back-to-back rebuilds
+    auto streamCia = [&](bool ovw) -> Result {
+        Handle h = {};
+        Result ret = ovw ? AM_StartCiaInstallOverwrite(&h, MEDIATYPE_SD)
+                         : AM_StartCiaInstall(MEDIATYPE_SD, &h);
+        if (R_FAILED(ret)) return ret;
+        u32 written = 0, offset = 0;
+        while (offset < cia.size()) {
+            u32 chunk = std::min((u32)0x10000, (u32)cia.size() - offset);
+            ret = FSFILE_Write(h, &written, offset, cia.data() + offset, chunk, FS_WRITE_FLUSH);
+            if (R_FAILED(ret)) {
+                AM_CancelCIAInstall(h);
+                return ret;
+            }
+            offset += written;
+        }
+        return AM_FinishCiaInstall(h);
+    };
+    Result ret = streamCia(titleInstalledOn(MEDIATYPE_SD, tid));
+    if ((u32)ret == 0xC8E083FC) {   // stale title/ticket/pending: clear + retry once
         AM_DeleteTitle(MEDIATYPE_SD, tid);
         AM_DeleteTicket(tid);
+        AM_DeletePendingTitle(MEDIATYPE_SD, tid);
+        ret = streamCia(false);
     }
-    Handle h = {};
-    Result ret = AM_StartCiaInstall(MEDIATYPE_SD, &h);
-    if (R_FAILED(ret)) return new ReturnResult(ret, "AM_StartCiaInstall failed");
-    u32 written = 0, offset = 0;
-    while (offset < cia.size()) {
-        u32 chunk = std::min((u32)0x10000, (u32)cia.size() - offset);
-        ret = FSFILE_Write(h, &written, offset, cia.data() + offset, chunk, FS_WRITE_FLUSH);
-        if (R_FAILED(ret)) {
-            AM_CancelCIAInstall(h);
-            return new ReturnResult(ret, "CIA write failed");
-        }
-        offset += written;
-    }
-    ret = AM_FinishCiaInstall(h);
-    if (R_FAILED(ret)) return new ReturnResult(ret, "AM_FinishCiaInstall failed");
+    if (R_FAILED(ret)) return new ReturnResult(ret, "CIA install failed");
 
     // --- path file for the payload
     char cfg[64];
@@ -814,16 +822,14 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
                            aligned(tik, 0x40) + aligned(tmd, 0x40);
     u64 totalBytes = preamble.size() + contentSize + meta.size();
 
-    // --- space check + stale title cleanup
+    // --- space check (the installed title is NOT deleted here: the install
+    // below overwrites in place, which keeps the save data and avoids AM's
+    // "already exists" on back-to-back rebuilds)
     FS_ArchiveResource sd = {};
     if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD))) {
         u64 freeBytes = (u64)sd.freeClusters * sd.clusterSize;
         if (freeBytes < totalBytes)
             return new ReturnResult(ERROR_NOT_ENOUGH_SPACE, "SD full");
-    }
-    if (titleInstalledOn(MEDIATYPE_SD, tid)) {
-        AM_DeleteTitle(MEDIATYPE_SD, tid);
-        AM_DeleteTicket(tid);
     }
 
     // --- assemble the CIA into an SD temp file (incremental — ROM streamed,
@@ -895,10 +901,6 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     }
     ctrLogger.info("gba: CIA assembled, installing via installCiaFromFile");
 
-    if (titleInstalledOn(MEDIATYPE_SD, tid)) {
-        AM_DeleteTitle(MEDIATYPE_SD, tid);
-        AM_DeleteTicket(tid);
-    }
     std::string ierr;
     bool installed = installCiaFromFile(ciaPath, ierr, true, [&](u64 d, u64 t) {
         return progress ? progress(d, t) : true;
