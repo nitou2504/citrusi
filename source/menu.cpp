@@ -744,8 +744,13 @@ static int gCoverFailedId = -1; // rommId that failed to load (don't retry)
 static int gCoverWantId = -1;
 static int gCoverDebounce = 0;
 // frames a selection must sit still before any art touches the SD card:
-// stepping through a list stays pure text (the NDS-manage feel everywhere)
-#define ART_SETTLE_FRAMES 8
+// stepping through a list stays pure text (the NDS-manage feel everywhere).
+// 12 frames (200ms) beats a fast press cadence (~6-7 presses/sec) so even
+// repeated single steps never fire a load between presses.
+#define ART_SETTLE_FRAMES 12
+// a cover that isn't in the SD cache yet (worker still fetching): back off
+// this many frames before the next stat instead of re-trying every frame
+#define ART_MISS_BACKOFF 30
 static u32 gTick = 0;           // global frame counter for marquees
 
 // cached libraries per platform slug, for instant search filtering
@@ -1232,6 +1237,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             gCoverForId = gCoverWantId;
         } else if (coverCacheUnavailable(gCoverWantId)) {
             gCoverFailedId = gCoverWantId;
+        } else {
+            // still downloading: don't stat the SD again every frame
+            gCoverDebounce = ART_SETTLE_FRAMES - ART_MISS_BACKOFF;
         }
     }
 
@@ -1310,16 +1318,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             MenuSelection* sel = *this->selection;
             bool is3ds = (sel->platformSlug == ROMM_SLUG_3DS);
-            bool onSD = is3ds ? installed3dsHasTitle(sel->titleId)
+            // installed state per SELECTION, not per frame: the GBA lookup
+            // walks paths + the tid-owner map and 60Hz of that dragged browse
+            static bool gOnSd = false;
+            if (gDescForId != sel->rommId) {
+                gOnSd = is3ds ? installed3dsHasTitle(sel->titleId)
                       : sel->platformSlug == ROMM_SLUG_GBA
                           ? installed3dsHasTitle(gbaTidForRom(std::filesystem::path(rommLocalPath(sel->fsName, sel->platformSlug)).filename().generic_string()))
                           : ndsForwarderInstalled(sel->fsName);
-            if (gDescForId != sel->rommId) {
                 wrapLines(sel->summary, CTW, 0.45f, gDescLines);
                 gDescForId = sel->rommId;
                 gDescScroll = 0;
                 gGenreTick = gTick; // restart genre marquee for the new game
             }
+            bool onSD = gOnSd;
             drawBottomFrame(""); // hint drawn last
             float y = CARD_Y + PAD;
             // title
