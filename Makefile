@@ -28,7 +28,7 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 
 APP_TITLE	:= romm3ds
-APP_DESCRIPTION := RomM client - 3DS, GBA & NDS installs with scraped icons & banners
+APP_DESCRIPTION := Install 3DS, GBA and DS games with art
 APP_AUTHOR := Nitou25
 
 TARGET		:=	$(notdir $(CURDIR))

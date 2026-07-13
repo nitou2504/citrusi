@@ -87,7 +87,49 @@ static std::string smdhTitleAt(const u8* smdh, size_t off) {
 // on retail titles (homebrew happened to work), which is why every retail game
 // used to fall back to its product code.
 #define SMDH_SIZE 0x36C0
+#define SMDH_ICON48 0x24C0          // large icon: 48x48 RGB565, 8x8 morton tiles
 static u8 gSmdhBuf[SMDH_SIZE];
+
+#define ICON_DIR (FORWARDER_DIR + std::string("/titleicons/"))
+
+static std::string iconPath(u64 tid) {
+    char b[32];
+    snprintf(b, sizeof(b), "%016llX.raw", (unsigned long long)tid);
+    return ICON_DIR + b;
+}
+
+// untile the SMDH icon into plain RGBA8 and keep it next to the name cache —
+// the SMDH is only read once per title, so this is the moment to grab the art
+static void saveTitleIcon(u64 tid, const u8* smdh) {
+    std::error_code ec;
+    std::filesystem::create_directories(ICON_DIR, ec);
+    const u16* src = (const u16*)(smdh + SMDH_ICON48);
+    std::string out(48 * 48 * 4, '\0');
+    u8* dst = (u8*)&out[0];
+    u32 i = 0;
+    for (u32 ty = 0; ty < 48; ty += 8)
+        for (u32 tx = 0; tx < 48; tx += 8)
+            for (u32 p = 0; p < 64; p++, i++) {
+                u32 x = (p & 1) | ((p & 4) >> 1) | ((p & 16) >> 2);
+                u32 y = ((p & 2) >> 1) | ((p & 8) >> 2) | ((p & 32) >> 3);
+                u16 c = src[i];
+                u8* o = &dst[(((ty + y) * 48) + tx + x) * 4];
+                o[0] = (u8)(((c >> 11) & 0x1F) << 3);
+                o[1] = (u8)(((c >> 5) & 0x3F) << 2);
+                o[2] = (u8)((c & 0x1F) << 3);
+                o[3] = 255;
+            }
+    FILE* f = fopen(iconPath(tid).c_str(), "wb");
+    if (!f) return;
+    fwrite(out.data(), 1, out.size(), f);
+    fclose(f);
+}
+
+std::string titleIconRGBA(u64 tid) {
+    std::string p = iconPath(tid);
+    if (!fileExists(p)) return "";
+    return readEntireFile(p);
+}
 
 static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out) {
     u32 archPath[4] = { (u32)(tid & 0xFFFFFFFF), (u32)(tid >> 32), (u32)media, 0 };
@@ -122,6 +164,7 @@ static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out) {
     if (out.empty()) out = smdhTitleAt(gSmdhBuf, 0x208);
     for (int i = 0; out.empty() && i < 16; i++)
         out = smdhTitleAt(gSmdhBuf, 0x08 + (size_t)i * 0x200);
+    saveTitleIcon(tid, gSmdhBuf);   // free art for the Manage list
     return !out.empty();
 }
 

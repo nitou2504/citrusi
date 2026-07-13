@@ -681,6 +681,10 @@ RommClient gRomm;
 
 // selected-game cover (shared by top rail + tick loader)
 static C2D_Image gCover = {nullptr, nullptr};
+// the selected 3DS title's own HOME icon (from its SMDH) — art for games that
+// aren't in the RomM library
+static C2D_Image gTitleIcon = {nullptr, nullptr};
+static u64 gTitleIconTid = 0;
 static int gCoverForId = -1;    // rommId currently in gCover
 static int gCoverFailedId = -1; // rommId that failed to load (don't retry)
 static int gCoverWantId = -1;
@@ -1005,6 +1009,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     float cw = gCover.subtex->width, ch = gCover.subtex->height;
                     C2D_DrawImageAt(gCover, railX + (railW - cw) / 2, MENU_HEADING_HEIGHT, 0.56f, NULL, 1.0f, 1.0f);
                     iy = MENU_HEADING_HEIGHT + ch + 6;
+                } else if (gTitleIconTid && gTitleIconTid == sel->tid && gTitleIcon.tex) {
+                    // no RomM cover: the title's own 48x48 HOME icon, 2x
+                    float d = 96;
+                    C2D_DrawImageAt(gTitleIcon, cx - d/2, MENU_HEADING_HEIGHT + 24, 0.56f, NULL, 2.0f, 2.0f);
+                    iy = MENU_HEADING_HEIGHT + 24 + d + 8;
                 } else {
                     const char* ph = (gCoverFailedId == sel->rommId || (sel->coverPath.empty() && sel->coverSmallPath.empty())) ? "no art" : "...";
                     drawText(cx, MENU_HEADING_HEIGHT + 72, 0.56f, 0.45f, COL_SURFACE, COL_TEXT_DIM, ph, C2D_AlignCenter);
@@ -1071,6 +1080,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if ((this->type != MENU_ROMM && this->type != MENU_MANAGE) || this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
         if (sel->action != RommInstall && sel->action != ManageRom) return;
+        // 3DS titles with no RomM cover: use the icon saved from their SMDH
+        if (this->type == MENU_MANAGE && sel->platformSlug == ROMM_SLUG_3DS &&
+            sel->rommId <= 0 && sel->tid && sel->tid != gTitleIconTid) {
+            if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
+            gTitleIconTid = sel->tid;
+            std::string rgba = titleIconRGBA(sel->tid);
+            if (rgba.size() == 48*48*4)
+                texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon);
+        }
         if (sel->rommId <= 0) return;
         if (sel->rommId != gCoverWantId) {
             gCoverWantId = sel->rommId;
@@ -1243,11 +1261,29 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             float y = CARD_Y + PAD;
             y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
             y += 5;
-            float cxp = drawChip(CTX, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
+            // 3DS: a game's updates/DLC are separate titles — show the real
+            // total for the row, with the breakdown underneath
+            static u64 gExtrasTid = 0;
+            static TitleExtras gExtras;
+            if (m3ds && sel->tid && sel->tid != gExtrasTid) {
+                gExtrasTid = sel->tid;
+                gExtras = findTitleExtras(sel->tid);
+            }
+            bool hasExtras = m3ds && sel->tid == gExtrasTid && !gExtras.empty();
+            u64 totalBytes = sel->sizeBytes + (hasExtras ? gExtras.bytes : 0);
+            float cxp = drawChip(CTX, y, humanSize(totalBytes), COL_TEXT_DIM);
             if (m3ds) {
                 cxp = drawChip(cxp, y, "3DS", COL_TEXT_DIM);
                 cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
-                if (sel->rommId > 0) drawChip(cxp, y, "on RomM", COL_TEXT_DIM);
+                if (sel->rommId > 0) cxp = drawChip(cxp, y, "on RomM", COL_TEXT_DIM);
+                if (hasExtras) {
+                    char ex[40];
+                    snprintf(ex, sizeof(ex), "%s%s%s",
+                             gExtras.updates ? "update" : "",
+                             (gExtras.updates && gExtras.dlc) ? " + " : "",
+                             gExtras.dlc ? "DLC" : "");
+                    drawChip(cxp, y, ex, COL_ACCENT);
+                }
             } else {
                 if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
@@ -1262,7 +1298,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (m3ds) {
                 snprintf(tid, sizeof(tid), "title  %016llX", (unsigned long long)sel->tid);
                 drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
-                drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
+                if (hasExtras) {
+                    char bd[96];
+                    snprintf(bd, sizeof(bd), "Game %s  +  %u update/DLC %s",
+                             humanSize(sel->sizeBytes).c_str(),
+                             (unsigned)(gExtras.updates + gExtras.dlc),
+                             humanSize(gExtras.bytes).c_str());
+                    drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, bd, 2);
+                    drawWrapped(CTX, y + 46, CTW, 14, 0.45f, COL_TEXT_DIM,
+                                "Press A to uninstall - the extras can go with it.", 2);
+                } else {
+                    drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
+                }
                 return;
             }
             if (sel->rtid) {
@@ -1839,10 +1886,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // Manage system-selection screen (NDS / 3DS), mirrors the library flow
     Menu* generateManageSystemMenu(Menu* prev) {
         delete prev;
-        // storage breakdown for the bottom panel: fresh on every visit (an
-        // install/uninstall may have just happened), then read from the static
-        CoverCachePause coverPause;   // the AM sweep owns the card while it runs
-        installedTitlesInvalidate();
+        // storage breakdown for the bottom panel. computeStorageTally() is
+        // cached until an install/uninstall invalidates it, so coming back from
+        // a system tab is instant instead of re-sweeping AM every time.
+        CoverCachePause coverPause;
         gManageTally = computeStorageTally();
         std::vector<MenuSelection*> entries;
         auto add = [&](const std::string& label, const std::string& slug){
@@ -1868,6 +1915,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         CoverCachePause coverPause;   // the AM/SD scans own the card while they run
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
+        installed3dsRefresh();   // the .cia scan below needs the AM set
         // .cia installers left on the card: once the title is installed the
         // file is a duplicate — offer to reclaim the space
         {
@@ -2332,8 +2380,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     return generateSystemMenu(this);
                 case OpenManage:
                     while (this->queue.size() > 0) this->queue.pop();
-                    if (entry.platformSlug.empty())          // main entry -> system pick
+                    if (entry.platformSlug.empty()) {        // main entry -> system pick
+                        showLoading(target, {"Opening Manage..."});
                         return generateManageSystemMenu(this);
+                    }
                     showLoading(target, {std::string("Scanning ")+(entry.platformSlug==ROMM_SLUG_3DS?"3DS":entry.platformSlug==ROMM_SLUG_GBA?"GBA":"NDS")+" titles..."});
                     return generateManageMenu(this,config->dsiwareCount,entry.platformSlug,target);
                 case EditRommConfig:
