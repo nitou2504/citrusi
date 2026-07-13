@@ -61,10 +61,15 @@ struct StorageTally {
     u64 gbaBytes = 0;      u32 gbaCount = 0;       // our GBA injects (SD)
     u64 appBytes = 0;      u32 appCount = 0;       // other 3DS apps + demos (SD)
     u64 extraBytes = 0;    u32 extraCount = 0;     // updates + DLC (SD)
+    // rom files on the card (sd:/roms/...): the forwarders are tiny, the roms
+    // they point at are not — so a DS row that omits them is meaningless
+    u64 ndsRomBytes = 0;   u32 ndsRomCount = 0;
+    u64 gbaRomBytes = 0;   u32 gbaRomCount = 0;
     u64 sdFreeBytes = 0;
     // "Nintendo DS" as the Manage tab sees it: every kind of DS forwarder
-    u64 dsBytes() const { return ndsFwdBytes + yanbfBytes + dsiwareBytes; }
+    u64 dsBytes() const { return ndsFwdBytes + yanbfBytes + dsiwareBytes + ndsRomBytes; }
     u32 dsCount() const { return ndsFwdCount + yanbfCount + dsiwareCount; }
+    u64 gbaTotalBytes() const { return gbaBytes + gbaRomBytes; }
 };
 StorageTally computeStorageTally();
 

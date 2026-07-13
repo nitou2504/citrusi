@@ -2,9 +2,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include "installedtitles.hpp"
+#include "romm.hpp"        // ROMM_NDS_DIR / ROMM_GBA_DIR
 #include "ctrbuilder.hpp"   // CTR_UID_BASE / GBA_UID_BASE
 #include "helpers.hpp"      // utf8FoldLatin, toLowerCase
 #include "settings.hpp"     // FORWARDER_DIR
@@ -80,16 +82,23 @@ static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out) {
     FS_Path ap = { PATH_BINARY, sizeof(archPath), archPath };
     FS_Path fp = { PATH_BINARY, sizeof(filePath), filePath };
     Handle h = 0;
-    if (R_FAILED(FSUSER_OpenFileDirectly(&h, ARCHIVE_SAVEDATA_AND_CONTENT, ap, fp, FS_OPEN_READ, 0)))
+    if (R_FAILED(FSUSER_OpenFileDirectly(&h, ARCHIVE_SAVEDATA_AND_CONTENT, ap, fp, FS_OPEN_READ, 0))) {
+        char b[48];
+        snprintf(b, sizeof(b), "no icon for %016llX", (unsigned long long)tid);
+        tlog.info(b);
         return false;
+    }
     u8 smdh[0x288];
     u32 read = 0;
     Result rc = FSFILE_Read(h, &read, 0, smdh, sizeof(smdh));
     FSFILE_Close(h);
     if (R_FAILED(rc) || read < sizeof(smdh) || memcmp(smdh, "SMDH", 4) != 0) return false;
-    // title blocks: 16 languages x 0x200 from 0x08; [1] = English
+    // title blocks: 16 languages x 0x200 from 0x08; [1] = English. Some titles
+    // (homebrew especially) leave English blank but fill another slot, so walk
+    // them all before falling back to the product code.
     out = smdhTitleAt(smdh, 0x208);
-    if (out.empty()) out = smdhTitleAt(smdh, 0x008);   // language 0 (Japanese)
+    for (int lang = 0; out.empty() && lang < 16; lang++)
+        out = smdhTitleAt(smdh, 0x08 + lang * 0x200);
     return !out.empty();
 }
 
@@ -236,6 +245,17 @@ StorageTally computeStorageTally() {
         s.dsiwareBytes += t.sizeBytes;
         s.dsiwareCount++;
     }
+    // the rom files themselves (a forwarder is a few hundred KB; its rom is not)
+    auto sumRoms = [](const std::string& dir, u64& bytes, u32& count) {
+        std::error_code ec;
+        for (auto& de : std::filesystem::directory_iterator(dir, ec)) {
+            if (!de.is_regular_file(ec)) continue;
+            bytes += (u64)de.file_size(ec);
+            count++;
+        }
+    };
+    sumRoms(ROMM_NDS_DIR, s.ndsRomBytes, s.ndsRomCount);
+    sumRoms(ROMM_GBA_DIR, s.gbaRomBytes, s.gbaRomCount);
     FS_ArchiveResource sd = {};
     if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
         s.sdFreeBytes = (u64)sd.freeClusters * sd.clusterSize;

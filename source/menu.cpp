@@ -1394,10 +1394,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     drawText(CARD_X + CARD_W - PAD, y + 7.5f, 0.55f, 0.45f, 0, COL_TEXT_DIM, v, C2D_AlignRight);
                     y += 18;
                 };
+                // DS/GBA sizes include the rom files on the card — the
+                // forwarder/inject titles alone say nothing about the space used
                 row("Nintendo DS", s.dsCount(), s.dsBytes());
-                row("Game Boy Advance", s.gbaCount, s.gbaBytes);
+                row("Game Boy Advance", s.gbaCount, s.gbaTotalBytes());
                 row("Nintendo 3DS", s.appCount, s.appBytes);
                 if (s.extraCount > 0) row("Updates and DLC", s.extraCount, s.extraBytes);
+                if (s.ndsRomCount + s.gbaRomCount > 0)
+                    row("  of that, roms on SD", s.ndsRomCount + s.gbaRomCount,
+                        s.ndsRomBytes + s.gbaRomBytes);
                 y += 4;
                 y = cardDivider(y) + 8;
                 drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
