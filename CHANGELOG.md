@@ -4,6 +4,40 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Added — batch operations (`feat/batch-ops`, merged into `feat/integration`)
+- **Multiselect with Y** on the RomM library and Manage lists (non-installable
+  3DS rows are skipped); the header shows "N selected". Details-panel
+  scroll-up moved from Y to L.
+- **Batch install from the library** (START): one confirm with the summed
+  download size, then **art first** — every GBA game's art (and its
+  missing-art prompts) is resolved up front — followed by an unattended
+  download/extract/install pass. B cancels the rest, failures don't stop the
+  run, and the summary reports "Installed X of N — <size>" with any failures
+  named in full.
+- **Batch Manage** (START): the action dialog follows the selection —
+  all-uninstalled offers *Install selected* / *Delete ROMs*, a mixed selection
+  offers *Install* / *Uninstall*, all-installed keeps *Uninstall* / *Change
+  art* (3DS: uninstall only). Batch install and batch change-art reuse the
+  single-item helpers; both report a summary.
+- Internals: the ~150-line `RommInstall` body was extracted into
+  `installOneRomm()` (single-install behavior preserved byte-for-byte) with an
+  `interactive` flag that suppresses notifies/error dialogs in the unattended
+  phase.
+
+### Added — Install from SD (`feat/local-install`, merged into `feat/integration`)
+- The old SD-card browser became **Install from SD**: one screen listing local
+  `.cia` (`sd:/cia`), `.nds` (`sd:/roms/nds`) and `.gba` (`sd:/roms/gba`)
+  files, tagged `[CIA]`/`[NDS]`/`[GBA]`, with the same install-state markers.
+  No RomM needed — drop files on the card and the app installs the .cia,
+  builds the NDS forwarder or bakes the GBA inject, art pipeline included.
+- Single install (A), Y-marks, **Install selected** / **Install all**, same
+  art-first-then-unattended batch flow and summary.
+- Cached RomM library entries are reused for title/cover when a filename
+  matches (never forces a library load).
+- Installed files are **hidden by default** (the rom dirs also hold every RomM
+  download, so the list was the whole library); the heading reports how many
+  are hidden and **X** toggles them back for Reinstall / Change art.
+
 ### Added — GBA support (hardware-verified)
 - **GBA Virtual Console injects built on-device**: ROM baked into a native
   AGB_FIRM title (vcoven layout), streamed install, save-type detection via
@@ -48,6 +82,23 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   GameTDB box → notify → RomM cover → DS-icon stamp (boxes are fallbacks now).
 
 ### Fixed
+- **App crash mid-batch (data abort)**: `readEntireFile` called `fseek` on a
+  NULL `FILE*` when an open failed. It now returns empty and logs the path;
+  the GBA template pieces are read once at `CtrBuilder::initialize()` instead
+  of on every build, and curl's connection cache is capped at 2 so the art
+  phase can't hoard sockets (file descriptors) across five hosts.
+- **GBA installs failed in any fresh clone/worktree**: `.gitignore`'s `*.bin`
+  rule silently excluded `ncchheader/exheader/romfs/config_block/gba_db.bin`,
+  so the app shipped with an empty GBA romfs (`open failed: romfs:/gba/...`).
+  The romfs assets are now tracked (`!romfs/**/*.bin`).
+- **Settings rows opening the RomM server screen**: the "GBA screen" row's id
+  landed inside the server-row id range; the id moved out and the server
+  branch is bounded to its own ids.
+- **Multi-second freeze on Manage / Install from SD**: their AM+SD scans now
+  pause the cover-prefetch worker (the same SD contention already handled for
+  art fetches).
+- Batch summaries: no `x` markers, full (word-wrapped) names under "Could not
+  install:", and the installed size is reported.
 - **Console freeze in the art picker**: GX display transfers need width ≥ 64 /
   height ≥ 16 — smaller thumb textures wedged the transfer engine (even
   Rosalina died). Textures are padded to the hardware minimum.
