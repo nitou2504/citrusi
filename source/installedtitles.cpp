@@ -232,21 +232,29 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos, bool sortBySize
         out.push_back(t);
     }
     // how many still need an SMDH read (the rest come straight from the cache)
+    // an SMDH read gives us BOTH the name and the icon: a title whose name is
+    // cached but whose icon was never saved still needs one (the icon cache was
+    // added after the name cache, so every earlier title was missing art)
+    auto needsRead = [](const InstalledTitle& t) {
+        return !gNames.count(nameKey(t.tid, t.version)) || !fileExists(iconPath(t.tid));
+    };
     int need = 0;
     for (auto& t : out)
-        if (!gNames.count(nameKey(t.tid, t.version))) need++;
+        if (needsRead(t)) need++;
     u64 t0 = osGetTime();
     int done = 0;
     for (auto& t : out) {
         std::string key = nameKey(t.tid, t.version);
         auto hit = gNames.find(key);
-        if (hit != gNames.end()) { t.name = hit->second; continue; }
+        if (hit != gNames.end() && !needsRead(t)) { t.name = hit->second; continue; }
         if (progress) progress(done, need);
         done++;
         std::string name;
-        if (readSmdhName(t.tid, t.media, name)) {
+        if (readSmdhName(t.tid, t.media, name)) {   // also saves the icon
             gNames[key] = name;         // only real names are cached: a product-code
             gNamesDirty = true;         // fallback must never become permanent
+        } else if (hit != gNames.end()) {
+            name = hit->second;         // icon read failed, keep the cached name
         } else {
             name = fallbackName(t.tid, t.media);
         }

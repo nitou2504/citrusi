@@ -979,7 +979,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 float textheight=0;
                 C2D_TextGetDimensions(&text,scale,scale,NULL,&textheight);
                 C2D_TextOptimize(&text);
-                C2D_DrawText(&text, C2D_WithColor,textX,ry+(ENTRY_HEIGHT/2)-(textheight/2),0.4f,scale,scale,isSel?COL_TEXT:COL_TEXT_DIM);
+                // the duplicates row is a cleanup action, not a game: tint it
+                u32 rowCol = ((*entry)->action == CleanupCias) ? COL_ACCENT
+                                                               : (isSel ? COL_TEXT : COL_TEXT_DIM);
+                C2D_DrawText(&text, C2D_WithColor,textX,ry+(ENTRY_HEIGHT/2)-(textheight/2),0.4f,scale,scale,rowCol);
                 C2D_TextBufDelete(buf);
                 offset+=ENTRY_HEIGHT;
                 counter++;
@@ -1010,10 +1013,19 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     C2D_DrawImageAt(gCover, railX + (railW - cw) / 2, MENU_HEADING_HEIGHT, 0.56f, NULL, 1.0f, 1.0f);
                     iy = MENU_HEADING_HEIGHT + ch + 6;
                 } else if (gTitleIconTid && gTitleIconTid == sel->tid && gTitleIcon.tex) {
-                    // no RomM cover: the title's own 48x48 HOME icon, 2x
-                    float d = 96;
-                    C2D_DrawImageAt(gTitleIcon, cx - d/2, MENU_HEADING_HEIGHT + 24, 0.56f, NULL, 2.0f, 2.0f);
-                    iy = MENU_HEADING_HEIGHT + 24 + d + 8;
+                    // no RomM cover: the title's own icon on a HOME-style plate
+                    float d = 96, pad = 8, r = 12;
+                    float px = cx - d/2 - pad, py = MENU_HEADING_HEIGHT + 24 - pad;
+                    float pw = d + pad*2, ph = d + pad*2;
+                    u32 plate = C2D_Color32(0xF4, 0xF6, 0xFA, 0xFF);
+                    C2D_DrawRectSolid(px + r, py, 0.56f, pw - r*2, ph, plate);
+                    C2D_DrawRectSolid(px, py + r, 0.56f, pw, ph - r*2, plate);
+                    C2D_DrawCircleSolid(px + r, py + r, 0.56f, r, plate);
+                    C2D_DrawCircleSolid(px + pw - r, py + r, 0.56f, r, plate);
+                    C2D_DrawCircleSolid(px + r, py + ph - r, 0.56f, r, plate);
+                    C2D_DrawCircleSolid(px + pw - r, py + ph - r, 0.56f, r, plate);
+                    C2D_DrawImageAt(gTitleIcon, cx - d/2, MENU_HEADING_HEIGHT + 24, 0.57f, NULL, 2.0f, 2.0f);
+                    iy = py + ph + 8;
                 } else {
                     const char* ph = (gCoverFailedId == sel->rommId || (sel->coverPath.empty() && sel->coverSmallPath.empty())) ? "no art" : "...";
                     drawText(cx, MENU_HEADING_HEIGHT + 72, 0.56f, 0.45f, COL_SURFACE, COL_TEXT_DIM, ph, C2D_AlignCenter);
@@ -1086,8 +1098,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
             gTitleIconTid = sel->tid;
             std::string rgba = titleIconRGBA(sel->tid);
-            if (rgba.size() == 48*48*4)
-                texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon);
+            if (rgba.size() == 48*48*4 &&
+                texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon))
+                C3D_TexSetFilter(gTitleIcon.tex, GPU_NEAREST, GPU_NEAREST);   // pixel art
         }
         if (sel->rommId <= 0) return;
         if (sel->rommId != gCoverWantId) {
@@ -1257,6 +1270,19 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 return;
             }
             MenuSelection* sel = *this->selection;
+            if (sel->action == CleanupCias) {   // the duplicates row explains itself here
+                float dy = CARD_Y + PAD;
+                dy = drawWrapped(CTX, dy, CTW, 17, 0.58f, COL_ACCENT, "Duplicate files", 1);
+                dy += 5;
+                drawChip(CTX, dy, humanSize(sel->sizeBytes) + " to free", COL_ACCENT);
+                dy += 21;
+                dy = cardDivider(dy) + 5;
+                drawWrapped(CTX, dy, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255),
+                            std::to_string(sel->rommId) + " installer (.cia) files on the SD card are for "
+                            "games that are already installed, so the card stores each of them twice. "
+                            "Press A to delete just those files - the games stay installed.", 6);
+                return;
+            }
             bool m3ds = (sel->platformSlug == ROMM_SLUG_3DS);
             float y = CARD_Y + PAD;
             y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
@@ -1924,10 +1950,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (doneCount > 0) {
                 MenuSelection* e = new MenuSelection();
                 e->action = CleanupCias;
-                e->title = "Installer files";
-                e->display = "  " + std::to_string(doneCount) + " installed .cia files - "
-                           + humanSize(doneBytes) + " to reclaim";
+                e->title = "Duplicate files";
+                e->display = "  Duplicates - " + humanSize(doneBytes);
                 e->sizeBytes = doneBytes;
+                e->rommId = doneCount;   // count, for the details panel
                 entries.push_back(e);
             }
         }
