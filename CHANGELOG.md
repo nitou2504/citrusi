@@ -4,6 +4,21 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Fixed (2026-07-14)
+- **Manage → 3DS scroll**: the real culprit — a FULL AM enumeration of every
+  SD title ran on each selection change (the update/DLC chip lookup). The SD
+  title list is now RAM-cached (invalidated with the storage tally); the
+  extras lookup is microseconds.
+- **Slow app exit**: quitting joined the library-refresh worker mid-download
+  (a GBA refresh runs 10s+). Workers are now abortable — the in-flight
+  transfer is cut between chunks — so START/HOME exit is immediate.
+- **Browse scroll**: the INSTALLED chip recomputed installed state every
+  frame (GBA: path build + tid-owner walk at 60Hz) — now per selection
+  change. Art settle raised to 12 frames so fast repeated presses never
+  fire a load between steps; covers still being downloaded back off 30
+  frames instead of stat()ing the SD every frame; the cover worker erases
+  finished jobs instead of re-stat()ing hundreds of them on every pick.
+
 ### Changed (2026-07-13, night)
 - **Scrolling never waits on art**: NDS Manage was fast, GBA slower, 3DS
   unbearable — ranked exactly by per-step art I/O. Covers and 3DS title
