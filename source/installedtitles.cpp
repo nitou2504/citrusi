@@ -81,31 +81,47 @@ static std::string smdhTitleAt(const u8* smdh, size_t off) {
     return utf8FoldLatin(t);
 }
 
-// FBI-style: another title's ExeFS icon IS readable from userland (only its
-// RomFS is blocked). archive 0x2345678A + filePath {0,0,2,'icon',0}.
+// Reads a title's own SMDH (its ExeFS "icon" file) exactly the way FBI does:
+// archive 0x2345678A + filePath {0,0,2,'icon',0}, and — this is the part that
+// matters — the WHOLE 0x36C0 struct in one read. A short read silently fails
+// on retail titles (homebrew happened to work), which is why every retail game
+// used to fall back to its product code.
+#define SMDH_SIZE 0x36C0
+static u8 gSmdhBuf[SMDH_SIZE];
+
 static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out) {
     u32 archPath[4] = { (u32)(tid & 0xFFFFFFFF), (u32)(tid >> 32), (u32)media, 0 };
     u32 filePath[5] = { 0, 0, 2, 0x6E6F6369 /* 'icon' */, 0 };
     FS_Path ap = { PATH_BINARY, sizeof(archPath), archPath };
     FS_Path fp = { PATH_BINARY, sizeof(filePath), filePath };
     Handle h = 0;
-    if (R_FAILED(FSUSER_OpenFileDirectly(&h, ARCHIVE_SAVEDATA_AND_CONTENT, ap, fp, FS_OPEN_READ, 0))) {
-        char b[48];
-        snprintf(b, sizeof(b), "no icon for %016llX", (unsigned long long)tid);
+    Result rc = FSUSER_OpenFileDirectly(&h, ARCHIVE_SAVEDATA_AND_CONTENT, ap, fp, FS_OPEN_READ, 0);
+    if (R_FAILED(rc)) {
+        char b[64];
+        snprintf(b, sizeof(b), "icon open failed %016llX rc=%08lX",
+                 (unsigned long long)tid, (unsigned long)rc);
         tlog.info(b);
         return false;
     }
-    u8 smdh[0x288];
     u32 read = 0;
-    Result rc = FSFILE_Read(h, &read, 0, smdh, sizeof(smdh));
+    rc = FSFILE_Read(h, &read, 0, gSmdhBuf, SMDH_SIZE);
     FSFILE_Close(h);
-    if (R_FAILED(rc) || read < sizeof(smdh) || memcmp(smdh, "SMDH", 4) != 0) return false;
-    // title blocks: 16 languages x 0x200 from 0x08; [1] = English. Some titles
-    // (homebrew especially) leave English blank but fill another slot, so walk
-    // them all before falling back to the product code.
-    out = smdhTitleAt(smdh, 0x208);
-    for (int lang = 0; out.empty() && lang < 16; lang++)
-        out = smdhTitleAt(smdh, 0x08 + lang * 0x200);
+    if (R_FAILED(rc) || read != SMDH_SIZE || memcmp(gSmdhBuf, "SMDH", 4) != 0) {
+        char b[80];
+        snprintf(b, sizeof(b), "icon read failed %016llX rc=%08lX read=%lu",
+                 (unsigned long long)tid, (unsigned long)rc, (unsigned long)read);
+        tlog.info(b);
+        return false;
+    }
+    // titles[16] start at 0x08, 0x200 each: system language first (FBI's
+    // smdh_select_title), then English, then whatever slot is filled
+    u8 lang = 1;   // CFG_LANGUAGE_EN
+    CFGU_GetSystemLanguage(&lang);
+    if (lang > 15) lang = 1;
+    out = smdhTitleAt(gSmdhBuf, 0x08 + (size_t)lang * 0x200);
+    if (out.empty()) out = smdhTitleAt(gSmdhBuf, 0x208);
+    for (int i = 0; out.empty() && i < 16; i++)
+        out = smdhTitleAt(gSmdhBuf, 0x08 + (size_t)i * 0x200);
     return !out.empty();
 }
 
