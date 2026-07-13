@@ -4,6 +4,25 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Fixed (2026-07-13)
+- **3DS library empty on RomM >= 4.9.2**: the server's list response now sends
+  `files: []` (file lists are no longer inlined), so every multi-file 3DS game
+  got dropped client-side. Multi-file roms are now listed immediately and the
+  base `.cia` is picked lazily via a `/api/roms/{id}` detail fetch — during the
+  title-id pass on library open, on the background refresh worker, or at
+  install time as a fallback; the pick persists in the lib cache.
+- **"Install failed: write 0xC8E083FC" on reinstall/rebuild** (AM "already
+  exists", e.g. Screen/Change art twice in a row): installs now use
+  `AM_StartCiaInstallOverwrite` when the title id is already installed —
+  keeping the save data — instead of delete-then-install; a stale
+  title/ticket/pending import that still triggers the error is cleared
+  (title + ticket + pending) and the install retried once automatically.
+
+### Changed (2026-07-13)
+- **GBA "Screen" action now opens a preset picker** (single + batch): the five
+  presets, preselected on the Settings default, instead of silently re-baking
+  with the global setting. Batch picks once and applies to all selected.
+
 ### Added — Manage → 3DS: all installed titles + storage (`feat/manage-3ds`)
 - **Manage → 3DS now lists every installed application**, not only the ones
   that match a RomM library entry. Names come from each title's own SMDH (read

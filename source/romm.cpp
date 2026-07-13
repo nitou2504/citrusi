@@ -179,6 +179,54 @@ Result RommClient::get(const std::string& url, std::string& out, u32* statusOut)
     return 0;
 }
 
+static bool isCiaName(const std::string& n) {
+    std::string low = toLowerCase(n);
+    return low.size() >= 4 && low.compare(low.size()-4, 4, ".cia") == 0;
+}
+
+// pick the base .cia out of a rom's files array (base beats update/dlc);
+// fills fsName/fileId/sizeBytes on the rom. Same shape in the list and the
+// /api/roms/{id} detail response.
+static bool pickCiaFile(const nlohmann::json& files, RommRom& rom) {
+    bool found = false;
+    for (auto& fj : files) {
+        std::string fn = fj.value("file_name", "");
+        if (!isCiaName(fn)) continue;
+        bool isBase = !fj.contains("category") || fj["category"].is_null();
+        if (!found || isBase) {
+            rom.fsName    = fn;
+            rom.fileId    = fj.value("id", 0);
+            rom.sizeBytes = fj.value("file_size_bytes", (u64)0);
+            found = true;
+            if (isBase) break;   // base cia beats update/dlc
+        }
+    }
+    return found;
+}
+
+bool RommClient::resolveRomFile(RommRom& rom) {
+    std::string body;
+    if (R_FAILED(get(this->host + "/api/roms/" + std::to_string(rom.id), body)))
+        return false;
+    try {
+        nlohmann::json j = nlohmann::json::parse(body);
+        if (!j.contains("files") || !j["files"].is_array()) {
+            lastError = "no files in rom detail";
+            return false;
+        }
+        if (pickCiaFile(j["files"], rom)) {
+            rom.installable = true;
+        } else {
+            rom.fileId = 0;              // resolved: folder holds no .cia
+            rom.installable = false;
+        }
+        return true;
+    } catch (...) {
+        lastError = "bad JSON from /api/roms/{id}";
+        return false;
+    }
+}
+
 int RommClient::findPlatform(const std::string& slug) {
     std::string body;
     u32 status = 0;
@@ -252,10 +300,6 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out, const std::
             rom.multiFile = r.value("multi", false) || r.value("has_multiple_files", false);
             rom.platformSlug = slug;
             rom.fileId = 0;
-            auto isCiaName = [](const std::string& n) {
-                std::string low = toLowerCase(n);
-                return low.size() >= 4 && low.compare(low.size()-4, 4, ".cia") == 0;
-            };
             if (!rom.multiFile) {
                 if (rom.fsName.empty()) continue;
                 rom.installable = (slug == ROMM_SLUG_3DS) ? isCiaName(rom.fsName) : true;
@@ -263,22 +307,17 @@ bool RommClient::listRoms(int platformId, std::vector<RommRom>& out, const std::
                 continue;
             }
             // multi-file game folder: nds (zip forwarder) unsupported here; 3ds -> pick the base .cia
-            if (slug != ROMM_SLUG_3DS || !r.contains("files") || !r["files"].is_array())
+            if (slug != ROMM_SLUG_3DS)
                 continue;
-            bool found = false;
-            for (auto& fj : r["files"]) {
-                std::string fn = fj.value("file_name", "");
-                if (!isCiaName(fn)) continue;
-                bool isBase = !fj.contains("category") || fj["category"].is_null();
-                if (!found || isBase) {
-                    rom.fsName    = fn;
-                    rom.fileId    = fj.value("id", 0);
-                    rom.sizeBytes = fj.value("file_size_bytes", (u64)0);
-                    found = true;
-                    if (isBase) break;   // base cia beats update/dlc
-                }
+            if (!r.contains("files") || !r["files"].is_array() || r["files"].empty()) {
+                // RomM >= 4.9.2 sends files:[] in the list response; the pick
+                // happens later via resolveRomFile (detail fetch per rom)
+                rom.fileId = -1;
+                rom.installable = true;
+                out.push_back(rom);
+                continue;
             }
-            if (!found) continue;        // no installable .cia in the folder
+            if (!pickCiaFile(r["files"], rom)) continue;   // no installable .cia in the folder
             rom.installable = true;
             out.push_back(rom);
         }

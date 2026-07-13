@@ -524,12 +524,23 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
 // Returns 1 = updated, 0 = skipped (B / nothing chosen), -1 = failed.
 // interactive=true shows the per-item result dialog (single); batch passes
 // false and reports in its own summary. The picker + progress always show.
-// re-bakes an installed inject with the Settings screen preset, reusing the
-// art already chosen for it (no picker). 1 ok, -1 failed.
+// five-preset picker, preselected on the Settings default; returns the
+// GBA_SCREEN_* index or -1 on B/cancel
+static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
+                               const std::string& title) {
+    static const char* names[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
+    int cur = config->gbaScreen % GBA_SCREEN_COUNT;
+    return Dialog(target,0,0,320,240,
+                  {"Screen filter",title,std::string("default: ")+names[cur]},
+                  {"AGS-101","Original","Raw","Bright","Night"},cur).handle();
+}
+
+// re-bakes an installed inject with the given screen preset, reusing the
+// art already chosen for it (no art picker). 1 ok, -1 failed.
 static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
                               const std::string& romBase, const std::string& title,
                               const std::string& coverPath, const std::string& romPath,
-                              bool interactive) {
+                              bool interactive, int screenMode) {
     if (!ensureCtrBuilder(target)) return -1;
     ensureSgdb();
     ArtEntry ae = artStoreGet(romBase);
@@ -543,7 +554,7 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
     u64 lastG = 0;
     ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid,
                                         pieces.icon48, pieces.bannerTex,
-                                        config->gbaScreen,
+                                        screenMode,
         [&](u64 done, u64 total) -> bool {
             hidScanInput();
             if (hidKeysDown() & KEY_B) return false;
@@ -748,22 +759,52 @@ static void invalidateAllCaches() {
 
 // resolve 3ds title ids (for install detection) via a small header fetch, cached in the lib json.
 // runs BEFORE the cover worker starts, so only the main thread touches httpc (no concurrency).
+// Also settles fileId==-1 roms (RomM >= 4.9.2 list response has no file lists)
+// with a detail fetch each, so the picked .cia lands in the lib json too.
 static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
     if (slug != ROMM_SLUG_3DS) return;
     auto& roms = gCache[slug];
     int need = 0;
-    for (auto& r : roms) if (r.installable && r.titleId == 0) need++;
+    for (auto& r : roms) if (r.installable && (r.titleId == 0 || r.fileId == -1)) need++;
     if (need == 0) return;
     int done = 0, ok = 0;
     for (auto& r : roms) {
-        if (!r.installable || r.titleId != 0) continue;
+        if (!r.installable || (r.titleId != 0 && r.fileId != -1)) continue;
         done++;
         if (target) showLoading(target, {"Reading title ids...", std::to_string(done)+"/"+std::to_string(need)});
+        if (r.fileId == -1 && !gRomm.resolveRomFile(r)) continue;   // network miss: retry next open
+        if (!r.installable || r.titleId != 0) { ok++; continue; }   // resolved to "no .cia"
         std::string hdr;
         if (gRomm.fetchCiaHeader(r, hdr)) { r.titleId = ciaBufferTitleId(hdr); if (r.titleId) ok++; }
     }
     rlog.info(" resolved title ids " + std::to_string(ok) + "/" + std::to_string(need));
     if (ok) saveLibCache(slug, roms);
+}
+
+// settle a fileId==-1 3DS row at install time (library was opened offline):
+// detail-fetch the .cia pick, update the row + the lib cache. Returns false
+// on network error (row untouched); on success e.installable says whether
+// the folder actually holds a .cia.
+static bool settle3dsFilePick(MenuSelection& e) {
+    if (e.platformSlug != ROMM_SLUG_3DS || e.fileId != -1) return true;
+    RommRom rr;
+    rr.id = e.rommId;
+    rr.fileId = -1;
+    rr.sizeBytes = 0;
+    if (!gRomm.resolveRomFile(rr)) return false;
+    e.fsName = rr.fsName.empty() ? e.fsName : rr.fsName;
+    e.fileId = rr.fileId;
+    e.sizeBytes = rr.sizeBytes ? rr.sizeBytes : e.sizeBytes;
+    e.installable = rr.installable;
+    for (auto& cr : gCache[ROMM_SLUG_3DS]) {   // persist the pick
+        if (cr.id != e.rommId) continue;
+        cr.fsName = rr.fsName.empty() ? cr.fsName : rr.fsName;
+        cr.fileId = rr.fileId; cr.installable = rr.installable;
+        if (rr.sizeBytes) cr.sizeBytes = rr.sizeBytes;
+        saveLibCache(ROMM_SLUG_3DS, gCache[ROMM_SLUG_3DS]);
+        break;
+    }
+    return true;
 }
 
 // loads a platform's library into gCache[slug] once; returns false on error (sets gRomm.lastError)
@@ -1384,7 +1425,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (id >= 0 && id <= 5) d = descs[id];
                 else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key (saved to sd:/3ds/romm3ds/sgdb.env) or re-read the file.";
-                else if (id == SETTING_GBA_SCREEN) d = "Color filter baked into new GBA installs. AGS-101 = gamma-corrected (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed; brighter gamma = between the two; night = AGS-101 + warm blue-light filter. Reinstall or Change art to apply.";
+                else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. AGS-101 = gamma-corrected (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed; brighter gamma = between the two; night = AGS-101 + warm blue-light filter. Per game: Manage -> game -> Screen.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -2502,6 +2543,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool isGba = (entry.platformSlug == ROMM_SLUG_GBA);
                     rlog.info("install: " + entry.fsName + " slug=" + entry.platformSlug +
                               " fileId=" + std::to_string(entry.fileId) + " installable=" + (entry.installable?"1":"0"));
+                    if (is3ds && entry.fileId == -1) {
+                        // file list still unresolved (library was opened offline)
+                        showLoading(target, {"Checking files...", entry.title});
+                        if (!settle3dsFilePick(entry)) {
+                            Dialog(target,0,0,320,240,{"Can't read file list",gRomm.lastError},{"OK"}).handle();
+                            break;
+                        }
+                    }
                     if (is3ds && !entry.installable) {
                         Dialog(target,0,0,320,240,{"Not a .cia — can't install here.",entry.fsName,"Convert on PC with ready3ds,","then upload the .cia to RomM."},{"OK"}).handle();
                         break;
@@ -2589,6 +2638,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         MenuSelection* it = items[i];
                         showLoading(target, {"Installing " + std::to_string(i+1) + "/" + std::to_string(M), it->title});
                         bool is3ds = (it->platformSlug == ROMM_SLUG_3DS);
+                        if (!settle3dsFilePick(*it) || (is3ds && !it->installable)) {
+                            failed.push_back(it->title);   // no file list / no .cia in folder
+                            continue;
+                        }
                         std::string romPath = rommLocalPath(it->fsName, it->platformSlug);
                         std::string dest = rommDirFor(it->platformSlug) + it->fsName;
                         bool onSD = fileExists(is3ds ? dest : romPath);
@@ -2724,9 +2777,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
                             if (c==1) {
-                                // re-bake with the Settings screen preset, art untouched
+                                // pick a preset (preselected on the Settings default),
+                                // then re-bake in place — art untouched, save kept
+                                int fc = pickGbaScreenPreset(target, config, ng);
+                                if (fc < 0) break;
                                 applyGbaScreenItem(target, config, romBase, ng,
-                                                   entry.coverPath, entry.path.generic_string(), true);
+                                                   entry.coverPath, entry.path.generic_string(), true, fc);
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
@@ -3110,7 +3166,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     if (act == A_BACK) break;
                     if (act == A_SCREEN) {
-                        // re-bake every selected inject with the Settings preset
+                        // pick a preset once, re-bake every selected inject with it
+                        int fc = pickGbaScreenPreset(target, config, std::to_string(M)+" selected");
+                        if (fc < 0) break;
                         int okCount = 0;
                         std::vector<std::string> failed;
                         CoverCachePause coverPause;
@@ -3120,7 +3178,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             showLoading(target, {"Screen filter "+std::to_string(i+1)+"/"+std::to_string(M), it->title});
                             std::string base = it->path.filename().generic_string();
                             if (applyGbaScreenItem(target, config, base, it->title, it->coverPath,
-                                                   it->path.generic_string(), false) == 1) okCount++;
+                                                   it->path.generic_string(), false, fc) == 1) okCount++;
                             else failed.push_back(it->title);
                         }
                         std::vector<std::string> msg;

@@ -40,11 +40,20 @@ static void worker(void*) {
     if (pid >= 0 && gClient.listRoms(pid, fresh, gSlug)) {
         ok = true;
         if (gSlug == ROMM_SLUG_3DS) {
-            std::map<int, u64> known;
-            for (auto& r : gOld) if (r.titleId) known[r.id] = r.titleId;
+            std::map<int, const RommRom*> old;
+            for (auto& r : gOld) old[r.id] = &r;
             for (auto& r : fresh) {
-                auto it = known.find(r.id);
-                if (it != known.end()) { r.titleId = it->second; continue; }
+                auto it = old.find(r.id);
+                // fileId==-1: RomM >= 4.9.2 list response has no file lists.
+                // Reuse the pick the UI already resolved, else fetch it here.
+                if (r.fileId == -1 && it != old.end() && it->second->fileId != -1) {
+                    r.fsName      = it->second->fsName;
+                    r.fileId      = it->second->fileId;
+                    r.sizeBytes   = it->second->sizeBytes;
+                    r.installable = it->second->installable;
+                }
+                if (r.fileId == -1 && !gClient.resolveRomFile(r)) continue;
+                if (it != old.end() && it->second->titleId) { r.titleId = it->second->titleId; continue; }
                 if (!r.installable) continue;
                 std::string hdr;
                 if (gClient.fetchCiaHeader(r, hdr)) r.titleId = ciaBufferTitleId(hdr);
