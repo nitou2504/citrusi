@@ -45,5 +45,3 @@ Result deleteRommCtrForwarder(u64 tid);     // CTR, SD + path file
 
 
 std::string humanSize(u64 bytes);
-// "SD: 12.3GB free | DSiWare: 27/40"
-std::string storageSummary(unsigned long dsiwareCount);

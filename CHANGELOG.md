@@ -4,6 +4,25 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Added — Manage → 3DS: all installed titles + storage (`feat/manage-3ds`)
+- **Manage → 3DS now lists every installed application**, not only the ones
+  that match a RomM library entry. Names come from each title's own SMDH (read
+  from its ExeFS `icon` via `FSUSER_OpenFileDirectly`), sizes and versions from
+  `AM_GetTitleInfo`. Games the library does know keep their cover and metadata
+  and get an "on RomM" chip. Region variants the library can't match
+  (Rhythm Megamix, Picross 3D R2 …) finally show up.
+- **Sorted biggest first** — the screen is about reclaiming space; the details
+  panel shows the installed size.
+- **Uninstall + extras** — uninstalling a game that has an update (`0004000E`)
+  or DLC (`0004008C`) installed offers to remove those too. This app, system
+  titles, our own forwarders/injects and DSiWare are never listed or deleted.
+- **Per-system storage** on the Manage system picker: bytes + counts for
+  Nintendo DS (forwarders + DSiWare), Game Boy Advance (injects), Nintendo 3DS
+  (apps), updates/DLC, plus SD free.
+- SMDH names are cached on SD (`smdhnames.json`, keyed `tid|version`), so only
+  the first open pays the one-FS-open-per-title pass ("Reading titles…", with
+  the cover worker paused so it doesn't fight for the card).
+
 ### Added — batch operations (`feat/batch-ops`, merged into `feat/integration`)
 - **Multiselect with Y** on the RomM library and Manage lists (non-installable
   3DS rows are skipped); the header shows "N selected". Details-panel

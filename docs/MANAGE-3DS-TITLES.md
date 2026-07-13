@@ -1,4 +1,25 @@
-# Manage → 3DS: list ALL installed titles (planned)
+# Manage → 3DS: list ALL installed titles (DONE, 2026-07-12)
+
+Shipped on `feat/manage-3ds`. What landed:
+
+- `installedtitles.{hpp,cpp}` — AM enumeration + `TitleKind` classification,
+  SMDH name reader with an SD name cache (`sd:/3ds/forwarder/smdhnames.json`,
+  keyed `tid|version`), `listInstalledApps()`, `findTitleExtras()`,
+  `computeStorageTally()`.
+- Manage → 3DS lists **every** installed app on SD, biggest first, with the
+  installed size in the details panel. Library matches keep their cover /
+  metadata and get an "on RomM" chip; the rest are named from their SMDH.
+  Our own forwarders/injects, DSiWare, system titles and the app itself are
+  filtered out.
+- Uninstall works on any listed title and offers **+ extras** when an update
+  (`0004000E`) or DLC (`0004008C`) with the same unique id is installed.
+- The Manage system picker's bottom panel shows bytes + counts per system
+  (DS forwarders / GBA injects / 3DS apps / updates+DLC) and SD free.
+- Deferred: A-Z sort toggle, "orphaned update/DLC" cleanup for games that are
+  no longer installed, and using SMDH names for the region-variant install
+  detection described in 3DS-INSTALL-DETECTION.md.
+
+## Original request and plan (kept for context)
 
 ## Request (2026-07-11)
 

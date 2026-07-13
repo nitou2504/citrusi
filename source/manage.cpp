@@ -415,15 +415,3 @@ std::string humanSize(u64 bytes) {
         snprintf(buf, sizeof(buf), "%lluKB", bytes / 1024);
     return std::string(buf);
 }
-
-std::string storageSummary(unsigned long dsiwareCount) {
-    FS_ArchiveResource sd = {};
-    std::string sdPart = "SD: ?";
-    if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD))) {
-        u64 freeBytes = (u64)sd.freeClusters * sd.clusterSize;
-        sdPart = "SD free: " + humanSize(freeBytes);
-    }
-    char buf[96];
-    snprintf(buf, sizeof(buf), "%s | DSiWare: %lu/40", sdPart.c_str(), dsiwareCount);
-    return std::string(buf);
-}
