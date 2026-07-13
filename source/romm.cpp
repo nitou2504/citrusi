@@ -166,6 +166,11 @@ Result RommClient::get(const std::string& url, std::string& out, u32* statusOut)
     u32 readSize = 0;
     try {
         do {
+            if (cancel && cancel->load()) {
+                lastError = "aborted";
+                httpcCloseContext(&ctx);
+                return -1;
+            }
             res = httpcDownloadData(&ctx, chunk, sizeof(chunk), &readSize);
             out.append((char*)chunk, readSize);
         } while (res == (Result)HTTPC_RESULTCODE_DOWNLOADPENDING);

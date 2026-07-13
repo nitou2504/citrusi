@@ -23,6 +23,7 @@ struct CoverJob { int id; std::string url; };
 
 static Thread gWorkers[COVER_WORKERS] = {nullptr};
 static std::atomic<bool> gRun(false);
+static std::atomic<bool> gAbort(false);   // exit: cut the in-flight transfer
 static std::atomic<int> gWantId(-1);
 static std::atomic<int> gPauseCount(0);
 static std::atomic<bool> gBusy(false);
@@ -98,13 +99,18 @@ static void workerMain(void*) {
             for (auto& j : gJobs)
                 if (j.id == want) { job = j; break; }
         }
-        // otherwise the next unclaimed, undone job
+        // otherwise the next unclaimed, undone job. Done jobs are ERASED as
+        // they're met: re-stat()ing an ever-growing done-prefix on every pick
+        // kept the SD busy for the whole session and starved the UI's reads.
         if (job.id < 0) {
-            for (auto& j : gJobs) {
-                if (!isClaimed(j.id) && !fileExists(rawPath(j.id)) && !fileExists(missPath(j.id))) {
-                    job = j;
-                    break;
+            for (auto it = gJobs.begin(); it != gJobs.end(); ) {
+                if (isClaimed(it->id)) { ++it; continue; }
+                if (fileExists(rawPath(it->id)) || fileExists(missPath(it->id))) {
+                    it = gJobs.erase(it);
+                    continue;
                 }
+                job = *it;
+                break;
             }
         }
         if (job.id >= 0) gClaimed.push_back(job.id);   // claim so peers skip it
@@ -135,6 +141,8 @@ void coverCacheStart(const RommClient& client, const std::vector<RommRom>& roms)
     gWorkerClient.user = client.user;
     gWorkerClient.pass = client.pass;
     gWorkerClient.buildAuth();
+    gWorkerClient.cancel = &gAbort;   // exit aborts the in-flight fetch
+    gAbort = false;
     gJobs.clear();
     gClaimed.clear();
     for (auto& r : roms) {
@@ -206,6 +214,7 @@ void coverCacheResume() {
 
 void coverCacheStop() {
     if (gWorkers[0]) {
+        gAbort = true;
         gRun = false;
         for (int i = 0; i < COVER_WORKERS; i++) {
             if (!gWorkers[i]) continue;

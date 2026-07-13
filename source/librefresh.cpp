@@ -11,6 +11,7 @@ static Logger lrlog("libref");
 static Thread gThread = nullptr;
 static std::atomic<bool> gBusy(false);   // worker running
 static std::atomic<bool> gDone(false);   // result waiting for take
+static std::atomic<bool> gAbort(false);  // app exit: drop the refresh mid-flight
 static bool gOk = false;                 // worker-only until gDone
 static bool gChanged = false;            // worker-only until gDone
 static std::string gSlug;                // set before spawn, read-only during run
@@ -43,6 +44,7 @@ static void worker(void*) {
             std::map<int, const RommRom*> old;
             for (auto& r : gOld) old[r.id] = &r;
             for (auto& r : fresh) {
+                if (gAbort) break;
                 auto it = old.find(r.id);
                 // fileId==-1: RomM >= 4.9.2 list response has no file lists.
                 // Reuse the pick the UI already resolved, else fetch it here.
@@ -59,7 +61,8 @@ static void worker(void*) {
                 if (gClient.fetchCiaHeader(r, hdr)) r.titleId = ciaBufferTitleId(hdr);
             }
         }
-        changed = differs(gOld, fresh);
+        if (gAbort) { ok = false; }              // partial result: never save it
+        changed = ok && differs(gOld, fresh);
         // heavy SD work stays on the worker: json save + cover-miss cleanup
         // would otherwise stall the UI thread when the result lands
         if (changed) {
@@ -87,6 +90,8 @@ void libRefreshStart(const RommClient& client, const std::string& slug,
     gClient.user = client.user;
     gClient.pass = client.pass;
     gClient.buildAuth();
+    gAbort = false;
+    gClient.cancel = &gAbort;   // exit aborts the transfer instead of waiting it out
     gSlug = slug;
     gOld = current;
     gSave = save;
@@ -117,6 +122,7 @@ bool libRefreshTake(std::string& slug, std::vector<RommRom>& roms, bool& ok, boo
 }
 
 void libRefreshStop() {
+    gAbort = true;   // a gba refresh can run 10s+; quitting must not wait for it
     if (gThread) { threadJoin(gThread, U64_MAX); threadFree(gThread); gThread = nullptr; }
     gBusy = false;
     gDone = false;

@@ -1,5 +1,6 @@
 #pragma once
 #include <3ds.h>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <functional>
@@ -50,6 +51,9 @@ class RommClient {
     std::string user;
     std::string pass;
     std::string lastError;
+    // worker clients set this so app exit can abort an in-flight transfer
+    // instead of joining a multi-second download (checked between chunks)
+    std::atomic<bool>* cancel = nullptr;
 
     bool loadConfig();
     void saveConfig();
