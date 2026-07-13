@@ -914,7 +914,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (id >= 0 && id <= 5) d = descs[id];
                 else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key (saved to sd:/3ds/romm3ds/sgdb.env) or re-read the file.";
-                else if (id == SETTING_GBA_SCREEN) d = "Color filter baked into new GBA installs. AGS-101 = gamma-corrected (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed; brighter gamma = between the two; night = AGS-101 + warm blue-light filter. Reinstall or Change art to apply.";
+                else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. AGS-101 = gamma-corrected (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed; brighter gamma = between the two; night = AGS-101 + warm blue-light filter. Per game: Manage -> game -> Filter.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -1965,7 +1965,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (entry.installed) {
                             std::string romBase = entry.path.filename().generic_string();
                             bool weakArt = artStoreGet(romBase).weak;
-                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"Installed - using fallback art":"Installed"},{"Change art","Uninstall","Back"}).handle();
+                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"Installed - using fallback art":"Installed"},{"Change art","Filter","Uninstall","Back"}).handle();
                             if (c==0) {
                                 // rebuild in place: same TID keeps the HOME
                                 // position and save data, only the art changes
@@ -2000,7 +2000,45 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
                             }
-                            if (c!=1) break;
+                            if (c==1) {
+                                // per-title screen filter: pick a preset, rebuild in
+                                // place (same TID = HOME position + save kept, stored
+                                // art reused silently)
+                                if (!ensureCtrBuilder(target)) break;
+                                static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
+                                int cur = config->gbaScreen % GBA_SCREEN_COUNT;
+                                int fc = Dialog(target,0,0,320,240,
+                                                {"Screen filter",ng,std::string("default: ")+gbaScreenNames[cur]},
+                                                {"AGS-101","Original","Raw","Bright","Night"},cur).handle();
+                                if (fc < 0) break;
+                                ArtEntry ae;
+                                ArtPieces pieces;
+                                resolveGbaArtInteractive(target, config, romBase, ng,
+                                                         entry.coverPath, ae, pieces);
+                                u64 gtid = gCtr.allocateGbaTID(romBase);
+                                if (gtid == 0) { Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); break; }
+                                Dialog(target,0,0,320,240,{"Applying filter...",ng},{},0).handle();
+                                u64 lastG = 0;
+                                ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
+                                                                    pieces.icon48, pieces.bannerTex, fc,
+                                    [&](u64 done, u64 total) -> bool {
+                                        hidScanInput();
+                                        if (hidKeysDown() & KEY_B) return false;
+                                        if (done - lastG < (2<<20) && done != total) return true;
+                                        lastG = done;
+                                        int pct = (total>0)?(int)(done*100/total):0;
+                                        Dialog(target,0,0,320,240,{"Applying filter... (B = cancel)",ng,std::to_string(pct)+"%"},{},0).handle();
+                                        return true;
+                                    });
+                                if (gr->isSuccess()) {
+                                    Dialog(target,0,0,320,240,{"Filter applied!",gbaScreenNames[fc % GBA_SCREEN_COUNT]},{"OK"}).handle();
+                                } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Filter update failed",gr->message},{"OK"}).handle();
+                                delete gr;
+                                while (this->queue.size() > 0) this->queue.pop();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug);
+                            }
+                            if (c!=2) break;
                             // single-pass: uninstall removes the inject AND the ROM file
                             if (Dialog(target,0,0,320,240,{"Uninstall game?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                             showLoading(target, {"Uninstalling...", ng});
