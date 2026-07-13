@@ -524,15 +524,50 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
 // Returns 1 = updated, 0 = skipped (B / nothing chosen), -1 = failed.
 // interactive=true shows the per-item result dialog (single); batch passes
 // false and reports in its own summary. The picker + progress always show.
-// five-preset picker, preselected on the Settings default; returns the
-// GBA_SCREEN_* index or -1 on B/cancel
+// five-preset picker: vertical list with a plain-words explanation of the
+// highlighted preset underneath. Preselected on the Settings default;
+// returns the GBA_SCREEN_* index or -1 on B/cancel.
+static float drawWrapped(float x, float y, float maxW, float lineH, float scale,
+                         u32 color, const std::string& text, int maxLines);
 static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
                                const std::string& title) {
-    static const char* names[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
-    int cur = config->gbaScreen % GBA_SCREEN_COUNT;
-    return Dialog(target,0,0,320,240,
-                  {"Screen filter",title,std::string("default: ")+names[cur]},
-                  {"AGS-101","Original","Raw","Bright","Night"},cur).handle();
+    static const char* names[GBA_SCREEN_COUNT] = {
+        "AGS-101 colors", "Original dark filter", "Unfiltered",
+        "Brighter gamma", "Night (warm)"};
+    static const char* descs[GBA_SCREEN_COUNT] = {
+        "Gamma-corrected to match the backlit AGS-101 screen. Vivid colors without the dark cast. Recommended.",
+        "Nintendo's own Virtual Console filter. Authentic, but noticeably dark and muted.",
+        "The raw palette, no filter at all. Brightest picture; colors look washed out.",
+        "A gentler gamma correction - halfway between AGS-101 and unfiltered.",
+        "AGS-101 colors plus a warm 3400K tint - easier on the eyes in the dark."};
+    int def = config->gbaScreen % GBA_SCREEN_COUNT;
+    int sel = def;
+    while (aptMainLoop()) {
+        hidScanInput();
+        u32 kd = hidKeysDown();
+        if (kd & KEY_UP)   sel = (sel + GBA_SCREEN_COUNT - 1) % GBA_SCREEN_COUNT;
+        if (kd & KEY_DOWN) sel = (sel + 1) % GBA_SCREEN_COUNT;
+        if (kd & (KEY_A | KEY_START)) return sel;
+        if (kd & KEY_B) return -1;
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        C2D_TargetClear(target, COL_BG);
+        C2D_SceneBegin(target);
+        drawText(160, 16, 0.5f, 0.55f, 0, COL_TEXT, "Screen filter", C2D_AlignCenter);
+        drawText(160, 34, 0.5f, 0.42f, 0, COL_TEXT_DIM, title.c_str(), C2D_AlignCenter);
+        float y = 50;
+        for (int i = 0; i < GBA_SCREEN_COUNT; i++, y += 24) {
+            bool hot = (i == sel);
+            if (hot) C2D_DrawRectSolid(12, y, 0.4f, 296, 22, COL_ACCENT);
+            std::string label = std::string(names[i]) + (i == def ? "  (default)" : "");
+            drawText(22, y + 11, 0.5f, 0.5f, 0,
+                     hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, label.c_str(), 0);
+        }
+        C2D_DrawRectSolid(12, y + 4, 0.4f, 296, 1, COL_ELEV);
+        drawWrapped(16, y + 12, 288, 13, 0.42f, COL_TEXT_DIM, descs[sel], 3);
+        drawText(160, 230, 0.5f, 0.4f, 0, COL_TEXT_DIM, "A apply    B cancel", C2D_AlignCenter);
+        C3D_FrameEnd(0);
+    }
+    return -1;
 }
 
 // re-bakes an installed inject with the given screen preset, reusing the
@@ -690,16 +725,27 @@ static bool uninstallManageItem(Config* config, const MenuSelection& it) {
 
 RommClient gRomm;
 
-// selected-game cover (shared by top rail + tick loader)
+// selected-game cover (shared by top rail + tick loader). gCover BORROWS the
+// texture from gCoverLru below — only eviction frees it.
 static C2D_Image gCover = {nullptr, nullptr};
+// small texture LRU: revisiting a cover while scrolling must cost nothing
+// (RESPONSIVENESS-PLAN: cap resident art, never re-read the SD for it)
+struct CoverSlot { int id; C2D_Image img; };
+static std::vector<CoverSlot> gCoverLru;   // front = most recent, owns textures
+#define COVER_LRU_CAP 16
 // the selected 3DS title's own HOME icon (from its SMDH) — art for games that
 // aren't in the RomM library
 static C2D_Image gTitleIcon = {nullptr, nullptr};
 static u64 gTitleIconTid = 0;
+static u64 gIconWantTid = 0;
+static int gIconDebounce = 0;
 static int gCoverForId = -1;    // rommId currently in gCover
 static int gCoverFailedId = -1; // rommId that failed to load (don't retry)
 static int gCoverWantId = -1;
 static int gCoverDebounce = 0;
+// frames a selection must sit still before any art touches the SD card:
+// stepping through a list stays pure text (the NDS-manage feel everywhere)
+#define ART_SETTLE_FRAMES 8
 static u32 gTick = 0;           // global frame counter for marquees
 
 // cached libraries per platform slug, for instant search filtering
@@ -1138,15 +1184,22 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if ((this->type != MENU_ROMM && this->type != MENU_MANAGE) || this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
         if (sel->action != RommInstall && sel->action != ManageRom) return;
-        // 3DS titles with no RomM cover: use the icon saved from their SMDH
+        // 3DS titles with no RomM cover: use the icon saved from their SMDH.
+        // Debounced like covers — an SD read on every step is what made the
+        // Manage->3DS list crawl (NDS is fast precisely because it does
+        // nothing per step).
         if (this->type == MENU_MANAGE && sel->platformSlug == ROMM_SLUG_3DS &&
-            sel->rommId <= 0 && sel->tid && sel->tid != gTitleIconTid) {
+            sel->rommId <= 0 && sel->tid) {
+            if (sel->tid != gIconWantTid) { gIconWantTid = sel->tid; gIconDebounce = 0; return; }
+            if (gTitleIconTid == sel->tid) return;
+            if (++gIconDebounce < ART_SETTLE_FRAMES) return;
             if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
             gTitleIconTid = sel->tid;
-            std::string rgba = titleIconRGBA(sel->tid);
+            std::string rgba = titleIconRGBA(sel->tid);   // RAM-cached after first read
             if (rgba.size() == 48*48*4 &&
                 texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon))
                 C3D_TexSetFilter(gTitleIcon.tex, GPU_NEAREST, GPU_NEAREST);   // pixel art
+            return;
         }
         if (sel->rommId <= 0) return;
         if (sel->rommId != gCoverWantId) {
@@ -1155,12 +1208,26 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             return;
         }
         if (gCoverForId == gCoverWantId || gCoverFailedId == gCoverWantId) return;
-        if (++gCoverDebounce < 3) return; // settle a few frames
+        // RAM LRU first: scrolling back to a seen cover never re-reads the SD
+        for (size_t i = 0; i < gCoverLru.size(); i++) {
+            if (gCoverLru[i].id != gCoverWantId) continue;
+            CoverSlot s = gCoverLru[i];
+            gCoverLru.erase(gCoverLru.begin() + i);
+            gCoverLru.insert(gCoverLru.begin(), s);
+            gCover = s.img;
+            gCoverForId = s.id;
+            return;
+        }
+        if (++gCoverDebounce < ART_SETTLE_FRAMES) return; // rapid steps: no SD at all
         // never fetch/decode here: the worker prefetches, we just upload
         coverCacheWant(gCoverWantId);
         C2D_Image img = {nullptr, nullptr};
         if (coverCacheLoad(gCoverWantId, &img)) {
-            freeTexImage(&gCover);
+            gCoverLru.insert(gCoverLru.begin(), {gCoverWantId, img});
+            while (gCoverLru.size() > COVER_LRU_CAP) {
+                freeTexImage(&gCoverLru.back().img);
+                gCoverLru.pop_back();
+            }
             gCover = img;
             gCoverForId = gCoverWantId;
         } else if (coverCacheUnavailable(gCoverWantId)) {

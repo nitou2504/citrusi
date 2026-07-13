@@ -4,6 +4,16 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Changed (2026-07-13, night)
+- **Scrolling never waits on art**: NDS Manage was fast, GBA slower, 3DS
+  unbearable — ranked exactly by per-step art I/O. Covers and 3DS title
+  icons now share one 8-frame settle debounce (rapid steps do zero SD work),
+  seen covers live in a 16-texture RAM LRU (scrolling back is free), and
+  title-icon reads are RAM-cached. Every list should feel like NDS Manage.
+- **Screen-filter picker redesigned**: vertical list of the five presets
+  (default tagged) with a plain-words explanation of the highlighted one
+  underneath, instead of five cramped horizontal buttons.
+
 ### Fixed (2026-07-13, evening)
 - **0xC8E083FC root cause found and fixed**: the new write-offset logging
   showed the cursed tid failing on the very first write with the title absent

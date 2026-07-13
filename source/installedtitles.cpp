@@ -126,9 +126,16 @@ static void saveTitleIcon(u64 tid, const u8* smdh) {
 }
 
 std::string titleIconRGBA(u64 tid) {
+    // RAM cache (misses included): the Manage list re-asks on every selection
+    // settle, and a per-ask SD stat/read is exactly the scroll hitch we killed
+    static std::map<u64, std::string> ram;
+    auto it = ram.find(tid);
+    if (it != ram.end()) return it->second;
     std::string p = iconPath(tid);
-    if (!fileExists(p)) return "";
-    return readEntireFile(p);
+    std::string d = fileExists(p) ? readEntireFile(p) : std::string();
+    if (ram.size() > 256) ram.clear();   // ~9KB each; never grows past ~2.3MB
+    ram[tid] = d;
+    return d;
 }
 
 static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out) {
