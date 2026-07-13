@@ -389,17 +389,21 @@ static void invalidateAllCaches() {
 
 // resolve 3ds title ids (for install detection) via a small header fetch, cached in the lib json.
 // runs BEFORE the cover worker starts, so only the main thread touches httpc (no concurrency).
+// Also settles fileId==-1 roms (RomM >= 4.9.2 list response has no file lists)
+// with a detail fetch each, so the picked .cia lands in the lib json too.
 static void resolveTitleIds(const std::string& slug, C3D_RenderTarget* target) {
     if (slug != ROMM_SLUG_3DS) return;
     auto& roms = gCache[slug];
     int need = 0;
-    for (auto& r : roms) if (r.installable && r.titleId == 0) need++;
+    for (auto& r : roms) if (r.installable && (r.titleId == 0 || r.fileId == -1)) need++;
     if (need == 0) return;
     int done = 0, ok = 0;
     for (auto& r : roms) {
-        if (!r.installable || r.titleId != 0) continue;
+        if (!r.installable || (r.titleId != 0 && r.fileId != -1)) continue;
         done++;
         if (target) showLoading(target, {"Reading title ids...", std::to_string(done)+"/"+std::to_string(need)});
+        if (r.fileId == -1 && !gRomm.resolveRomFile(r)) continue;   // network miss: retry next open
+        if (!r.installable || r.titleId != 0) { ok++; continue; }   // resolved to "no .cia"
         std::string hdr;
         if (gRomm.fetchCiaHeader(r, hdr)) { r.titleId = ciaBufferTitleId(hdr); if (r.titleId) ok++; }
     }
@@ -1758,6 +1762,31 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool isNds = !is3ds && !isGba;
                     rlog.info("install: " + entry.fsName + " slug=" + entry.platformSlug +
                               " fileId=" + std::to_string(entry.fileId) + " installable=" + (entry.installable?"1":"0"));
+                    if (is3ds && entry.fileId == -1) {
+                        // file list still unresolved (server was unreachable at
+                        // library open): fetch the rom detail and pick the .cia now
+                        showLoading(target, {"Checking files...", entry.title});
+                        RommRom rr;
+                        rr.id = entry.rommId;
+                        rr.fileId = -1;
+                        rr.sizeBytes = 0;
+                        if (!gRomm.resolveRomFile(rr)) {
+                            Dialog(target,0,0,320,240,{"Can't read file list",gRomm.lastError},{"OK"}).handle();
+                            break;
+                        }
+                        entry.fsName = rr.fsName.empty() ? entry.fsName : rr.fsName;
+                        entry.fileId = rr.fileId;
+                        entry.sizeBytes = rr.sizeBytes ? rr.sizeBytes : entry.sizeBytes;
+                        entry.installable = rr.installable;
+                        for (auto& cr : gCache[ROMM_SLUG_3DS]) {   // persist the pick
+                            if (cr.id != entry.rommId) continue;
+                            cr.fsName = rr.fsName.empty() ? cr.fsName : rr.fsName;
+                            cr.fileId = rr.fileId; cr.installable = rr.installable;
+                            if (rr.sizeBytes) cr.sizeBytes = rr.sizeBytes;
+                            saveLibCache(ROMM_SLUG_3DS, gCache[ROMM_SLUG_3DS]);
+                            break;
+                        }
+                    }
                     if (is3ds && !entry.installable) {
                         Dialog(target,0,0,320,240,{"Not a .cia — can't install here.",entry.fsName,"Convert on PC with ready3ds,","then upload the .cia to RomM."},{"OK"}).handle();
                         break;
