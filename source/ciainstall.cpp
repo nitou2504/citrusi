@@ -2,11 +2,45 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <filesystem>
 #include <sys/stat.h>
 #include "ciainstall.hpp"
 #include "logger.hpp"
 
 static Logger cilog("ciainst");
+
+// Last resort for a tid that AM insists "already exists" while it is NOT in
+// the title db: an aborted CIA import can leave an orphan title dir on SD
+// (<id0>/<id1>/title/<high>/<low> holding a 00000000.ctx import context +
+// content/*.app) that blocks every future install of that tid. This is the
+// on-device version of the classic "delete the folder in GodMode9" fix.
+// Only called when AM_GetTitleInfo says the title is not installed, so the
+// dir (including its now-unreachable save) is dead weight by definition.
+static bool removeOrphanTitleDir(u64 tid) {
+    namespace fs = std::filesystem;
+    char high[16], low[16];
+    snprintf(high, sizeof(high), "%08lx", (unsigned long)(tid >> 32));
+    snprintf(low,  sizeof(low),  "%08lx", (unsigned long)(tid & 0xFFFFFFFF));
+    bool removed = false;
+    std::error_code ec;
+    for (auto& id0 : fs::directory_iterator("sdmc:/Nintendo 3DS", ec)) {
+        std::error_code ec1;
+        if (!id0.is_directory(ec1)) continue;
+        for (auto& id1 : fs::directory_iterator(id0.path(), ec1)) {
+            std::error_code ec2;
+            if (!id1.is_directory(ec2)) continue;
+            fs::path t = id1.path() / "title" / high / low;
+            if (!fs::exists(t, ec2)) continue;
+            uintmax_t n = fs::remove_all(t, ec2);
+            char lb[192];
+            snprintf(lb, sizeof(lb), "removed orphan title dir %s (%llu entries, ec=%d)",
+                     t.generic_string().c_str(), (unsigned long long)n, ec2.value());
+            cilog.warn(lb);
+            if (n > 0 && !ec2) removed = true;
+        }
+    }
+    return removed;
+}
 
 // Parse the title id out of a CIA's TMD (big-endian u64 at TMD header +0x4C).
 static u64 readCiaTitleId(FILE* f) {
@@ -165,6 +199,14 @@ bool installCiaFromFile(const std::string& path, std::string& err, bool force,
         cilog.warn(lb);
         rc = installAttempt(f, sz, media, false, err, progress);
         if (rc == 0) cilog.info("retry after cleanup: installed ok");
+        // db-level cleanup didn't help: if the title is genuinely not
+        // installed, the blocker is an orphan import dir on SD — remove it
+        // (GodMode9-style) and stream one last time
+        if (rc == 2 && media == MEDIATYPE_SD && !amTitleExists(media, tid) &&
+            removeOrphanTitleDir(tid)) {
+            rc = installAttempt(f, sz, media, false, err, progress);
+            if (rc == 0) cilog.info("retry after orphan-dir removal: installed ok");
+        }
     }
     fclose(f);
     return rc == 0;
