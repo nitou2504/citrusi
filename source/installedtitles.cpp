@@ -202,8 +202,14 @@ static TitleKind classify(u64 tid, FS_MediaType media, bool& prot) {
     return (cat == 0x0002) ? TK_DEMO : TK_APP;
 }
 
-// every title on one media, with size + version filled in (no names)
+// every title on one media, with size + version filled in (no names).
+// The SD list is cached in RAM: findTitleExtras runs from drawBottom on
+// every Manage->3DS selection change, and a full AM enumeration per scroll
+// step was what made that list crawl. Invalidated with the tally.
+static std::vector<InstalledTitle> gSdEnum;
+static bool gSdEnumOk = false;
 static std::vector<InstalledTitle> enumerateMedia(FS_MediaType media) {
+    if (media == MEDIATYPE_SD && gSdEnumOk) return gSdEnum;
     std::vector<InstalledTitle> out;
     u32 count = 0;
     if (R_FAILED(AM_GetTitleCount(media, &count)) || count == 0) return out;
@@ -224,6 +230,7 @@ static std::vector<InstalledTitle> enumerateMedia(FS_MediaType media) {
         t.kind = classify(t.tid, media, t.protectedTitle);
         out.push_back(t);
     }
+    if (media == MEDIATYPE_SD) { gSdEnum = out; gSdEnumOk = true; }
     return out;
 }
 
@@ -306,7 +313,7 @@ static StorageTally gTally;
 
 // after an install/uninstall the numbers moved. names stay valid: they are
 // keyed by tid|version, so a new/updated title simply misses the cache.
-void installedTitlesInvalidate() { gTallyOk = false; }
+void installedTitlesInvalidate() { gTallyOk = false; gSdEnumOk = false; }
 
 std::vector<CiaFile> listCiaFiles() {
     std::vector<CiaFile> out;
