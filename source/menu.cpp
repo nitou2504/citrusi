@@ -524,6 +524,44 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
 // Returns 1 = updated, 0 = skipped (B / nothing chosen), -1 = failed.
 // interactive=true shows the per-item result dialog (single); batch passes
 // false and reports in its own summary. The picker + progress always show.
+// re-bakes an installed inject with the Settings screen preset, reusing the
+// art already chosen for it (no picker). 1 ok, -1 failed.
+static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
+                              const std::string& romBase, const std::string& title,
+                              const std::string& coverPath, const std::string& romPath,
+                              bool interactive) {
+    if (!ensureCtrBuilder(target)) return -1;
+    ensureSgdb();
+    ArtEntry ae = artStoreGet(romBase);
+    ArtPieces pieces;
+    if (ae.valid && !artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, pieces))
+        artFromRommCover(gSgdb, gRomm, coverPath,
+                         pieces.icon48.empty(), pieces.bannerTex.empty(), pieces);
+    u64 gtid = gCtr.allocateGbaTID(romBase);
+    if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
+    Dialog(target,0,0,320,240,{"Applying screen filter...",title},{},0).handle();
+    u64 lastG = 0;
+    ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid,
+                                        pieces.icon48, pieces.bannerTex,
+                                        config->gbaScreen,
+        [&](u64 done, u64 total) -> bool {
+            hidScanInput();
+            if (hidKeysDown() & KEY_B) return false;
+            if (done - lastG < (2<<20) && done != total) return true;
+            lastG = done;
+            int pct = (total>0)?(int)(done*100/total):0;
+            Dialog(target,0,0,320,240,{"Installing... (B = cancel)",title,std::to_string(pct)+"%"},{},0).handle();
+            return true;
+        });
+    int rc = gr->isSuccess() ? 1 : -1;
+    if (interactive) {
+        if (rc == 1) Dialog(target,0,0,320,240,{"Screen filter applied!",title},{"OK"}).handle();
+        else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Update failed",gr->message},{"OK"}).handle();
+    }
+    delete gr;
+    return rc;
+}
+
 static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
                             const std::string& romBase, const std::string& title,
                             const std::string& coverPath, const std::string& romPath,
@@ -2545,7 +2583,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (entry.installed) {
                             std::string romBase = entry.path.filename().generic_string();
                             bool weakArt = artStoreGet(romBase).weak;
-                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"Installed - using fallback art":"Installed"},{"Change art","Uninstall","Back"}).handle();
+                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"Installed - using fallback art":"Installed"},{"Change art","Screen","Uninstall","Back"}).handle();
                             if (c==0) {
                                 // rebuild in place: same TID keeps the HOME
                                 // position and save data, only the art changes
@@ -2556,7 +2594,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
-                            if (c!=1) break;
+                            if (c==1) {
+                                // re-bake with the Settings screen preset, art untouched
+                                applyGbaScreenItem(target, config, romBase, ng,
+                                                   entry.coverPath, entry.path.generic_string(), true);
+                                while (this->queue.size() > 0) this->queue.pop();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
+                            }
+                            if (c!=2) break;
                             // single-pass: uninstall removes the inject AND the ROM file
                             if (Dialog(target,0,0,320,240,{"Uninstall game?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                             showLoading(target, {"Uninstalling...", ng});
@@ -2910,7 +2956,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     for (auto e : items)
                         if (!is3ds && !manageItemInstalled(slug, *e)) notInstalled++;
                     // action dialog: what's offered follows what's selected
-                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_BACK } act = A_BACK;
+                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_SCREEN, A_BACK } act = A_BACK;
                     if (!is3ds && notInstalled == M) {
                         int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
                                        {"Install selected","Delete ROMs","Back"}).handle();
@@ -2924,12 +2970,42 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
                                        {"Uninstall selected","Back"}).handle();
                         act = (c==0) ? A_UNINSTALL : A_BACK;
+                    } else if (slug == ROMM_SLUG_GBA) {
+                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
+                                       {"Uninstall","Change art","Screen","Back"}).handle();
+                        act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : (c==2) ? A_SCREEN : A_BACK;
                     } else {
                         int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
                                        {"Uninstall selected","Change art selected","Back"}).handle();
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
                     }
                     if (act == A_BACK) break;
+                    if (act == A_SCREEN) {
+                        // re-bake every selected inject with the Settings preset
+                        int okCount = 0;
+                        std::vector<std::string> failed;
+                        CoverCachePause coverPause;
+                        for (int i = 0; i < M; i++) {
+                            MenuSelection* it = items[i];
+                            if (!it->installed) continue;
+                            showLoading(target, {"Screen filter "+std::to_string(i+1)+"/"+std::to_string(M), it->title});
+                            std::string base = it->path.filename().generic_string();
+                            if (applyGbaScreenItem(target, config, base, it->title, it->coverPath,
+                                                   it->path.generic_string(), false) == 1) okCount++;
+                            else failed.push_back(it->title);
+                        }
+                        std::vector<std::string> msg;
+                        msg.push_back("Screen filter applied to "+std::to_string(okCount)+" of "+std::to_string(M));
+                        if (!failed.empty()) {
+                            msg.push_back("Failed:");
+                            int shown = 0;
+                            for (auto& f : failed) { if (shown++ >= 3) break; msg.push_back(f); }
+                        }
+                        Dialog(target,0,0,320,240, msg, {"OK"}).handle();
+                        while (this->queue.size() > 0) this->queue.pop();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount,slug,target);
+                    }
                     if (act == A_INSTALL) {
                         if (!ensureCtrBuilder(target)) break;
                         std::vector<MenuSelection*> todo;
