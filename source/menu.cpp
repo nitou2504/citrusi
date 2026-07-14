@@ -2468,6 +2468,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
     void Menu::action() {
         if (this->entries.size()==0) return;
+        // A on a MARKED row acts on the whole selection (same as START);
+        // A on an unmarked row still manages/installs just that one
+        MenuSelection* sel = *this->selection;
+        if (sel->selected && this->selectedCount() > 0 && this->startBatch()) return;
         this->queue.push(MenuSelection(*this->selection));
     }
     // Y: toggle the batch mark on the current row. Only the installable
