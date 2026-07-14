@@ -1672,11 +1672,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 };
                 // DS/GBA sizes include the rom files on the card — the
                 // forwarder/inject titles alone say nothing about the space used
+                row("Nintendo 3DS", s.appCount, s.appBytes);
                 row("Nintendo DS", s.dsCount(), s.dsBytes());
                 row("Game Boy Advance", s.gbaCount, s.gbaTotalBytes());
-                row("Nintendo 3DS", s.appCount, s.appBytes);
                 if (s.extraCount > 0) row("Updates and DLC", s.extraCount, s.extraBytes);
-                if (s.ciaCount > 0) row("Installer files (.cia)", s.ciaCount, s.ciaBytes);
+                // plain installer files aren't the user's problem; only the
+                // duplicates of already-installed games are reclaimable
+                if (s.ciaDoneCount > 0) row("Duplicates - can be freed", s.ciaDoneCount, s.ciaDoneBytes);
                 y += 4;
                 y = cardDivider(y) + 8;
                 drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
