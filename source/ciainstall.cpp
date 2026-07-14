@@ -186,27 +186,35 @@ bool installCiaFromFile(const std::string& path, std::string& err, bool force,
     (void)force;   // an installed tid always takes the overwrite path (keeps the save)
 
     bool overwrite = amTitleExists(media, tid);
+    // PRE-FLIGHT orphan cleanup: an aborted import can leave the tid's title
+    // dir on SD (00000000.ctx import context) that makes AM refuse every
+    // future install. Deleting it is only safe NOW, before any
+    // AM_StartCiaInstall of this call — doing it right after a failed
+    // attempt (the old order) deleted a file AM still had open and wedged
+    // the fs sysmodule: whole-console freeze, Rosalina included.
+    if (!overwrite && media == MEDIATYPE_SD && removeOrphanTitleDir(tid))
+        cilog.warn("pre-flight: removed orphan import dir");
     int rc = installAttempt(f, sz, media, overwrite, err, progress);
     if (rc == 2 && tid) {
-        // stale title/ticket/pending import in the AM db: clear all three and
-        // stream once more (fresh install — the save data is already gone or
-        // was never there if we land here on a non-overwrite path)
+        // stale title/ticket/pending import in the AM db: clear them via AM
+        // ONLY (never the filesystem while AM may hold import handles) and
+        // stream once more
         Result dt = AM_DeleteTitle(media, tid);
         Result dk = AM_DeleteTicket(tid);
         Result dp = AM_DeletePendingTitle(media, tid);
-        char lb[128];
-        snprintf(lb, sizeof(lb), "already-exists cleanup tid=%016llX delTitle=%08lX delTicket=%08lX delPending=%08lX",
-                 (unsigned long long)tid, (unsigned long)dt, (unsigned long)dk, (unsigned long)dp);
+        Result dtmp = AM_DeleteAllTemporaryTitles();
+        char lb[160];
+        snprintf(lb, sizeof(lb), "already-exists cleanup tid=%016llX delTitle=%08lX delTicket=%08lX delPending=%08lX delTmp=%08lX",
+                 (unsigned long long)tid, (unsigned long)dt, (unsigned long)dk,
+                 (unsigned long)dp, (unsigned long)dtmp);
         cilog.warn(lb);
         rc = installAttempt(f, sz, media, false, err, progress);
         if (rc == 0) cilog.info("retry after cleanup: installed ok");
-        // db-level cleanup didn't help: if the title is genuinely not
-        // installed, the blocker is an orphan import dir on SD — remove it
-        // (GodMode9-style) and stream one last time
-        if (rc == 2 && media == MEDIATYPE_SD && !amTitleExists(media, tid) &&
-            removeOrphanTitleDir(tid)) {
-            rc = installAttempt(f, sz, media, false, err, progress);
-            if (rc == 0) cilog.info("retry after orphan-dir removal: installed ok");
+        else if (rc == 2) {
+            // AM is holding a stale import context we must not touch while
+            // it's live; a reboot releases it and the pre-flight cleans up
+            err = "already exists - reboot the console, then retry";
+            cilog.error("still already-exists; needs a reboot (stale AM import context)");
         }
     }
     fclose(f);
