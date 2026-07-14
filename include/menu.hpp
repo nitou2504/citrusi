@@ -65,6 +65,7 @@ class MenuSelection {
         u64 sizeBytes=0;
         // Manage entries
         u64 tid=0;
+        u32 region=0;                // 3DS: SMDH region lockout (0 = unknown)
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;

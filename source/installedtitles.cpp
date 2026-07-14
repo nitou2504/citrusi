@@ -25,6 +25,7 @@ static Logger tlog("titles");
 
 #define SMDH_CACHE_FILE (FORWARDER_DIR + std::string("/smdhnames.json"))
 static std::map<std::string, std::string> gNames;
+static std::map<std::string, u32> gRegions;   // same key; SMDH region lockout
 static bool gNamesLoaded = false;
 static bool gNamesDirty = false;
 
@@ -37,12 +38,18 @@ static void loadNameCache() {
         nlohmann::json j; in >> j;
         for (auto it = j.begin(); it != j.end(); ++it)
         {
+            if (it.key() == "_regions" && it.value().is_object()) {
+                for (auto rit = it.value().begin(); rit != it.value().end(); ++rit)
+                    if (rit.value().is_number()) gRegions[rit.key()] = rit.value().get<u32>();
+                continue;
+            }
+            if (!it.value().is_string()) continue;
             std::string v = it.value().get<std::string>();
             // drop the fallbacks the first build cached (CTR-P-XXXX / raw tid)
             bool looksLikeCode = (v.size() == 10 && v[3] == '-' && v[5] == '-') || v.size() == 16;
             if (!looksLikeCode) gNames[it.key()] = v;
         }
-    } catch (...) { gNames.clear(); }
+    } catch (...) { gNames.clear(); gRegions.clear(); }
 }
 
 static void saveNameCache() {
@@ -50,6 +57,7 @@ static void saveNameCache() {
     gNamesDirty = false;
     nlohmann::json j;
     for (auto& kv : gNames) j[kv.first] = kv.second;
+    for (auto& kv : gRegions) j["_regions"][kv.first] = kv.second;
     std::ofstream o(SMDH_CACHE_FILE);
     o << j.dump();
 }
@@ -187,6 +195,13 @@ static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out) {
     return !out.empty();
 }
 
+// region lockout of the last SMDH readSmdhName parsed (0x2018, u32)
+static u32 lastSmdhRegion() {
+    u32 r = 0;
+    memcpy(&r, gSmdhBuf + 0x2018, 4);
+    return r;
+}
+
 static std::string fallbackName(u64 tid, FS_MediaType media) {
     char code[16] = {0};
     if (R_SUCCEEDED(AM_GetTitleProductCode(media, tid, code)) && code[0])
@@ -262,7 +277,8 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos, bool sortBySize
     // cached but whose icon was never saved still needs one (the icon cache was
     // added after the name cache, so every earlier title was missing art)
     auto needsRead = [](const InstalledTitle& t) {
-        return !gNames.count(nameKey(t.tid, t.version)) || !fileExists(iconPath(t.tid));
+        return !gNames.count(nameKey(t.tid, t.version)) || !fileExists(iconPath(t.tid)) ||
+               !gRegions.count(nameKey(t.tid, t.version));   // region cache added later
     };
     int need = 0;
     for (auto& t : out)
@@ -272,6 +288,8 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos, bool sortBySize
     for (auto& t : out) {
         std::string key = nameKey(t.tid, t.version);
         auto hit = gNames.find(key);
+        auto rhit = gRegions.find(key);
+        if (rhit != gRegions.end()) t.region = rhit->second;
         if (hit != gNames.end() && !needsRead(t)) { t.name = hit->second; continue; }
         if (progress) progress(done, need);
         done++;
@@ -279,6 +297,8 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos, bool sortBySize
         if (readSmdhName(t.tid, t.media, name)) {   // also saves the icon
             gNames[key] = name;         // only real names are cached: a product-code
             gNamesDirty = true;         // fallback must never become permanent
+            t.region = lastSmdhRegion();
+            gRegions[key] = t.region;
         } else if (hit != gNames.end()) {
             name = hit->second;         // icon read failed, keep the cached name
         } else {

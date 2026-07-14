@@ -1349,6 +1349,24 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     // small flat metadata chip with y as its TOP; returns x after the chip
     #define CHIP_H 16.0f
+    // short region tag from the SMDH region lockout (nullptr = unknown)
+    static const char* regionChipText(u32 r) {
+        if (!r) return nullptr;
+        if (r == 0x7FFFFFFF) return "World";
+        int n = 0;
+        for (u32 b = r & 0x7F; b; b >>= 1) n += (int)(b & 1);
+        if (n >= 3) return "World";
+        if ((r & 2) && (r & 4)) return "USA/EUR";
+        if (r & 2)  return "USA";
+        if (r & 4)  return "EUR";
+        if (r & 1)  return "JPN";
+        if (r & 8)  return "AUS";
+        if (r & 16) return "CHN";
+        if (r & 32) return "KOR";
+        if (r & 64) return "TWN";
+        return nullptr;
+    }
+
     static float drawChip(float x, float y, const std::string& label, u32 fg) {
         float fscale = getFontScale(0.42f);
         float w = measureText(label, fscale) + 14;
@@ -1494,17 +1512,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             u64 totalBytes = sel->sizeBytes + (hasExtras ? gExtras.bytes : 0);
             float cxp = drawChip(CTX, y, humanSize(totalBytes), COL_TEXT_DIM);
             if (m3ds) {
-                cxp = drawChip(cxp, y, "3DS", COL_TEXT_DIM);
+                // the tab already says 3DS; the slot goes to the region.
+                // extras collapse into one short chip — "update + DLC" plus
+                // the rest overflowed the row; the breakdown lives below.
+                if (const char* rg = regionChipText(sel->region))
+                    cxp = drawChip(cxp, y, rg, COL_TEXT_DIM);
                 cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
                 if (sel->rommId > 0) cxp = drawChip(cxp, y, "on RomM", COL_TEXT_DIM);
-                if (hasExtras) {
-                    char ex[40];
-                    snprintf(ex, sizeof(ex), "%s%s%s",
-                             gExtras.updates ? "update" : "",
-                             (gExtras.updates && gExtras.dlc) ? " + " : "",
-                             gExtras.dlc ? "DLC" : "");
-                    drawChip(cxp, y, ex, COL_ACCENT);
-                }
+                if (hasExtras) drawChip(cxp, y, "extras", COL_ACCENT);
             } else {
                 if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
@@ -2183,6 +2198,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->action = ManageRom;
             e->platformSlug = ROMM_SLUG_3DS;
             e->tid = t.tid;
+            e->region = t.region;
             e->installed = true;
             e->protectedTitle = t.protectedTitle;
             e->sizeBytes = t.sizeBytes;   // installed size, not the server's file size

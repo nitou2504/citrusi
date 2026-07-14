@@ -32,6 +32,7 @@ struct InstalledTitle {
     u64 sizeBytes = 0;
     u16 version = 0;
     std::string name;              // SMDH English short title (product code / hex tid as fallback)
+    u32 region = 0;                // SMDH region lockout (0 = unknown)
     TitleKind kind = TK_APP;
     bool protectedTitle = false;   // never list, never uninstall (this app, system titles)
 };
