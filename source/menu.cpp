@@ -1470,7 +1470,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     void Menu::drawBottom(Config* config) {
         if (this->type == MENU_ROMM) {
             if (this->entries.empty()) {
-                drawBottomFrame("B Back    START Quit");
+                drawBottomFrame("B Back");
                 drawText(160, 110, 0.55f, 0.5f, COL_SURFACE, COL_TEXT_DIM, "No games match.", C2D_AlignCenter);
                 return;
             }
@@ -1532,18 +1532,21 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     drawArrow(CARD_X + CARD_W - 12, BAR_Y - 12, 0.56f, 7, 7, COL_ACCENT, true);
             }
             int nsel = this->selectedCount();
-            std::string hint = "A Install   Y/R Select   SEL Find   B Back";
+            // one bar, bottom only: verb (with the batch count when rows are
+            // marked), marks, find, back. START quits silently, as homebrew does.
+            std::string hint = (nsel > 0)
+                ? "A Install " + std::to_string(nsel) + "   Y/R Mark   B Back"
+                : std::string("A Install   Y/R Mark   SEL Find   B Back");
             if (maxScroll > 0) hint += "   X/L Scroll";
-            hint += nsel > 0 ? "   START Install " + std::to_string(nsel) : "   START Quit";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
             return;
         }
         if (this->type == MENU_MANAGE) {
             int nsel = this->selectedCount();
             std::string mhint = this->entries.empty()
-                ? std::string("A Manage    B Back    START Quit")
-                : ("A Manage   Y/R Select   SEL Find   B Back" +
-                   std::string(nsel > 0 ? "   START Batch " + std::to_string(nsel) : "   START Quit"));
+                ? std::string("B Back")
+                : (nsel > 0 ? "A Batch " + std::to_string(nsel) + "   Y/R Mark   B Back"
+                            : std::string("A Manage   Y/R Mark   SEL Find   B Back"));
             drawBottomFrame(mhint.c_str());
             if (this->entries.empty()) {
                 const char* empty = (this->platformSlug == ROMM_SLUG_3DS) ? "No installed 3DS titles."
@@ -1641,7 +1644,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
-            drawBottomFrame("A Change    B Back    START Quit");
+            drawBottomFrame("A Change    B Back");
             static const char* descs[] = {
                 "Give each install a random title ID. Useful for rom hacks that share a game code.",
                 "Ask for a custom HOME menu name on every install.",
@@ -1677,7 +1680,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         }
         if (this->type == MENU_LOCAL) {
             if (this->entries.empty()) {
-                drawBottomFrame(gLocalHidden ? "X Show installed    B Back" : "B Back    START Quit");
+                drawBottomFrame(gLocalHidden ? "X Show installed    B Back" : "B Back");
                 if (gLocalHidden && !gLocalShowInstalled) {
                     drawText(160, 88, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Nothing new to install.", C2D_AlignCenter);
                     drawWrapped(48, 112, 224, 14, 0.42f, COL_TEXT_DIM,
@@ -1720,15 +1723,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 : "Install every game listed that isn't installed yet.", 4);
             }
             std::string hint = (nSel > 0)
-                ? std::to_string(nSel) + " selected   START Install   B Back"
-                : std::string("A Install   Y Select   X ") +
+                ? "A Install " + std::to_string(nSel) + "   Y/R Mark   B Back"
+                : std::string("A Install   Y/R Mark   X ") +
                   (gLocalShowInstalled ? "Hide done" : "Show all") + "   B Back";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
                      hint.c_str(), C2D_AlignCenter);
             return;
         }
         // main menu / systems / SD browser
-        drawBottomFrame("A Select    B Back    START Quit");
+        drawBottomFrame("A Select    B Back");
         if (this->type == MENU_MAIN) {
             drawText(160, 70, 0.5f, 0.9f, COL_SURFACE, COL_TEXT, "romm3ds", C2D_AlignCenter);
             drawText(160, 96, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, VERSION, C2D_AlignCenter);
@@ -2124,7 +2127,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         menu->crossSystem=cross;
         std::string scope = cross ? std::string("All systems") : std::string(systemName(slug));
         if (filter.empty())
-            menu->heading=scope+" - SELECT to search";
+            menu->heading=scope;   // search hint lives in the bottom bar only
         else
             menu->heading="\""+filter+"\" - "+std::to_string(entries.size())+" found";
         rlog.info(" buildRommMenu: " + std::to_string(entries.size()) + " entries (slug=" + slug + " cross=" + (cross?"1":"0") + ")");
@@ -2955,12 +2958,30 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (items.empty()) break;
                     int M = (int)items.size();
                     u64 total = 0; for (auto e : items) total += e->sizeBytes;
-                    if (Dialog(target,0,0,320,240,
-                               {"Install " + std::to_string(M) + " games?", "Total download: " + humanSize(total)},
-                               {gLang.getString("menu_yes"), gLang.getString("menu_no")}).handle() != 0)
-                        break;
-                    bool anyCtr = false;
-                    for (auto e : items) if (e->platformSlug != ROMM_SLUG_3DS) { anyCtr = true; break; }
+                    bool anyGba = false, anyCtr = false;
+                    for (auto e : items) {
+                        if (e->platformSlug == ROMM_SLUG_GBA) anyGba = true;
+                        if (e->platformSlug != ROMM_SLUG_3DS) anyCtr = true;
+                    }
+                    // same customization depth as a single install (menu IS the confirm)
+                    bool pickArtAll = false;
+                    int batchScreen = -1;
+                    std::vector<MenuOpt> bopts = {
+                        {"Install " + std::to_string(M), "Auto art, saved/default filters. The usual choice."}};
+                    if (anyGba) {
+                        bopts.push_back({"Install + choose art", "Art picker for each GBA game first, then everything installs unattended."});
+                        bopts.push_back({"Install + screen filter", "Pick ONE preset, baked into every GBA install in this batch."});
+                        bopts.push_back({"Install + art + filter", "Art picker per game, one preset for all."});
+                    }
+                    int bc = actionMenu(target, "Batch install",
+                                        std::to_string(M) + " games - " + humanSize(total) + " to download",
+                                        bopts);
+                    if (bc < 0) break;
+                    pickArtAll = (bc == 1 || bc == 3);
+                    if (bc == 2 || bc == 3) {
+                        batchScreen = pickGbaScreenPreset(target, config, std::to_string(M) + " games");
+                        if (batchScreen < 0) break;
+                    }
                     if (anyCtr && !ensureCtrBuilder(target)) break;   // shared CIA shell template
                     // PHASE 1 (interactive): resolve GBA art up front — correcting a
                     // bad name is cheapest before the long downloads. 3DS/NDS need
@@ -2972,7 +2993,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (items[i]->platformSlug != ROMM_SLUG_GBA) continue;
                         showLoading(target, {"Art " + std::to_string(i+1) + "/" + std::to_string(M), items[i]->title});
                         resolveGbaArtInteractive(target, config, items[i]->fsName, items[i]->title,
-                                                 items[i]->coverPath, artEntries[i], arts[i], false);
+                                                 items[i]->coverPath, artEntries[i], arts[i], pickArtAll);
                     }
                     // PHASE 2 (unattended): download -> extract -> install/inject/build
                     // for each item. B cancels the current item and stops the rest;
@@ -2993,7 +3014,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string dest = rommDirFor(it->platformSlug) + it->fsName;
                         bool onSD = fileExists(is3ds ? dest : romPath);
                         InstallOutcome io = installOneRomm(target, config, *it, !onSD,
-                                                           artEntries[i], arts[i], false, false);
+                                                           artEntries[i], arts[i], false, false,
+                                                           batchScreen);
                         if (io.ok) {
                             okCount++;
                             okBytes += it->sizeBytes;
