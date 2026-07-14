@@ -215,7 +215,8 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
                                      const std::string& fsName, const std::string& title,
                                      const std::string& coverPath,
                                      ArtEntry& entryOut, ArtPieces& piecesOut,
-                                     bool forcePicker = false) {
+                                     bool forcePicker = false,
+                                     bool pickIcon = true, bool pickBanner = true) {
     // own the network while art resolves: the cover prefetch worker shares
     // httpc and the SD card with us
     CoverCachePause coverPause;
@@ -237,7 +238,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
         entryOut = ae;
         bool iCh = false, bCh = false;
         artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
-                     entryOut, piecesOut, true, true, &iCh, &bCh);
+                     entryOut, piecesOut, pickIcon, pickBanner, &iCh, &bCh);
         // pages the user skipped keep their stored art
         if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty()) {
             ArtPieces re;
@@ -261,7 +262,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
                   [&](const std::string& msg) { showLoading(target, {msg, title}); });
     if (forcePicker) {
         artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
-                     entryOut, piecesOut, true, true);
+                     entryOut, piecesOut, pickIcon, pickBanner);
     }
     bool iconMiss = piecesOut.icon48.empty();
     bool bannerMiss = piecesOut.bannerTex.empty();
@@ -641,9 +642,20 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
                             const std::string& coverPath, const std::string& romPath,
                             bool interactive) {
     if (!ensureCtrBuilder(target)) return -1;
+    // ask WHICH art up front — skipping an unwanted page with a well-timed B
+    // was the only way before, and easy to fumble
+    bool pIcon = true, pBanner = true;
+    if (interactive) {
+        int w = Dialog(target,0,0,320,240,{"Change which art?",title},
+                       {"Icon","Banner","Both","Back"}).handle();
+        if (w < 0 || w == 3) return 0;
+        pIcon   = (w == 0 || w == 2);
+        pBanner = (w == 1 || w == 2);
+    }
     ArtEntry ae;
     ArtPieces pieces;
-    resolveGbaArtInteractive(target, config, romBase, title, coverPath, ae, pieces, true);
+    resolveGbaArtInteractive(target, config, romBase, title, coverPath, ae, pieces, true,
+                             pIcon, pBanner);
     if (pieces.icon48.empty() && pieces.bannerTex.empty()) return 0;   // picker cancelled
     u64 gtid = gCtr.allocateGbaTID(romBase);
     if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
@@ -2997,8 +3009,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Uninstalled.",ng},{"OK"}).handle();
                             }
                         } else {
-                            int c = Dialog(target,0,0,320,240,{ng,"Not installed."},{"Install","Delete ROM","Back"}).handle();
-                            if (c==0) {
+                            int c = Dialog(target,0,0,320,240,{ng,"Not installed."},{"Install","+ Art","Delete ROM","Back"}).handle();
+                            if (c==0 || c==1) {
+                                bool pickArt = (c==1);   // "+ Art": picker first, like the library flow
                                 if (!ensureCtrBuilder(target)) break;
                                 std::string romBase = entry.path.filename().generic_string();
                                 u64 gtid = gCtr.allocateGbaTID(romBase);
@@ -3006,7 +3019,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 ArtEntry gbaArtEntry;
                                 ArtPieces gbaArt;
                                 resolveGbaArtInteractive(target, config, romBase, ng,
-                                                         entry.coverPath, gbaArtEntry, gbaArt);
+                                                         entry.coverPath, gbaArtEntry, gbaArt, pickArt);
                                 Dialog(target,0,0,320,240,{"Installing...",ng},{},0).handle();
                                 u64 lastG = 0;
                                 int mode = gbaScreenFor(gbaArtEntry, config);
@@ -3028,7 +3041,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     Dialog(target,0,0,320,240,{"Installed!",ng},{"OK"}).handle();
                                 } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message},{"OK"}).handle();
                                 delete gr;
-                            } else if (c==1) {
+                            } else if (c==2) {
                                 if (Dialog(target,0,0,320,240,{"Delete ROM file?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                                 showLoading(target, {"Deleting..."});
                                 std::error_code ec;
