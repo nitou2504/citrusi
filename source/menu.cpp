@@ -1529,17 +1529,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 return;
             }
             // installed: the baked banner, big and centered — exactly what
-            // HOME shows — with the size as the focus line underneath
-            if (gBannerPrev.tex && gBannerPrevTid && gBannerPrevTid == manageIconTid(sel)) {
+            // HOME shows. Size already lives in the chip row; no repeat here.
+            if (gBannerPrev.tex && gBannerPrevTid && gBannerPrevTid == manageIconTid(sel))
                 C2D_DrawImageAt(gBannerPrev, CARD_X + (CARD_W - 192) / 2, y,
                                 0.57f, NULL, 0.75f, 0.75f);
-                y += 96 + 8;
-            } else {
-                y += 4;
-            }
-            char szl[48];
-            snprintf(szl, sizeof(szl), "%s on SD", humanSize(sel->sizeBytes).c_str());
-            drawText(160, y + 8, 0.56f, 0.5f, 0, COL_TEXT, szl, C2D_AlignCenter);
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
