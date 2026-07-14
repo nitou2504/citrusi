@@ -1170,7 +1170,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     C2D_DrawImageAt(gTitleIcon, cx - d/2, MENU_HEADING_HEIGHT + 24, 0.57f, NULL, 2.0f, 2.0f);
                     iy = py + ph + 8;
                 } else {
-                    const char* ph = (gCoverFailedId == sel->rommId || (sel->coverPath.empty() && sel->coverSmallPath.empty())) ? "no art" : "...";
+                    const char* ph;
+                    u64 mtid = (this->type == MENU_MANAGE) ? manageIconTid(sel) : 0;
+                    if (mtid) {
+                        // icon rows: "..." until the debounced load actually
+                        // ran and came back empty (matches the other systems)
+                        ph = (gTitleIconTid == mtid && !gTitleIcon.tex) ? "no art" : "...";
+                    } else {
+                        ph = (gCoverFailedId == sel->rommId ||
+                              (sel->coverPath.empty() && sel->coverSmallPath.empty())) ? "no art" : "...";
+                    }
                     drawText(cx, MENU_HEADING_HEIGHT + 72, 0.56f, 0.45f, COL_SURFACE, COL_TEXT_DIM, ph, C2D_AlignCenter);
                 }
                 // condensed info under the art
