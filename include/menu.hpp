@@ -66,6 +66,7 @@ class MenuSelection {
         // Manage entries
         u64 tid=0;
         u32 region=0;                // 3DS: SMDH region lockout (0 = unknown)
+        int gbaScreen=-1;            // GBA: preset baked into the install (-1 unknown)
         u64 ytid=0;
         u64 rtid=0;
         bool installed=false;
@@ -120,6 +121,7 @@ class Menu {
         // batch multiselect: Install-from-SD rows via toggleMark (Y), RomM
         // library + Manage rows via toggleSelect (Y). START queues the batch.
         void toggleSelect();     // Y: mark/unmark the current row (skips rows that can't batch)
+        void toggleSelectAll();  // R: mark every selectable row / clear all marks
         int  selectedCount();    // how many rows are [x]-selected
         void clearSelection();   // drop all marks (menu rebuild / after a batch)
         // START: queue a batch for the marked rows. Returns false when there

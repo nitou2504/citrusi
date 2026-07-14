@@ -1532,7 +1532,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     drawArrow(CARD_X + CARD_W - 12, BAR_Y - 12, 0.56f, 7, 7, COL_ACCENT, true);
             }
             int nsel = this->selectedCount();
-            std::string hint = "A Install   Y Select   SEL Find   B Back";
+            std::string hint = "A Install   Y/R Select   SEL Find   B Back";
             if (maxScroll > 0) hint += "   X/L Scroll";
             hint += nsel > 0 ? "   START Install " + std::to_string(nsel) : "   START Quit";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
@@ -1542,7 +1542,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             int nsel = this->selectedCount();
             std::string mhint = this->entries.empty()
                 ? std::string("A Manage    B Back    START Quit")
-                : ("A Manage   Y Select   SEL Find   B Back" +
+                : ("A Manage   Y/R Select   SEL Find   B Back" +
                    std::string(nsel > 0 ? "   START Batch " + std::to_string(nsel) : "   START Quit"));
             drawBottomFrame(mhint.c_str());
             if (this->entries.empty()) {
@@ -1590,6 +1590,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
                 if (sel->rommId > 0) cxp = drawChip(cxp, y, "on RomM", COL_TEXT_DIM);
                 if (hasExtras) drawChip(cxp, y, "extras", COL_ACCENT);
+            } else if (sel->platformSlug == ROMM_SLUG_GBA) {
+                if (sel->installed) {
+                    cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
+                    // the screen preset baked into THIS game's install
+                    static const char* scr[GBA_SCREEN_COUNT] =
+                        {"AGS-101", "Original", "Raw", "Bright", "Night"};
+                    if (sel->gbaScreen >= 0)
+                        drawChip(cxp, y, scr[sel->gbaScreen % GBA_SCREEN_COUNT], COL_TEXT_DIM);
+                } else {
+                    drawChip(cxp, y, "not installed", COL_TEXT_DIM);
+                }
             } else {
                 if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
@@ -2361,7 +2372,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             bool inst = installed3dsHasTitle(gtid);
             MenuSelection* e = new MenuSelection();
             std::string clean = p.stem().generic_string();
-            bool weakArt = inst && artStoreGet(fname).weak;   // ⚠: fallback art in use
+            ArtEntry gae = artStoreGet(fname);
+            bool weakArt = inst && gae.weak;   // ⚠: fallback art in use
+            e->gbaScreen = gae.screen;         // filter chip in the details card
             e->display = (inst ? "* " : "  ") + std::string(weakArt ? "[!] " : "") + utf8FoldLatin(clean);
             e->title = utf8FoldLatin(clean);
             e->action = ManageRom;
@@ -2488,6 +2501,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         int n = 0;
         for (auto e : this->entries) if (e->selected) n++;
         return n;
+    }
+    // R: mark every selectable row; if anything is marked already, clear all
+    void Menu::toggleSelectAll() {
+        if (this->entries.empty()) return;
+        if (this->selectedCount() > 0) { this->clearSelection(); return; }
+        for (auto e : this->entries) {
+            if (e->action != RommInstall && e->action != ManageRom &&
+                e->action != LocalInstall) continue;
+            if (e->action == RommInstall && e->platformSlug == ROMM_SLUG_3DS && !e->installable) continue;
+            e->selected = true;
+        }
     }
     void Menu::clearSelection() {
         for (auto e : this->entries) e->selected = false;
