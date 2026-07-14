@@ -58,6 +58,34 @@ static Logger rlog("romm");
 #define SETTING_SGDB_KEY 9
 #define SETTING_GBA_SCREEN 20   // outside the server-row range (10-13)
 #define SETTING_MANAGE_ART 21
+#define SETTING_ART_CACHE 22
+
+// downloaded covers + generated previews/icons — safe to wipe, all of it
+// re-downloads or rebuilds on demand. art.json (the user's picks) is NOT here.
+static const char* kArtCacheDirs[] = {"/cache/", "/banners-cache/", "/titleicons/"};
+static void artCacheStats(int& files, u64& bytes) {
+    files = 0; bytes = 0;
+    std::error_code ec;
+    for (const char* d : kArtCacheDirs) {
+        for (auto& de : std::filesystem::directory_iterator(FORWARDER_DIR + d, ec)) {
+            if (!de.is_regular_file(ec)) continue;
+            files++;
+            bytes += de.file_size(ec);
+        }
+    }
+}
+static int artCacheClear() {
+    int gone = 0;
+    std::error_code ec;
+    for (const char* d : kArtCacheDirs) {
+        std::vector<std::filesystem::path> victims;
+        for (auto& de : std::filesystem::directory_iterator(FORWARDER_DIR + d, ec))
+            if (de.is_regular_file(ec)) victims.push_back(de.path());
+        for (auto& p : victims)
+            if (std::filesystem::remove(p, ec)) gone++;
+    }
+    return gone;
+}
 
 static CtrBuilder gCtr;
 static bool gCtrReady = false;
@@ -1467,7 +1495,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         ensureBatterySprites();   // texture upload — must run OUTSIDE the C3D frame
         if ((this->type != MENU_ROMM && this->type != MENU_MANAGE) || this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
-        if (sel->action != RommInstall && sel->action != ManageRom) return;
+        if (sel->action != RommInstall && sel->action != ManageRom &&
+            sel->action != ManageZip) return;
         // Manage rows showing the installed title's own art: HOME icon on the
         // rail + baked-banner preview in the details card. Debounced like
         // covers — an SD read on every step is what made lists crawl.
@@ -1725,6 +1754,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             "Press A to delete just those files - the games stay installed.", 6);
                 return;
             }
+            if (sel->action == ManageZip) {   // interrupted download: zip never extracted
+                float zy = CARD_Y + PAD;
+                zy = drawWrapped(CTX, zy, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
+                zy += 5;
+                float zx = drawChip(CTX, zy, humanSize(sel->sizeBytes), COL_TEXT_DIM);
+                drawChip(zx, zy, "not extracted", COL_ACCENT);
+                zy += 21;
+                zy = cardDivider(zy) + 5;
+                drawWrapped(CTX, zy, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255),
+                            "Downloaded archive whose ROM was never extracted - the install "
+                            "was interrupted. Press A to finish it (extract + install) or to "
+                            "delete the file.", 5);
+                return;
+            }
             bool m3ds = (sel->platformSlug == ROMM_SLUG_3DS);
             float y = CARD_Y + PAD;
             y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
@@ -1828,6 +1871,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/romm3ds/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
                 else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. Press A to pick from the presets, each explained there. Per game: Manage -> game -> Screen filter.";
                 else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage: each game's own HOME icon, or its RomM cover. Press A to choose.";
+                else if (id == SETTING_ART_CACHE) d = "Downloaded covers, banner previews and title icons. Safe to clear - everything re-downloads or rebuilds on demand. The art you picked per game (art.json) is kept.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -2185,6 +2229,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
         add(SETTING_GBA_SCREEN,   std::string("GBA screen: ") + gbaScreenNames[config->gbaScreen % GBA_SCREEN_COUNT]);
         add(SETTING_MANAGE_ART,   std::string("Manage art: ") + (config->manageIcons ? "title icons" : "RomM covers"));
+        {
+            int cf; u64 cb;
+            artCacheStats(cf, cb);
+            add(SETTING_ART_CACHE, std::string("Art cache: ") +
+                (cf ? std::to_string(cf) + " files - " + humanSize(cb) : "empty"));
+        }
         if (config->templates.size() > 1)
             add(SETTING_TEMPLATE, "Template: " + config->templates.at(config->currentTemplate));
         gRomm.loadConfig();
@@ -2427,6 +2477,38 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         return menu;
     }
 
+    // interrupted downloads: .zip archives in a rom dir whose ROM never got
+    // extracted (B during extract / crash). Listed in Manage so they can be
+    // finished (extract + install) or deleted — invisible everywhere else.
+    static void appendZipRows(std::vector<MenuSelection*>& entries, const std::string& dir,
+                              const std::string& slug,
+                              const std::map<std::string, const RommRom*>& libByName) {
+        std::error_code ec;
+        std::vector<std::filesystem::path> zips;
+        for (auto& de : std::filesystem::directory_iterator(dir, ec))
+            if (toLowerCase(de.path().extension().generic_string()) == ".zip")
+                zips.push_back(de.path());
+        std::sort(zips.begin(), zips.end());
+        for (auto& p : zips) {
+            MenuSelection* e = new MenuSelection();
+            std::string stem = p.stem().generic_string();
+            e->action = ManageZip;
+            e->platformSlug = slug;
+            e->path = p;
+            e->title = utf8FoldLatin(stem);
+            e->display = "  [zip] " + utf8FoldLatin(stem);
+            e->sizeBytes = std::filesystem::file_size(p, ec);
+            auto hit = libByName.find(toLowerCase(p.filename().generic_string()));
+            if (hit != libByName.end()) {
+                e->year = hit->second->year;
+                e->coverPath = hit->second->coverPath;
+                e->coverSmallPath = hit->second->coverSmallPath;
+                e->rommId = hit->second->id;
+            }
+            entries.push_back(e);
+        }
+    }
+
     Menu* generateManageMenu(Menu* prev, unsigned long dsiwareCount, std::string slug,
                              C3D_RenderTarget* target) {
         (void)dsiwareCount;
@@ -2511,10 +2593,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             ensurePlatformLoaded(ROMM_SLUG_GBA);
         installed3dsRefresh();
         // filename -> lib entry (covers/metadata), keyed by the extracted name
+        // (and the server fsName, so un-extracted .zip rows match too)
         std::map<std::string, const RommRom*> libByName;
-        for (auto& cr : gCache[ROMM_SLUG_GBA])
+        for (auto& cr : gCache[ROMM_SLUG_GBA]) {
             libByName.emplace(toLowerCase(std::filesystem::path(
                 rommLocalPath(cr.fsName, cr.platformSlug)).filename().generic_string()), &cr);
+            libByName.emplace(toLowerCase(cr.fsName), &cr);
+        }
         std::error_code ec;
         std::vector<std::filesystem::path> paths;
         for (auto& de : std::filesystem::directory_iterator(ROMM_GBA_DIR, ec)) {
@@ -2550,6 +2635,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             entries.push_back(e);
         }
+        appendZipRows(entries, ROMM_GBA_DIR, ROMM_SLUG_GBA, libByName);
       } else {
         // NDS: roms on SD + their forwarder state
         if (!gCacheOk[ROMM_SLUG_NDS] && gRomm.loadConfig() && gRomm.hasConfig())
@@ -2592,6 +2678,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             entries.push_back(e);
         }
+        appendZipRows(entries, ROMM_NDS_DIR, ROMM_SLUG_NDS, libByName);
       }
         Menu* menu = new Menu(entries);
         menu->currentDirectory=std::filesystem::path("/");
@@ -3007,6 +3094,31 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 {"RomM covers", "Box art from the server, for games matched in the library."}},
                                 config->manageIcons ? 0 : 1);
                             if (c >= 0) config->manageIcons = (c == 0);
+                            break;
+                        }
+                        case SETTING_ART_CACHE: {
+                            int cf; u64 cb;
+                            artCacheStats(cf, cb);
+                            if (cf == 0) {
+                                Dialog(target,0,0,320,240,{"Art cache is empty."},{"OK"}).handle();
+                                break;
+                            }
+                            if (Dialog(target,0,0,320,240,
+                                       {"Clear art cache?",
+                                        std::to_string(cf) + " files - " + humanSize(cb),
+                                        "Covers re-download as you browse;","previews and icons rebuild.",
+                                        "Your picked art (art.json) is kept."},
+                                       {"Clear","Back"},1).handle()!=0) break;
+                            showLoading(target, {"Clearing art cache..."});
+                            int gone;
+                            {
+                                CoverCachePause pause;   // the worker owns httpc + the SD
+                                gone = artCacheClear();
+                            }
+                            coverCacheClearMisses();     // missing covers retry next browse
+                            installedTitlesInvalidate(); // drop the RAM icon cache too
+                            Dialog(target,0,0,320,240,{"Cleared " + std::to_string(gone) + " files",
+                                   humanSize(cb) + " freed"},{"OK"}).handle();
                             break;
                         }
                         case SETTING_SGDB_KEY: {
@@ -3526,6 +3638,65 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     Dialog(target,0,0,320,240,{"Deleted " + std::to_string(okCount) + " files",
                                                humanSize(freed) + " reclaimed"},{"OK"}).handle();
                     while (this->queue.size() > 0) this->queue.pop();
+                    showLoading(target, {"Refreshing..."});
+                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
+                }
+                case ManageZip: {
+                    // interrupted download: finish it (extract + install) or drop it
+                    bool zGba = (entry.platformSlug == ROMM_SLUG_GBA);
+                    int c = actionMenu(target, entry.title,
+                                       "Archive - not extracted (" + humanSize(entry.sizeBytes) + ")", {
+                        {"Extract + install", zGba ? "Unpack the ROM, then bake and install the inject."
+                                                   : "Unpack the ROM, then build and install its forwarder."},
+                        {"Delete archive", "Remove the .zip from the SD card."}});
+                    if (c < 0) break;
+                    if (c == 1) {
+                        if (Dialog(target,0,0,320,240,{"Delete archive?",entry.title,humanSize(entry.sizeBytes)},
+                                   {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        std::error_code ec;
+                        std::filesystem::remove(entry.path, ec);
+                        while (this->queue.size() > 0) this->queue.pop();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
+                    }
+                    std::string zdir = rommDirFor(entry.platformSlug);
+                    std::string wantName = entry.path.stem().generic_string() + (zGba ? ".gba" : ".nds");
+                    Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",entry.title},{},0).handle();
+                    std::string extracted, zerr;
+                    u64 lastZ = 0;
+                    bool zok = extractFirstRom(entry.path.generic_string(), zdir,
+                                               zipRomExtsFor(entry.platformSlug), extracted, zerr,
+                        [&](unsigned long long done, unsigned long long total) -> bool {
+                            hidScanInput();
+                            if (hidKeysDown() & KEY_B) return false;
+                            if (done - lastZ < (2<<20) && done != total) return true;
+                            lastZ = done;
+                            int pct = (total>0)?(int)(done*100/total):0;
+                            Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",entry.title,std::to_string(pct)+"%"},{},0).handle();
+                            return true;
+                        }, wantName);
+                    if (!zok) {
+                        // the archive stays: a bad/cancelled extract must be retryable
+                        Dialog(target,0,0,320,240,{(zerr=="cancelled")?"Extract cancelled":"Extract failed",zerr},{"OK"}).handle();
+                        break;
+                    }
+                    { std::error_code ec; std::filesystem::remove(entry.path, ec); }   // zip -> rom, single copy
+                    bool ok = false;
+                    if (ensureCtrBuilder(target)) {
+                        if (zGba) {
+                            ArtEntry ae; ArtPieces pieces;
+                            resolveGbaArtInteractive(target, config, wantName, entry.title,
+                                                     entry.coverPath, ae, pieces, false);
+                            ok = installGbaInject(target, config, extracted, entry.title,
+                                                  wantName, ae, pieces);
+                        } else {
+                            ok = buildForwarderFor(target, config, extracted, entry.title, entry.coverPath);
+                        }
+                    }
+                    if (ok) Dialog(target,0,0,320,240,{"Installed!",entry.title},{"OK"}).handle();
+                    while (this->queue.size() > 0) this->queue.pop();
+                    gFwdReady = false; invalidateManagedRoms(); invalidateYanbfCache();
+                    installedTitlesInvalidate();
                     showLoading(target, {"Refreshing..."});
                     return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                 }

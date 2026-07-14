@@ -2,6 +2,20 @@
 
 All notable changes to romm3ds. Dates are the working days the changes landed.
 
+## [Unreleased]
+
+### Added (2026-07-14)
+- **Interrupted downloads surface in Manage**: a `.zip` in sd:/roms/nds|gba
+  whose ROM never got extracted (B during extract, crash) was invisible
+  everywhere — Manage DS/GBA now lists it as a "[zip]" row with *Extract +
+  install* (finishes the original install, archive deleted after) and
+  *Delete archive*. Failed/cancelled extracts keep the zip for retry.
+- **Art cache row in Settings**: shows the live count/size of the cover
+  cache + banner previews + title icons (sd:/3ds/forwarder/cache,
+  banners-cache, titleicons) and clears them on A after a confirm.
+  Everything re-downloads/rebuilds on demand; per-game art picks
+  (art.json) are untouched.
+
 ## v1.0 — the GBA + art + UX release (2026-07-14)
 
 ### Added (2026-07-14, round 3)

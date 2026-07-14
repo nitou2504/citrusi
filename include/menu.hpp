@@ -29,7 +29,8 @@ enum MenuAction {
     LocalInstall,          // "Install from SD": install one local file (.cia/.nds/.gba)
     LocalInstallSelected,  // batch-install the Y-marked rows
     LocalInstallAll,       // batch-install every not-yet-installed row
-    CleanupCias            // Manage->3DS: delete .cia installers already installed
+    CleanupCias,           // Manage->3DS: delete .cia installers already installed
+    ManageZip              // Manage NDS/GBA: .zip whose ROM never got extracted
 };
 
 enum MenuType {
