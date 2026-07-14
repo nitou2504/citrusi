@@ -127,12 +127,16 @@ static void saveTitleIcon(u64 tid, const u8* smdh) {
 
 static bool readSmdhName(u64 tid, FS_MediaType media, std::string& out);
 
+// RAM cache (misses included): the Manage list re-asks on every selection
+// settle, and a per-ask SD stat/read is exactly the scroll hitch we killed.
+// Cleared by installedTitlesInvalidate(): a cached MISS from a moment when
+// the title wasn't installed (e.g. between uninstall and reinstall) would
+// otherwise blank that game's icon until the app restarts.
+static std::map<u64, std::string> gIconRam;
+
 std::string titleIconRGBA(u64 tid) {
-    // RAM cache (misses included): the Manage list re-asks on every selection
-    // settle, and a per-ask SD stat/read is exactly the scroll hitch we killed
-    static std::map<u64, std::string> ram;
-    auto it = ram.find(tid);
-    if (it != ram.end()) return it->second;
+    auto it = gIconRam.find(tid);
+    if (it != gIconRam.end()) return it->second;
     std::string p = iconPath(tid);
     if (!fileExists(p)) {
         // on demand: GBA injects / NDS forwarders aren't covered by the 3DS
@@ -141,8 +145,8 @@ std::string titleIconRGBA(u64 tid) {
         readSmdhName(tid, MEDIATYPE_SD, dummy);
     }
     std::string d = fileExists(p) ? readEntireFile(p) : std::string();
-    if (ram.size() > 256) ram.clear();   // ~9KB each; never grows past ~2.3MB
-    ram[tid] = d;
+    if (gIconRam.size() > 256) gIconRam.clear();   // ~9KB each; caps at ~2.3MB
+    gIconRam[tid] = d;
     return d;
 }
 
@@ -321,7 +325,7 @@ static StorageTally gTally;
 
 // after an install/uninstall the numbers moved. names stay valid: they are
 // keyed by tid|version, so a new/updated title simply misses the cache.
-void installedTitlesInvalidate() { gTallyOk = false; gSdEnumOk = false; }
+void installedTitlesInvalidate() { gTallyOk = false; gSdEnumOk = false; gIconRam.clear(); }
 bool storageTallyCached() { return gTallyOk; }
 
 std::vector<CiaFile> listCiaFiles() {
