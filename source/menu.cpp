@@ -55,6 +55,7 @@ static Logger rlog("romm");
 #define SETTING_ART_NOTIFY 8
 #define SETTING_SGDB_KEY 9
 #define SETTING_GBA_SCREEN 20   // outside the server-row range (10-13)
+#define SETTING_MANAGE_ART 21
 
 static CtrBuilder gCtr;
 static bool gCtrReady = false;
@@ -313,6 +314,13 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
 
 // build + install a GBA VC inject for an on-SD rom with pre-resolved art
 // (same allocate/build/progress/persist shape as the RomM GBA install path).
+// the screen preset a (re)bake of this game should use: the one already baked
+// into its install when known (art.json), else the Settings default
+static int gbaScreenFor(const ArtEntry& ae, Config* config) {
+    return (ae.screen >= 0) ? ae.screen % GBA_SCREEN_COUNT
+                            : config->gbaScreen % GBA_SCREEN_COUNT;
+}
+
 // *cancelled (optional) reports a B-cancel so batch flows can stop early;
 // quiet suppresses the per-item failure dialog (unattended batch phase).
 static bool installGbaInject(C3D_RenderTarget* target, Config* config,
@@ -329,8 +337,9 @@ static bool installGbaInject(C3D_RenderTarget* target, Config* config,
     }
     Dialog(target,0,0,320,240,{"Installing...",title},{},0).handle();
     u64 lastG = 0;
+    int mode = gbaScreenFor(ae, config);   // reinstalls keep the game's preset
     ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid, pieces.icon48, pieces.bannerTex,
-                                        config->gbaScreen,
+                                        mode,
         [&](u64 done, u64 total) -> bool {
             hidScanInput();
             if (hidKeysDown() & KEY_B) return false;
@@ -341,7 +350,7 @@ static bool installGbaInject(C3D_RenderTarget* target, Config* config,
             return true;
         });
     bool ok = gr->isSuccess();
-    if (ok) artStorePut(fsName, ae);
+    if (ok) { ArtEntry e2 = ae; e2.screen = mode; artStorePut(fsName, e2); }
     else {
         if (cancelled) *cancelled = (gr->message == "cancelled");
         if (!quiet)
@@ -489,9 +498,10 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
         }
         Dialog(target,0,0,320,240,{"Installing...",entry.title},{},0).handle();
         u64 lastG = 0;
+        int mode = gbaScreenFor(gbaArtEntry, config);
         ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid,
                                             gbaArt.icon48, gbaArt.bannerTex,
-                                            config->gbaScreen,
+                                            mode,
             [&](u64 done, u64 total) -> bool {
                 hidScanInput();
                 if (hidKeysDown() & KEY_B) return false;
@@ -502,8 +512,10 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
                 return true;
             });
         installed = gr->isSuccess();
-        if (installed)
-            artStorePut(entry.fsName, gbaArtEntry);
+        if (installed) {
+            ArtEntry e2 = gbaArtEntry; e2.screen = mode;
+            artStorePut(entry.fsName, e2);
+        }
         else {
             out.cancelled = (gr->message == "cancelled");
             if (interactive)
@@ -525,12 +537,13 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
 // interactive=true shows the per-item result dialog (single); batch passes
 // false and reports in its own summary. The picker + progress always show.
 // five-preset picker: vertical list with a plain-words explanation of the
-// highlighted preset underneath. Preselected on the Settings default;
-// returns the GBA_SCREEN_* index or -1 on B/cancel.
+// highlighted preset underneath. current = the preset baked into this game's
+// install (art.json; -1 unknown/mixed) — tagged and preselected when known,
+// else the Settings default. Returns the GBA_SCREEN_* index or -1 on B.
 static float drawWrapped(float x, float y, float maxW, float lineH, float scale,
                          u32 color, const std::string& text, int maxLines);
 static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
-                               const std::string& title) {
+                               const std::string& title, int current = -1) {
     static const char* names[GBA_SCREEN_COUNT] = {
         "AGS-101 colors", "Original dark filter", "Unfiltered",
         "Brighter gamma", "Night (warm)"};
@@ -541,7 +554,8 @@ static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
         "A gentler gamma correction - halfway between AGS-101 and unfiltered.",
         "AGS-101 colors plus a warm 3400K tint - easier on the eyes in the dark."};
     int def = config->gbaScreen % GBA_SCREEN_COUNT;
-    int sel = def;
+    if (current >= 0) current %= GBA_SCREEN_COUNT;
+    int sel = (current >= 0) ? current : def;
     while (aptMainLoop()) {
         hidScanInput();
         u32 kd = hidKeysDown();
@@ -558,7 +572,9 @@ static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
         for (int i = 0; i < GBA_SCREEN_COUNT; i++, y += 24) {
             bool hot = (i == sel);
             if (hot) C2D_DrawRectSolid(12, y, 0.4f, 296, 22, COL_ACCENT);
-            std::string label = std::string(names[i]) + (i == def ? "  (default)" : "");
+            std::string label = names[i];
+            if (i == current)  label += "  (current)";
+            else if (i == def) label += "  (default)";
             drawText(22, y + 11, 0.5f, 0.5f, 0,
                      hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, label.c_str(), 0);
         }
@@ -600,6 +616,12 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
             return true;
         });
     int rc = gr->isSuccess() ? 1 : -1;
+    if (rc == 1) {
+        ae.screen = screenMode % GBA_SCREEN_COUNT;   // remember per game
+        artStorePut(romBase, ae);
+    }
+    rlog.info("screen apply '" + romBase + "' mode=" + std::to_string(screenMode) +
+              " rc=" + std::to_string(rc) + (rc == 1 ? "" : " (" + gr->message + ")"));
     if (interactive) {
         if (rc == 1) Dialog(target,0,0,320,240,{"Screen filter applied!",title},{"OK"}).handle();
         else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Update failed",gr->message},{"OK"}).handle();
@@ -621,9 +643,10 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
     if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
     Dialog(target,0,0,320,240,{"Updating art...",title},{},0).handle();
     u64 lastG = 0;
+    int mode = gbaScreenFor(ae, config);   // art change keeps the game's preset
     ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid,
                                         pieces.icon48, pieces.bannerTex,
-                                        config->gbaScreen,
+                                        mode,
         [&](u64 done, u64 total) -> bool {
             hidScanInput();
             if (hidKeysDown() & KEY_B) return false;
@@ -635,6 +658,7 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
         });
     int rc;
     if (gr->isSuccess()) {
+        ae.screen = mode;
         artStorePut(romBase, ae);
         if (interactive) Dialog(target,0,0,320,240,{"Art updated!",title},{"OK"}).handle();
         rc = 1;
@@ -743,6 +767,21 @@ static int gCoverForId = -1;    // rommId currently in gCover
 static int gCoverFailedId = -1; // rommId that failed to load (don't retry)
 static int gCoverWantId = -1;
 static int gCoverDebounce = 0;
+// which installed title's own icon/banner represents a Manage row (0 = none).
+// NDS rows prefer our CTR forwarder, then YANBF (both SD titles with an
+// SMDH); a bare TWL forwarder has no SMDH to read.
+static u64 manageIconTid(const MenuSelection* s) {
+    if (s->platformSlug == ROMM_SLUG_3DS) return s->tid;
+    if (s->platformSlug == ROMM_SLUG_GBA) return s->installed ? s->tid : 0;
+    if (s->rtid) return s->rtid;
+    if (s->ytid) return s->ytid;
+    return 0;
+}
+// baked-banner preview slot (GBA injects write banners-cache/<tid>.raw)
+static C2D_Image gBannerPrev = {nullptr, nullptr};
+static u64 gBannerPrevTid = 0;   // tid the texture belongs to (0 = none)
+static u64 gBannerWantTid = 0;
+
 // frames a selection must sit still before any art touches the SD card:
 // stepping through a list stays pure text (the NDS-manage feel everywhere).
 // 15 frames (250ms) beats a fast press cadence (~6-7 presses/sec) so even
@@ -1109,7 +1148,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     float cw = gCover.subtex->width, ch = gCover.subtex->height;
                     C2D_DrawImageAt(gCover, railX + (railW - cw) / 2, MENU_HEADING_HEIGHT, 0.56f, NULL, 1.0f, 1.0f);
                     iy = MENU_HEADING_HEIGHT + ch + 6;
-                } else if (gTitleIconTid && gTitleIconTid == sel->tid && gTitleIcon.tex) {
+                } else if (gTitleIconTid && this->type == MENU_MANAGE &&
+                           gTitleIconTid == manageIconTid(sel) && gTitleIcon.tex) {
                     // no RomM cover: the title's own icon on a HOME-style plate
                     float d = 96, pad = 8, r = 12;
                     float px = cx - d/2 - pad, py = MENU_HEADING_HEIGHT + 24 - pad;
@@ -1189,21 +1229,34 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if ((this->type != MENU_ROMM && this->type != MENU_MANAGE) || this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
         if (sel->action != RommInstall && sel->action != ManageRom) return;
-        // 3DS titles with no RomM cover: use the icon saved from their SMDH.
-        // Debounced like covers — an SD read on every step is what made the
-        // Manage->3DS list crawl (NDS is fast precisely because it does
-        // nothing per step).
-        if (this->type == MENU_MANAGE && sel->platformSlug == ROMM_SLUG_3DS &&
-            sel->rommId <= 0 && sel->tid) {
-            if (sel->tid != gIconWantTid) { gIconWantTid = sel->tid; gIconDebounce = 0; return; }
-            if (gTitleIconTid == sel->tid) return;
+        // Manage rows showing the installed title's own art: HOME icon on the
+        // rail + baked-banner preview in the details card. Debounced like
+        // covers — an SD read on every step is what made lists crawl.
+        u64 mtid = (this->type == MENU_MANAGE) ? manageIconTid(sel) : 0;
+        if (mtid && sel->rommId <= 0) {
+            if (mtid != gIconWantTid) { gIconWantTid = mtid; gIconDebounce = 0; return; }
             if (++gIconDebounce < ART_SETTLE_FRAMES) return;
-            if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
-            gTitleIconTid = sel->tid;
-            std::string rgba = titleIconRGBA(sel->tid);   // RAM-cached after first read
-            if (rgba.size() == 48*48*4 &&
-                texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon))
-                C3D_TexSetFilter(gTitleIcon.tex, GPU_NEAREST, GPU_NEAREST);   // pixel art
+            if (gTitleIconTid != mtid) {
+                if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
+                gTitleIconTid = mtid;
+                std::string rgba = titleIconRGBA(mtid);   // RAM-cached after first read
+                if (rgba.size() == 48*48*4 &&
+                    texFromRGBA((const unsigned char*)rgba.data(), 48, 48, &gTitleIcon))
+                    C3D_TexSetFilter(gTitleIcon.tex, GPU_NEAREST, GPU_NEAREST);   // pixel art
+                return;   // banner next settle frame: one SD read per frame max
+            }
+            if (gBannerPrevTid != mtid && gBannerWantTid != mtid) {
+                gBannerWantTid = mtid;   // one attempt per selection
+                char bp[96];
+                snprintf(bp, sizeof(bp), "%s/banners-cache/%016llX.raw",
+                         FORWARDER_DIR.c_str(), (unsigned long long)mtid);
+                std::string raw = fileExists(bp) ? readEntireFile(bp) : std::string();
+                if (raw.size() == 256*128*4) {
+                    if (gBannerPrev.tex) freeTexImage(&gBannerPrev);
+                    if (texFromRGBA((const unsigned char*)raw.data(), 256, 128, &gBannerPrev))
+                        gBannerPrevTid = mtid;
+                }
+            }
             return;
         }
         if (sel->rommId <= 0) return;
@@ -1480,6 +1533,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             sel->fwdCia.empty()
                                 ? "Not installed — the ROM is on your SD card. Press A to install."
                                 : "Not installed — a ready .cia is on your SD card. Press A to install.", 3);
+            // baked-banner preview (GBA injects save one on every bake): shows
+            // exactly the art installed on HOME, so Change art is informed
+            if (gBannerPrev.tex && gBannerPrevTid && gBannerPrevTid == manageIconTid(sel))
+                C2D_DrawImageAt(gBannerPrev, CARD_X + (CARD_W - 128) / 2, BAR_Y - 64 - 6,
+                                0.57f, NULL, 0.5f, 0.5f);
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
@@ -1510,6 +1568,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key (saved to sd:/3ds/romm3ds/sgdb.env) or re-read the file.";
                 else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. AGS-101 = gamma-corrected (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed; brighter gamma = between the two; night = AGS-101 + warm blue-light filter. Per game: Manage -> game -> Screen.";
+                else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage. Title icons = each game's own HOME icon (fast, always available); RomM covers = box art from the server for library matches.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -1849,6 +1908,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         add(SETTING_SGDB_KEY,     std::string("SteamGridDB key: ") + (ensureSgdb() ? "found" : "missing"));
         static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
         add(SETTING_GBA_SCREEN,   std::string("GBA screen: ") + gbaScreenNames[config->gbaScreen % GBA_SCREEN_COUNT]);
+        add(SETTING_MANAGE_ART,   std::string("Manage art: ") + (config->manageIcons ? "title icons" : "RomM covers"));
         if (config->templates.size() > 1)
             add(SETTING_TEMPLATE, "Template: " + config->templates.at(config->currentTemplate));
         gRomm.loadConfig();
@@ -2121,8 +2181,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 const RommRom* cr = hit->second;
                 if (!cr->name.empty()) name = utf8FoldLatin(cr->name);
                 e->year = cr->year;
-                // no rommId/coverPath on purpose: rommId<=0 makes the rail
-                // show the title's own icon instead of fetching the cover
+                // rommId<=0 makes the rail show the title's own icon instead
+                // of fetching the cover (Settings -> Manage art)
+                if (!(gConfigPtr && gConfigPtr->manageIcons)) {
+                    e->rommId = cr->id;
+                    e->coverPath = cr->coverPath;
+                    e->coverSmallPath = cr->coverSmallPath;
+                }
             }
             if (name.empty()) name = "Unknown title";
             e->title = name;
@@ -2164,10 +2229,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             auto hit = libByName.find(toLowerCase(fname));
             if (hit != libByName.end()) {
                 const RommRom* cr = hit->second;
-                e->rommId = cr->id;
-                e->coverPath = cr->coverPath;
-                e->coverSmallPath = cr->coverSmallPath;
                 e->year = cr->year;
+                e->coverPath = cr->coverPath;          // art flows still need it
+                e->coverSmallPath = cr->coverSmallPath;
+                if (!(gConfigPtr && gConfigPtr->manageIcons) || !inst)
+                    e->rommId = cr->id;                // rail cover only in covers mode
             }
             entries.push_back(e);
         }
@@ -2205,10 +2271,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             auto hit = libByName.find(toLowerCase(rom.display));
             if (hit != libByName.end()) {
                 const RommRom* cr = hit->second;
-                e->rommId = cr->id;
-                e->coverPath = cr->coverPath;
-                e->coverSmallPath = cr->coverSmallPath;
                 e->year = cr->year;
+                e->coverPath = cr->coverPath;          // art flows still need it
+                e->coverSmallPath = cr->coverSmallPath;
+                if (!(gConfigPtr && gConfigPtr->manageIcons) || !hasFwd)
+                    e->rommId = cr->id;                // rail cover only in covers mode
             }
             entries.push_back(e);
         }
@@ -2583,6 +2650,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         case SETTING_SHOW_3DS:     config->show3dsRoms = !config->show3dsRoms; break;
                         case SETTING_ART_NOTIFY:   config->artNotify = !config->artNotify; break;
                         case SETTING_GBA_SCREEN:   config->gbaScreen = (config->gbaScreen + 1) % GBA_SCREEN_COUNT; break;
+                        case SETTING_MANAGE_ART:   config->manageIcons = !config->manageIcons; break;
                         case SETTING_SGDB_KEY: {
                             gSgdbKeyTried = false;   // re-read sgdb.env on demand
                             int c;
@@ -2869,7 +2937,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (c==1) {
                                 // pick a preset (preselected on the Settings default),
                                 // then re-bake in place — art untouched, save kept
-                                int fc = pickGbaScreenPreset(target, config, ng);
+                                int fc = pickGbaScreenPreset(target, config, ng,
+                                                             artStoreGet(romBase).screen);
                                 if (fc < 0) break;
                                 applyGbaScreenItem(target, config, romBase, ng,
                                                    entry.coverPath, entry.path.generic_string(), true, fc);
@@ -2903,9 +2972,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                                          entry.coverPath, gbaArtEntry, gbaArt);
                                 Dialog(target,0,0,320,240,{"Installing...",ng},{},0).handle();
                                 u64 lastG = 0;
+                                int mode = gbaScreenFor(gbaArtEntry, config);
                                 ReturnResult* gr = gCtr.buildGbaCIA(entry.path.generic_string(), ng, gtid,
                                                                     gbaArt.icon48, gbaArt.bannerTex,
-                                                                    config->gbaScreen,
+                                                                    mode,
                                     [&](u64 done, u64 total) -> bool {
                                         hidScanInput();
                                         if (hidKeysDown() & KEY_B) return false;
@@ -2916,7 +2986,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                         return true;
                                     });
                                 if (gr->isSuccess()) {
-                                    artStorePut(romBase, gbaArtEntry);
+                                    ArtEntry e2 = gbaArtEntry; e2.screen = mode;
+                                    artStorePut(romBase, e2);
                                     Dialog(target,0,0,320,240,{"Installed!",ng},{"OK"}).handle();
                                 } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message},{"OK"}).handle();
                                 delete gr;

@@ -26,6 +26,7 @@ static void loadStore() {
             e.query = v.value("query", "");
             e.sgdbGameId = v.value("sgdbGameId", 0);
             e.weak = v.value("weak", false);
+            e.screen = v.value("screen", -1);
             if (v.contains("icon")) {
                 e.iconSource = v["icon"].value("source", "");
                 e.iconId = v["icon"].value("id", 0);
@@ -50,6 +51,7 @@ static void saveStore() {
         if (!e.query.empty()) v["query"] = e.query;
         if (e.sgdbGameId) v["sgdbGameId"] = e.sgdbGameId;
         v["weak"] = e.weak;
+        if (e.screen >= 0) v["screen"] = e.screen;
         if (!e.iconSource.empty()) {
             v["icon"]["source"] = e.iconSource;
             if (e.iconId) v["icon"]["id"] = e.iconId;

@@ -178,6 +178,7 @@ void Config::save() {
     j["forceInstall"] = this->forceInstall;
     j["show3dsRoms"] = this->show3dsRoms;
     j["artNotify"] = this->artNotify;
+    j["manageIcons"] = this->manageIcons;
     j["gbaScreen"] = this->gbaScreen;
     j["selectedLanguage"] = this->selectedLanguage;
     
@@ -198,6 +199,7 @@ void Config::load() {
     if (j.contains("forceInstall")) this->forceInstall = j["forceInstall"];
     if (j.contains("show3dsRoms")) this->show3dsRoms = j["show3dsRoms"];
     if (j.contains("artNotify")) this->artNotify = j["artNotify"];
+    if (j.contains("manageIcons")) this->manageIcons = j["manageIcons"];
     if (j.contains("gbaScreen")) this->gbaScreen = j["gbaScreen"];
     if (j.contains("selectedLanguage")) this->selectedLanguage = j["selectedLanguage"];
 }

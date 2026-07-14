@@ -4,6 +4,22 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Added (2026-07-14)
+- **Per-game screen filter memory**: every GBA bake records its preset in
+  art.json; reinstalls and art changes keep the game's preset instead of
+  reverting to the Settings default, and the Screen picker tags/preselects
+  the game's current one. Batch apply logs one result line per game.
+- **Manage art setting** (Settings → "Manage art", default *title icons*):
+  all Manage tabs show each installed game's own HOME icon — GBA injects and
+  NDS forwarders included (their SMDH is read once on demand). Switch to
+  *RomM covers* for the old look. Not-installed rows keep the cover.
+- **Baked-banner preview**: GBA bakes save an untiled copy of the banner and
+  the Manage details card shows it — exactly what HOME displays.
+- Random title ID note: it applies to **NDS** TWL forwarders (rom hacks
+  sharing the original's game code would collide) via the existing Settings
+  toggle. GBA injects can't collide (per-filename title ids), and 3DS .cia
+  files can't be re-id'd on device (the title id keys the NCCH encryption).
+
 ### Fixed (2026-07-14)
 - **B goes back instantly**: every screen rebuild paused the cover worker by
   draining its in-flight download — B mid-fetch waited for the whole
