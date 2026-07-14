@@ -105,6 +105,18 @@ bool SgdbClient::get(const std::string& url, std::string& out, const std::string
     // matches the app's httpc SSLCOPT_DisableVerify posture; pinned roots TODO
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    // abort hook: lets the caller (art picker Skip) cut a transfer mid-flight
+    if (abortCheck) {
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
+        curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION,
+            +[](void* p, curl_off_t, curl_off_t, curl_off_t, curl_off_t) -> int {
+                SgdbClient* self = (SgdbClient*)p;
+                return (self->abortCheck && self->abortCheck()) ? 1 : 0;
+            });
+    } else {
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 1L);
+    }
     CURLcode res = curl_easy_perform(c);
     long status = 0;
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);

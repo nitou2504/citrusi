@@ -208,6 +208,9 @@ void buildBannerCands(int gameId, const std::string& query, const std::string& f
     aplog.info("banner cands: " + std::to_string(out.size()));
 }
 
+// set when B cut an in-flight thumb download — consumed as a Skip press
+static bool gThumbSkip = false;
+
 // fetch + decode ONE pending thumb (called once per frame; blocking but short)
 void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW, int maxH) {
     for (size_t i = first; i < last && i < cands.size(); i++) {
@@ -215,7 +218,16 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
         if (c.state != 0) continue;
         aplog.info("thumb fetch: " + c.thumbKey);
         std::string bytes;
+        // B during the transfer aborts it (curl progress hook) so Skip is
+        // instant instead of waiting out a slow cdn
+        gSgdb.abortCheck = []() -> bool {
+            hidScanInput();
+            if (hidKeysDown() & KEY_B) gThumbSkip = true;
+            return gThumbSkip;
+        };
         artGetUrl(gSgdb, gRomm, c.thumbUrl.empty() ? c.url : c.thumbUrl, c.thumbKey, bytes);
+        gSgdb.abortCheck = nullptr;
+        if (gThumbSkip) return;   // cut on purpose: not a fetch failure
         aplog.info("thumb bytes: " + std::to_string(bytes.size()));
         if (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) {
             c.state = 1;
@@ -314,6 +326,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
 
         hidScanInput();
         u32 kDown = hidKeysDown();
+        if (gThumbSkip) { gThumbSkip = false; kDown |= KEY_B; }   // cut fetch = Skip
         int count = (int)cands.size();
 
         if (kDown & KEY_B) {                       // skip this page
