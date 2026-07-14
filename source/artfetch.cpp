@@ -486,6 +486,23 @@ std::vector<std::string> artQueriesFor(const std::string& fsName,
     std::string qf = artSanitizeQuery(fsName);
     if (!qt.empty()) qs.push_back(qt);
     if (!qf.empty() && qf != qt) qs.push_back(qf);
+    // a trailing platform token poisons otherwise-exact matches
+    // ("Bubble Bobble - Old and New GBA" never hits anything)
+    auto stripPlatform = [](const std::string& s) -> std::string {
+        static const char* sufs[] = {" gba", " agb", " gbc", " gb", " nds", " 3ds"};
+        for (const char* suf : sufs) {
+            size_t n = strlen(suf);
+            if (s.size() <= n) continue;
+            std::string tail = s.substr(s.size() - n);
+            for (auto& c : tail) c = (char)tolower((unsigned char)c);
+            if (tail == suf) return s.substr(0, s.size() - n);
+        }
+        return s;
+    };
+    for (size_t i = 0, n = qs.size(); i < n; i++) {
+        std::string st = stripPlatform(qs[i]);
+        if (st != qs[i]) qs.push_back(st);
+    }
     return qs;
 }
 
