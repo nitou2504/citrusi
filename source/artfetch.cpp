@@ -83,7 +83,7 @@ static std::vector<u8> icoFrameRGBA(const u8* d, u32 size, int* w, int* h) {
     u16 bpp = icoRd16(d + 14);
     if (icoRd32(d + 16) != 0) return out;                    // BI_RGB only
     if (bw <= 0 || bh <= 0 || bw > 512 || bh > 512) return out;
-    u32 palN = (bpp == 8) ? (icoRd32(d + 32) ? icoRd32(d + 32) : 256) : 0;
+    u32 palN = (bpp <= 8) ? (icoRd32(d + 32) ? icoRd32(d + 32) : (1u << bpp)) : 0;
     const u8* pal = d + 40;
     const u8* xorD = pal + palN * 4;
     u32 xorStride = ((u32)bw * bpp + 31) / 32 * 4;
@@ -105,7 +105,18 @@ static std::vector<u8> icoFrameRGBA(const u8* d, u32 size, int* w, int* h) {
             } else if (bpp == 8) {
                 const u8* c = &pal[(u32)row[x] * 4];
                 o[0] = c[2]; o[1] = c[1]; o[2] = c[0]; o[3] = 255;
-            } else return std::vector<u8>();                 // 4/1bpp: unsupported
+            } else if (bpp == 4) {
+                u8 v = row[x >> 1];
+                u8 idx = (x & 1) ? (v & 0xF) : (u8)(v >> 4);
+                if (idx >= palN) return std::vector<u8>();
+                const u8* c = &pal[(u32)idx * 4];
+                o[0] = c[2]; o[1] = c[1]; o[2] = c[0]; o[3] = 255;
+            } else if (bpp == 1) {
+                u8 idx = (row[x >> 3] >> (7 - (x & 7))) & 1;
+                if (idx >= palN) return std::vector<u8>();
+                const u8* c = &pal[(u32)idx * 4];
+                o[0] = c[2]; o[1] = c[1]; o[2] = c[0]; o[3] = 255;
+            } else return std::vector<u8>();                 // 2/16bpp: unsupported
             if ((mrow[x >> 3] >> (7 - (x & 7))) & 1) o[3] = 0;   // AND mask = transparent
         }
     }
@@ -121,25 +132,34 @@ static std::vector<u8> icoFrameRGBA(const u8* d, u32 size, int* w, int* h) {
     return out;
 }
 
-// best frame for the 48px target: smallest frame >= 48, else the largest
+// best frame for the 48px target: smallest frame >= 48, else the largest.
+// Frames are TRIED in preference order — a container whose best frame is an
+// undecodable format (e.g. a leading 4bpp entry) must fall back to the next
+// one, not fail the whole icon ("Couldn't fetch that one").
 static std::vector<u8> icoBestRGBA(const std::string& bytes, int* w, int* h) {
     const u8* d = (const u8*)bytes.data();
     u32 n = icoRd16(d + 4);
-    int best = -1, bestDim = 0;
+    std::vector<std::pair<int,int>> order;   // (index, dim)
     for (u32 i = 0; i < n && 6 + i * 16 + 16 <= bytes.size(); i++) {
         const u8* e = d + 6 + i * 16;
         int fw = e[0] ? e[0] : 256, fh = e[1] ? e[1] : 256;
-        int dim = std::min(fw, fh);
-        bool better = (best < 0) ||
-                      (dim >= ICON_DIM && (bestDim < ICON_DIM || dim < bestDim)) ||
-                      (dim < ICON_DIM && bestDim < ICON_DIM && dim > bestDim);
-        if (better) { best = (int)i; bestDim = dim; }
+        order.push_back({(int)i, std::min(fw, fh)});
     }
-    if (best < 0) return std::vector<u8>();
-    const u8* e = d + 6 + best * 16;
-    u32 fsize = icoRd32(e + 8), foff = icoRd32(e + 12);
-    if (foff + fsize > bytes.size()) return std::vector<u8>();
-    return icoFrameRGBA(d + foff, fsize, w, h);
+    std::sort(order.begin(), order.end(), [](const std::pair<int,int>& a,
+                                             const std::pair<int,int>& b) {
+        bool aBig = a.second >= ICON_DIM, bBig = b.second >= ICON_DIM;
+        if (aBig != bBig) return aBig;                       // >=48 beats <48
+        return aBig ? a.second < b.second                    // smallest >=48
+                    : a.second > b.second;                   // else largest
+    });
+    for (auto& cand : order) {
+        const u8* e = d + 6 + cand.first * 16;
+        u32 fsize = icoRd32(e + 8), foff = icoRd32(e + 12);
+        if (foff + fsize > bytes.size()) continue;
+        std::vector<u8> px = icoFrameRGBA(d + foff, fsize, w, h);
+        if (!px.empty()) return px;
+    }
+    return std::vector<u8>();
 }
 
 std::string artIcon48FromImage(const std::string& bytes) {
