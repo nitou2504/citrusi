@@ -47,6 +47,8 @@ inline bool isSystemApp(u64 tid) {
 }
 void denit() {
 	sgdbNetExit();
+	mcuHwcExit();
+	ptmuExit();
 	httpcExit();
 	amExit();
 	cfguExit();
@@ -117,6 +119,10 @@ Result init() {
 	if (R_FAILED(httpcInit(0))) {
 		return failWait("Failed to init httpc\n");
 	}
+	// battery + charge state for the header clock/battery cluster.
+	// both optional: on failure the header just shows the clock.
+	ptmuInit();
+	mcuHwcInit();
 	// soc:u + curl for the SGDB art client — at boot, never lazily mid-UI
 	// (a first-use socInit alongside live httpc/gsp hard-froze the console)
 	sgdbNetBoot();

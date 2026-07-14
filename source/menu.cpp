@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <cctype>
+#include <ctime>
 #include "menu.hpp"
 extern "C" {
 #include "graphics.h"
@@ -961,6 +962,47 @@ static u64 gBannerWantTid = 0;
 #define ART_MISS_BACKOFF 30
 static u32 gTick = 0;           // global frame counter for marquees
 
+// ---- header status cluster: clock + battery, like every homebrew ----------
+// battery reads are service calls (mcuHwc / ptm:u) — cached, refreshed ~5s
+static u8 gBattPct = 255;        // 255 = unknown (no mcu/ptm access)
+static bool gBattCharging = false;
+static u32 gBattLastTick = 0;
+static bool gBattEver = false;
+static void drawHeaderStatus() {
+    if (!gBattEver || gTick - gBattLastTick >= 300) {
+        gBattEver = true;
+        gBattLastTick = gTick;
+        u8 pct;
+        if (R_SUCCEEDED(MCUHWC_GetBatteryLevel(&pct))) gBattPct = pct;   // exact %
+        else {
+            u8 lvl;                                                     // 0-5 fallback
+            if (R_SUCCEEDED(PTMU_GetBatteryLevel(&lvl))) gBattPct = (u8)(lvl * 20);
+        }
+        u8 chg = 0;
+        gBattCharging = R_SUCCEEDED(PTMU_GetBatteryChargeState(&chg)) && chg;
+    }
+    time_t now = time(NULL);
+    struct tm* lt = localtime(&now);
+    char clk[8] = {0};
+    if (lt) snprintf(clk, sizeof(clk), "%02d:%02d", lt->tm_hour, lt->tm_min);
+    float timeRight = 396;
+    if (gBattPct <= 100) {
+        // battery glyph: hollow body + nub, fill scaled to charge.
+        // accent while charging, red when nearly empty.
+        float bx = 374, by = 2, bw = 17, bh = 10;
+        C2DExtra_DrawRectHollow(bx, by, 0.3f, bw, bh, 1, COL_TEXT_DIM);
+        C2D_DrawRectSolid(bx + bw, by + 2.5f, 0.3f, 2, 5, COL_TEXT_DIM);
+        float fw = (bw - 4) * (gBattPct / 100.0f);
+        if (fw < 1 && gBattPct > 0) fw = 1;
+        u32 fill = gBattCharging ? COL_ACCENT
+                 : (gBattPct <= 15 ? C2D_Color32(0xE0, 0x55, 0x55, 0xFF) : COL_TEXT_DIM);
+        if (fw >= 1) C2D_DrawRectSolid(bx + 2, by + 2, 0.35f, fw, bh - 4, fill);
+        timeRight = bx - 6;
+    }
+    if (clk[0])
+        drawText(timeRight, 7, 0.5f, 0.45f, COL_BG, COL_TEXT_DIM, clk, C2D_AlignRight);
+}
+
 // cached libraries per platform slug, for instant search filtering
 static std::map<std::string, std::vector<RommRom>> gCache;   // slug -> roms
 static std::map<std::string, bool> gCacheOk;                 // slug -> loaded?
@@ -1221,20 +1263,21 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 for (auto e : this->entries) if (e->selected) nSel++;
                 if (nSel > 0) title += "  " + std::to_string(nSel) + " selected";
             }
-            // flat background + header
+            // flat background + header (clock + battery live at the right edge)
             C2D_DrawRectSolid(0, 0, 0, 400, 240, COL_BG);
             drawText(12, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
+            drawHeaderStatus();
             if (!this->entries.empty() && this->type != MENU_MAIN && this->type != MENU_SETTINGS && this->type != MENU_SERVER) {
                 int nsel = this->selectedCount();
                 char pos[24];
                 if (nsel > 0) {          // multiselect: show the count in the accent color
                     snprintf(pos, sizeof(pos), "%d selected", nsel);
-                    drawText(390, 7, 0.5f, 0.5f, COL_BG, COL_ACCENT, pos, C2D_AlignRight);
+                    drawText(330, 7, 0.5f, 0.5f, COL_BG, COL_ACCENT, pos, C2D_AlignRight);
                 } else {
                     snprintf(pos, sizeof(pos), "%d/%d",
                              (int)(this->selection - this->entries.begin()) + 1,
                              (int)this->entries.size());
-                    drawText(390, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, pos, C2D_AlignRight);
+                    drawText(330, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, pos, C2D_AlignRight);
                 }
             }
             C2D_DrawRectSolid(0, MENU_HEADING_HEIGHT-1, 0.1f, 400, 1, COL_ELEV);
