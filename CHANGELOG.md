@@ -25,9 +25,11 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   under the list — instead of blind value cycling; the row descriptions
   drop the cramped ;-separated enumerations.
 - **Clock + battery in the header**: top-right of every screen — time plus
-  a battery glyph (exact % via mcu::HWC, ptm:u 0-5 fallback; accent fill
-  while charging, red under 15%). Battery polled every ~5s, never per
-  frame. The list position counter moved left to make room.
+  the hbmenu/ftpd battery sprites (romfs:/ui/battery*.png from
+  devkitPro/3ds-hbmenu, GPL like this project): the HOME-style glyph with
+  the charge sprite while charging. Level via ptm:u (0-5, hbmenu's
+  mapping), polled every ~5s, never per frame. The list position counter
+  moved left to make room.
 - **Mixed library batches pick a scope**: a library batch whose selection
   includes installed games first asks — *Install new (N)* (skip installed),
   *Install + reinstall all (M)*, or *Uninstall installed (K)* (manage-style:

@@ -962,45 +962,51 @@ static u64 gBannerWantTid = 0;
 #define ART_MISS_BACKOFF 30
 static u32 gTick = 0;           // global frame counter for marquees
 
-// ---- header status cluster: clock + battery, like every homebrew ----------
-// battery reads are service calls (mcuHwc / ptm:u) — cached, refreshed ~5s
-static u8 gBattPct = 255;        // 255 = unknown (no mcu/ptm access)
+// ---- header status cluster: clock + battery ------------------------------
+// the battery is the hbmenu/ftpd sprite set (romfs:/ui/battery*.png, from
+// devkitPro/3ds-hbmenu) — the familiar HOME-style glyph, charge sprite while
+// charging. Level comes from ptm:u (0-5, same mapping as hbmenu), cached and
+// refreshed every ~5s — never a service call per frame.
+static u8 gBattLevel = 5;        // ptm:u 0-5
 static bool gBattCharging = false;
 static u32 gBattLastTick = 0;
 static bool gBattEver = false;
+static C2D_Image gBattImg[6];    // levels 0-4 + [5] charging
+static bool gBattImgTried = false;
+static void ensureBatterySprites() {
+    if (gBattImgTried) return;
+    gBattImgTried = true;
+    static const char* names[6] = {"battery0", "battery1", "battery2",
+                                   "battery3", "battery4", "batteryCharge"};
+    for (int i = 0; i < 6; i++) {
+        std::string b = readEntireFile(std::string("romfs:/ui/") + names[i] + ".png");
+        if (!b.empty()) loadTexImage(b, &gBattImg[i], 32, 32);
+    }
+}
 static void drawHeaderStatus() {
+    ensureBatterySprites();
     if (!gBattEver || gTick - gBattLastTick >= 300) {
         gBattEver = true;
         gBattLastTick = gTick;
-        u8 pct;
-        if (R_SUCCEEDED(MCUHWC_GetBatteryLevel(&pct))) gBattPct = pct;   // exact %
-        else {
-            u8 lvl;                                                     // 0-5 fallback
-            if (R_SUCCEEDED(PTMU_GetBatteryLevel(&lvl))) gBattPct = (u8)(lvl * 20);
-        }
+        u8 lvl;
+        if (R_SUCCEEDED(PTMU_GetBatteryLevel(&lvl))) gBattLevel = (lvl > 5) ? 5 : lvl;
         u8 chg = 0;
         gBattCharging = R_SUCCEEDED(PTMU_GetBatteryChargeState(&chg)) && chg;
+    }
+    // hbmenu's level -> sprite mapping (0 and 1 share the empty glyph)
+    static const int lvlImg[6] = {0, 0, 1, 2, 3, 4};
+    C2D_Image bat = gBattCharging ? gBattImg[5] : gBattImg[lvlImg[gBattLevel]];
+    float timeRight = 396;
+    if (bat.tex) {
+        C2D_DrawImageAt(bat, 400 - 27 - 2, 5, 0.35f);   // 27x18 sprite, header-centered
+        timeRight = 400 - 27 - 2 - 5;
     }
     time_t now = time(NULL);
     struct tm* lt = localtime(&now);
     char clk[8] = {0};
     if (lt) snprintf(clk, sizeof(clk), "%02d:%02d", lt->tm_hour, lt->tm_min);
-    float timeRight = 396;
-    if (gBattPct <= 100) {
-        // battery glyph: hollow body + nub, fill scaled to charge.
-        // accent while charging, red when nearly empty.
-        float bx = 374, by = 2, bw = 17, bh = 10;
-        C2DExtra_DrawRectHollow(bx, by, 0.3f, bw, bh, 1, COL_TEXT_DIM);
-        C2D_DrawRectSolid(bx + bw, by + 2.5f, 0.3f, 2, 5, COL_TEXT_DIM);
-        float fw = (bw - 4) * (gBattPct / 100.0f);
-        if (fw < 1 && gBattPct > 0) fw = 1;
-        u32 fill = gBattCharging ? COL_ACCENT
-                 : (gBattPct <= 15 ? C2D_Color32(0xE0, 0x55, 0x55, 0xFF) : COL_TEXT_DIM);
-        if (fw >= 1) C2D_DrawRectSolid(bx + 2, by + 2, 0.35f, fw, bh - 4, fill);
-        timeRight = bx - 6;
-    }
     if (clk[0])
-        drawText(timeRight, 7, 0.5f, 0.45f, COL_BG, COL_TEXT_DIM, clk, C2D_AlignRight);
+        drawText(timeRight, 14, 0.5f, 0.45f, COL_BG, COL_TEXT_DIM, clk, C2D_AlignRight);
 }
 
 // cached libraries per platform slug, for instant search filtering
