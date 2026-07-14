@@ -317,6 +317,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
     ensureCands();
     aplog.info("loop enter");
     bool firstFrame = true;
+    int idle = 0;   // frames since the last key: thumbs only load when settled
 
     while (aptMainLoop()) {
         std::vector<Cand>& cands = (page == 0) ? iconCands : bannerCands;
@@ -335,6 +336,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
         u32 kDown = hidKeysDown();
         kDown |= gPendingKeys;   // replay presses that cut an in-flight fetch
         gPendingKeys = 0;
+        if (kDown & PICKER_KEYS) idle = 0; else if (idle < 1000) idle++;
         int count = (int)cands.size();
 
         if (kDown & KEY_B) {                       // skip this page
@@ -412,8 +414,11 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
             }
         }
 
-        // one lazy thumb fetch per frame (visible page only)
-        loadOneThumb(cands, scroll, scroll + perPage, cellW, cellH);
+        // one lazy thumb fetch per frame (visible page only) — but only once
+        // the selection has settled (same 15-frame rule as the list art), so
+        // pressing through the grid never fights a transfer
+        if (idle >= 15)
+            loadOneThumb(cands, scroll, scroll + perPage, cellW, cellH);
 
         // ---- draw ----
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
