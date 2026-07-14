@@ -2123,6 +2123,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         (void)dsiwareCount;
         delete prev;
         CoverCachePause coverPause;   // the AM/SD scans own the card while they run
+        // drop the rail art slots: after a rebake the same tid must reload
+        // its (new) icon and banner instead of showing the old textures
+        if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
+        gTitleIconTid = 0; gIconWantTid = 0;
+        if (gBannerPrev.tex) freeTexImage(&gBannerPrev);
+        gBannerPrevTid = 0; gBannerWantTid = 0;
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
         installed3dsRefresh();   // the .cia scan below needs the AM set

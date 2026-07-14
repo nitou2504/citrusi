@@ -100,3 +100,5 @@ std::vector<CiaFile> listCiaFiles();
 // the title's own 48x48 HOME icon, saved from its SMDH: raw RGBA8 (48*48*4).
 // "" when we've never read that title's SMDH. Free art for every 3DS game.
 std::string titleIconRGBA(u64 tid);
+// drop the cached icon for one title (call after a rebake changed its SMDH)
+void titleIconInvalidate(u64 tid);

@@ -326,6 +326,13 @@ static StorageTally gTally;
 // after an install/uninstall the numbers moved. names stay valid: they are
 // keyed by tid|version, so a new/updated title simply misses the cache.
 void installedTitlesInvalidate() { gTallyOk = false; gSdEnumOk = false; gIconRam.clear(); }
+
+// a rebake changed the title's SMDH: the on-SD icon copy is stale, drop it
+// (and the RAM copy) so the next ask re-reads the new SMDH
+void titleIconInvalidate(u64 tid) {
+    remove(iconPath(tid).c_str());
+    gIconRam.erase(tid);
+}
 bool storageTallyCached() { return gTallyOk; }
 
 std::vector<CiaFile> listCiaFiles() {

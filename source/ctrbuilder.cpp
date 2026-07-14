@@ -503,6 +503,7 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     ctrTidCacheInvalidate();
     installedTitlesInvalidate();      // new title: refresh tally/icon caches
     saveBannerPreview(tid, etc1a4);   // same template texture layout as GBA
+    titleIconInvalidate(tid);         // SMDH may carry new art
 
     return new ReturnResult(ERROR_SUCCESS, "");
 }
@@ -1012,6 +1013,7 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     o.close();
     ctrTidCacheInvalidate();
     saveBannerPreview(tid, bannerTex);
+    titleIconInvalidate(tid);         // SMDH carries the new icon now
 
     ctrLogger.info("gba: installed tid ok");
     return new ReturnResult(ERROR_SUCCESS, "");
