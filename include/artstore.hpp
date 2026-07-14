@@ -19,6 +19,7 @@ struct ArtEntry {
     int bannerId = 0;         // sgdb asset id
     std::string bannerName;   // libretro No-Intro name that hit
     bool weak = false;        // fallback art in use -> ⚠ in Manage
+    int screen = -1;          // GBA_SCREEN_* baked into the installed inject (-1 = unknown)
 };
 
 // cached-on-first-use art.json accessors

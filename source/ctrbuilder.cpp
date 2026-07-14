@@ -18,6 +18,38 @@
 
 static Logger ctrLogger("CtrBuilder");
 
+// untile the baked 256x128 RGBA4444 banner into linear RGBA8 and keep it on
+// SD (banners-cache/<tid>.raw, 128KB) so Manage can show what's actually
+// installed. Only written on a successful (re)bake.
+static void saveBannerPreview(u64 tid, const std::string& tex) {
+    if (tex.size() != 256 * 128 * 2) return;
+    std::error_code ec;
+    std::filesystem::create_directories(FORWARDER_DIR + "/banners-cache", ec);
+    std::string out(256 * 128 * 4, '\0');
+    const u16* src = (const u16*)tex.data();
+    u8* dst = (u8*)&out[0];
+    for (u32 y = 0; y < 128; y++) {
+        for (u32 x = 0; x < 256; x++) {
+            u32 index = (((y >> 3) * (256 >> 3) + (x >> 3)) << 6) +
+                        ((x & 1) | ((y & 1) << 1) | ((x & 2) << 1) |
+                         ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3));
+            u16 c = src[index];
+            u8* o = &dst[(y * 256 + x) * 4];
+            o[0] = (u8)(((c >> 12) & 0xF) * 17);
+            o[1] = (u8)(((c >>  8) & 0xF) * 17);
+            o[2] = (u8)(((c >>  4) & 0xF) * 17);
+            o[3] = (u8)(( c        & 0xF) * 17);
+        }
+    }
+    std::string p = FORWARDER_DIR + "/banners-cache/";
+    char name[24];
+    snprintf(name, sizeof(name), "%016llX.raw", (unsigned long long)tid);
+    FILE* f = fopen((p + name).c_str(), "wb");
+    if (!f) return;
+    fwrite(out.data(), 1, out.size(), f);
+    fclose(f);
+}
+
 static inline u32 rd32(const std::string& b, u32 o) { u32 v; memcpy(&v, b.data()+o, 4); return v; }
 static inline void wr32(std::string& b, u32 o, u32 v) { memcpy(&b[o], &v, 4); }
 static inline u64 rd64(const std::string& b, u32 o) { u64 v; memcpy(&v, b.data()+o, 8); return v; }
@@ -932,6 +964,7 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
     o << romPath;
     o.close();
     ctrTidCacheInvalidate();
+    saveBannerPreview(tid, bannerTex);
 
     ctrLogger.info("gba: installed tid ok");
     return new ReturnResult(ERROR_SUCCESS, "");
