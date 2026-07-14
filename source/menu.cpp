@@ -3243,6 +3243,103 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             !(e->platformSlug == ROMM_SLUG_3DS && !e->installable))
                             items.push_back(e);
                     if (items.empty()) break;
+                    // split by installed state (same checks as the row markers):
+                    // a selection with installed games first picks its SCOPE —
+                    // install the new ones, reinstall everything, or uninstall
+                    // the installed ones — instead of blindly reinstalling all
+                    installed3dsRefresh();
+                    refreshNdsForwarders();
+                    auto rowInstalled = [](MenuSelection* e) -> bool {
+                        if (e->platformSlug == ROMM_SLUG_3DS)
+                            return installed3dsHasTitle(e->titleId);
+                        if (e->platformSlug == ROMM_SLUG_GBA)
+                            return installed3dsHasTitle(gbaTidForRom(std::filesystem::path(
+                                rommLocalPath(e->fsName, e->platformSlug)).filename().generic_string()));
+                        return ndsForwarderInstalled(e->fsName);
+                    };
+                    std::vector<MenuSelection*> instItems, newItems;
+                    for (auto e : items)
+                        (rowInstalled(e) ? instItems : newItems).push_back(e);
+                    if (!instItems.empty()) {
+                        std::string ssub = std::to_string((int)items.size()) + " selected - " +
+                                           std::to_string((int)instItems.size()) + " installed";
+                        std::vector<MenuOpt> so;
+                        std::vector<int> sa;   // 0 install new, 1 reinstall all, 2 uninstall installed
+                        if (!newItems.empty()) {
+                            so.push_back({"Install new (" + std::to_string((int)newItems.size()) + ")",
+                                          "Only the games that aren't installed yet; the " +
+                                          std::to_string((int)instItems.size()) + " installed are skipped."});
+                            sa.push_back(0);
+                        }
+                        so.push_back({newItems.empty()
+                                          ? "Reinstall (" + std::to_string((int)instItems.size()) + ")"
+                                          : "Install + reinstall all (" + std::to_string((int)items.size()) + ")",
+                                      "Everything selected installs; the installed ones are reinstalled over."});
+                        sa.push_back(1);
+                        so.push_back({"Uninstall installed (" + std::to_string((int)instItems.size()) + ")",
+                                      "Remove the installed ones - 3DS updates/DLC, GBA injects and DS forwarders go with their ROMs."});
+                        sa.push_back(2);
+                        int sc = actionMenu(target, "Batch", ssub, so);
+                        if (sc < 0) break;
+                        if (sa[sc] == 0) items = newItems;
+                        else if (sa[sc] == 2) {
+                            // batch uninstall, manage-style, right from the library
+                            int K = (int)instItems.size();
+                            if (Dialog(target,0,0,320,240,
+                                       {"Uninstall " + std::to_string(K) + " games?",
+                                        "Updates/DLC, injects and forwarders","go with their ROM files."},
+                                       {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                                break;
+                            // NDS forwarder tids come from the manage scan
+                            std::map<std::string, ManagedRom> ndsBy;
+                            for (auto e : instItems) {
+                                if (e->platformSlug == ROMM_SLUG_3DS || e->platformSlug == ROMM_SLUG_GBA) continue;
+                                for (auto& m : scanManagedRoms(ROMM_NDS_DIR))
+                                    ndsBy[normNds(m.display)] = m;
+                                break;
+                            }
+                            int okCount = 0;
+                            std::vector<std::string> failed;
+                            for (int i = 0; i < K; i++) {
+                                MenuSelection* it = instItems[i];
+                                showLoading(target, {"Uninstalling " + std::to_string(i+1) + "/" + std::to_string(K), it->title});
+                                MenuSelection um;
+                                um.platformSlug = it->platformSlug;
+                                std::string lp = rommLocalPath(it->fsName, it->platformSlug);
+                                if (it->platformSlug == ROMM_SLUG_3DS) {
+                                    um.tid = it->titleId;
+                                } else if (it->platformSlug == ROMM_SLUG_GBA) {
+                                    um.tid = gbaTidForRom(std::filesystem::path(lp).filename().generic_string());
+                                    um.installed = true;
+                                    um.path = std::filesystem::path(lp);
+                                } else {
+                                    auto hit = ndsBy.find(normNds(it->fsName));
+                                    if (hit == ndsBy.end()) { failed.push_back(it->title); continue; }
+                                    um.tid = hit->second.tid;
+                                    um.ytid = hit->second.yanbfTid;
+                                    um.rtid = hit->second.rommTid;
+                                    um.installed = hit->second.installed;
+                                    um.path = std::filesystem::path(hit->second.path);
+                                }
+                                if (uninstallManageItem(config, um)) okCount++;
+                                else failed.push_back(it->title);
+                            }
+                            gFwdReady = false; invalidateManagedRoms(); invalidateYanbfCache();
+                            installedTitlesInvalidate();
+                            installed3dsRefresh();
+                            std::vector<std::string> msg;
+                            msg.push_back("Uninstalled " + std::to_string(okCount) + " of " + std::to_string(K));
+                            int shownU = 0;
+                            for (auto& f : failed) { if (shownU++ >= 3) break; msg.push_back(f); }
+                            if ((int)failed.size() > 3)
+                                msg.push_back("...and " + std::to_string((int)failed.size()-3) + " more");
+                            Dialog(target,0,0,320,240, msg, {"OK"}).handle();
+                            while (this->queue.size() > 0) this->queue.pop();
+                            const std::vector<RommRom>& usrc = this->crossSystem ? gCombined : gCache[this->platformSlug];
+                            return buildRommMenu(this, this->filter, usrc, this->platformSlug, this->crossSystem);
+                        }
+                        // sa[sc] == 1: keep every selected item (reinstall over)
+                    }
                     int M = (int)items.size();
                     u64 total = 0; for (auto e : items) total += e->sizeBytes;
                     bool anyGba = false, anyCtr = false;

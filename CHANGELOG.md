@@ -24,6 +24,12 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   notify, Template) open a vertical picker on A — each choice explained
   under the list — instead of blind value cycling; the row descriptions
   drop the cramped ;-separated enumerations.
+- **Mixed library batches pick a scope**: a library batch whose selection
+  includes installed games first asks — *Install new (N)* (skip installed),
+  *Install + reinstall all (M)*, or *Uninstall installed (K)* (manage-style:
+  3DS updates/DLC, GBA injects and DS forwarders go with their ROMs) —
+  instead of silently redownloading and reinstalling everything. All
+  installed → *Reinstall (K)* / *Uninstall (K)*.
 - **Manage from the library**: A on an installed game in the RomM browse
   opens the Manage actions right there (hint reads "A Manage"). 3DS:
   Reinstall / Redownload plus the granular uninstall rows (update/DLC).
