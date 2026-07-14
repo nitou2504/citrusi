@@ -40,7 +40,8 @@ static Logger rlog("romm");
 
 #define MAX_DSIWARE 40
 
-#define SETTING_RANDOM_TID 0
+// id 0 was the Random-title-ID toggle: now asked at install time when the
+// title id is already taken (TWL forwarders), so the setting is gone
 #define SETTING_CUSTOM_TITLE 1
 #define SETTING_FORCE 2
 #define SETTING_LANGUAGE 3
@@ -51,7 +52,7 @@ static Logger rlog("romm");
 #define SETTING_SRV_USER 11
 #define SETTING_SRV_PASS 12
 #define SETTING_SRV_TEST 13
-#define SETTING_SHOW_3DS 7
+// id 7 was "Show 3DS .3ds": removed — only decrypted .cia files install
 #define SETTING_ART_NOTIFY 8
 #define SETTING_SGDB_KEY 9
 #define SETTING_GBA_SCREEN 20   // outside the server-row range (10-13)
@@ -612,10 +613,10 @@ static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
         "AGS-101 colors", "Original dark filter", "Unfiltered",
         "Brighter gamma", "Night (warm)"};
     static const char* descs[GBA_SCREEN_COUNT] = {
-        "Gamma-corrected to match the backlit AGS-101 screen. Vivid colors without the dark cast. Recommended.",
+        "Gamma-corrected to match the backlit AGS-101 screen. Vivid colors without the dark cast.",
         "Nintendo's own Virtual Console filter. Authentic, but noticeably dark and muted.",
         "The raw palette, no filter at all. Brightest picture; colors look washed out.",
-        "A gentler gamma correction - halfway between AGS-101 and unfiltered.",
+        "A gentler gamma correction - bright and punchy, pops like a 3DS game. Recommended.",
         "AGS-101 colors plus a warm 3400K tint - easier on the eyes in the dark."};
     if (current >= 0) current %= GBA_SCREEN_COUNT;
     int sel = -1;
@@ -793,15 +794,26 @@ static bool manageItemInstalled(const std::string& slug, const MenuSelection& it
 static bool uninstallManageItem(Config* config, const MenuSelection& it) {
     if (it.platformSlug == ROMM_SLUG_3DS) {
         if (it.protectedTitle) return false;   // this app / a system title
+        // its updates/DLC would stay behind as orphans — take them too.
+        // allowEnumerate: in a batch the previous item invalidated the cache
+        TitleExtras ex = findTitleExtras(it.tid, true);
         Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
         AM_DeleteTicket(it.tid);
-        if (R_SUCCEEDED(dr)) installedTitlesInvalidate();
+        if (R_SUCCEEDED(dr)) {
+            for (u64 xt : ex.tids) {
+                AM_DeleteTitle(MEDIATYPE_SD, xt);
+                AM_DeleteTicket(xt);
+            }
+            installedTitlesInvalidate();
+        }
         return R_SUCCEEDED(dr);
     }
     if (it.platformSlug == ROMM_SLUG_GBA) {
-        Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
-        AM_DeleteTicket(it.tid);
-        if (R_FAILED(dr)) return false;
+        if (it.installed) {   // "Delete ROMs" rows have no inject to remove
+            Result dr = AM_DeleteTitle(MEDIATYPE_SD, it.tid);
+            AM_DeleteTicket(it.tid);
+            if (R_FAILED(dr)) return false;
+        }
         std::error_code ec;
         std::filesystem::remove(it.path, ec);          // single-pass: inject + ROM
         return true;
@@ -1534,9 +1546,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             int nsel = this->selectedCount();
             // one bar, bottom only: verb (with the batch count when rows are
             // marked), marks, find, back. START quits silently, as homebrew does.
+            // marking mode drops the find hint so "R All/None" reads clearly.
             std::string hint = (nsel > 0)
-                ? "A Install " + std::to_string(nsel) + "   Y/R Mark   B Back"
-                : std::string("A Install   Y/R Mark   SEL Find   B Back");
+                ? "A Install " + std::to_string(nsel) + "   Y Mark   R All/None   B Back"
+                : std::string("A Install   Y Mark   SEL Find   B Back");
             if (maxScroll > 0) hint += "   X/L Scroll";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
             return;
@@ -1545,8 +1558,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             int nsel = this->selectedCount();
             std::string mhint = this->entries.empty()
                 ? std::string("B Back")
-                : (nsel > 0 ? "A Batch " + std::to_string(nsel) + "   Y/R Mark   B Back"
-                            : std::string("A Manage   Y/R Mark   SEL Find   B Back"));
+                : (nsel > 0 ? "A Batch " + std::to_string(nsel) + "   Y Mark   R All/None   B Back"
+                            : std::string("A Manage   Y Mark   SEL Find   B Back"));
             drawBottomFrame(mhint.c_str());
             if (this->entries.empty()) {
                 const char* empty = (this->platformSlug == ROMM_SLUG_3DS) ? "No installed 3DS titles."
@@ -1646,7 +1659,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
             drawBottomFrame("A Change    B Back");
             static const char* descs[] = {
-                "Give each install a random title ID. Useful for rom hacks that share a game code.",
+                "", // random title id (removed: asked on install when a duplicate is detected)
                 "Ask for a custom HOME menu name on every install.",
                 "Overwrite existing installs without asking first.",
                 "", // language (removed)
@@ -1669,8 +1682,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 const char* d = nullptr;
                 if (id >= 0 && id <= 5) d = descs[id];
                 else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
-                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key (saved to sd:/3ds/romm3ds/sgdb.env) or re-read the file.";
-                else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. AGS-101 = gamma-corrected (recommended); original = Nintendo's dark filter; unfiltered = brightest, washed; brighter gamma = between the two; night = AGS-101 + warm blue-light filter. Per game: Manage -> game -> Screen.";
+                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/romm3ds/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
+                else if (id == SETTING_GBA_SCREEN) d = "Filter baked into new GBA installs. Brighter gamma = bright, pops like 3DS games (recommended). AGS-101 = backlit GBA look; original = dark; unfiltered = washed; night = warm. Per game: Manage -> Screen filter.";
                 else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage. Title icons = each game's own HOME icon (fast, always available); RomM covers = box art from the server for library matches.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
@@ -1723,8 +1736,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 : "Install every game listed that isn't installed yet.", 4);
             }
             std::string hint = (nSel > 0)
-                ? "A Install " + std::to_string(nSel) + "   Y/R Mark   B Back"
-                : std::string("A Install   Y/R Mark   X ") +
+                ? "A Install " + std::to_string(nSel) + "   Y Mark   R All/None   B Back"
+                : std::string("A Install   Y Mark   X ") +
                   (gLocalShowInstalled ? "Hide done" : "Show all") + "   B Back";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
                      hint.c_str(), C2D_AlignCenter);
@@ -2022,10 +2035,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->rommId = id;
             entries.push_back(e);
         };
-        add(SETTING_RANDOM_TID,   std::string("Random title ID: ") + (config->randomTID ? "on" : "off"));
         add(SETTING_CUSTOM_TITLE, std::string("Ask for custom title: ") + (config->customTitle ? "on" : "off"));
         add(SETTING_FORCE,        std::string("Force install: ") + (config->forceInstall ? "on" : "off"));
-        add(SETTING_SHOW_3DS,     std::string("Show 3DS .3ds (non-installable): ") + (config->show3dsRoms ? "on" : "off"));
         add(SETTING_ART_NOTIFY,   std::string("Art: ") + (config->artNotify ? "notify when missing" : "silent fallback"));
         add(SETTING_SGDB_KEY,     std::string("SteamGridDB key: ") + (ensureSgdb() ? "found" : "missing"));
         static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
@@ -2078,7 +2089,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                std::string slug, bool cross) {
         delete prev;
         std::string flow = toLowerCase(filter);
-        bool show3ds = gConfigPtr ? gConfigPtr->show3dsRoms : false;
         installed3dsRefresh();     // 3DS: titles installed on the console
         refreshNdsForwarders();    // NDS: forwarders on the HOME menu
         std::vector<MenuSelection*> entries;
@@ -2087,8 +2097,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 toLowerCase(rom.name).find(flow) == std::string::npos &&
                 toLowerCase(rom.fsName).find(flow) == std::string::npos)
                 continue;
-            // hide non-installable 3DS .3ds entries unless the setting is on
-            if (rom.platformSlug == ROMM_SLUG_3DS && !rom.installable && !show3ds)
+            // only decrypted .cia files install on-device: hide the rest
+            if (rom.platformSlug == ROMM_SLUG_3DS && !rom.installable)
                 continue;
             MenuSelection* e = new MenuSelection();
             // marker: 3DS/GBA = title installed on the console (AM, by title id);
@@ -2457,6 +2467,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         this->top=entries.begin();
         this->selection=entries.begin();
     }
+    // put the cursor back on row i after a rebuild (Settings toggles): the
+    // list scrolls just enough to keep the row visible
+    void Menu::selectIndex(size_t i) {
+        if (this->entries.empty()) return;
+        if (i >= this->entries.size()) i = this->entries.size() - 1;
+        this->selection = this->entries.begin() + i;
+        this->top = this->entries.begin();
+        if (this->entries.size() > (size_t)MAX_ENTRY_COUNT && i >= (size_t)MAX_ENTRY_COUNT)
+            this->top = this->entries.begin() + (i - MAX_ENTRY_COUNT + 1);
+    }
     void Menu::down() {
         if (this->entries.size()==0) return;
         if (this->selection+1 == this->entries.end()) {
@@ -2505,16 +2525,26 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         for (auto e : this->entries) if (e->selected) n++;
         return n;
     }
-    // R: mark every selectable row; if anything is marked already, clear all
+    // R: mark every selectable row; when everything is already marked, a
+    // second press clears all (all/none toggle — partial marks extend to all)
     void Menu::toggleSelectAll() {
         if (this->entries.empty()) return;
-        if (this->selectedCount() > 0) { this->clearSelection(); return; }
-        for (auto e : this->entries) {
+        auto selectable = [](MenuSelection* e) {
             if (e->action != RommInstall && e->action != ManageRom &&
-                e->action != LocalInstall) continue;
-            if (e->action == RommInstall && e->platformSlug == ROMM_SLUG_3DS && !e->installable) continue;
-            e->selected = true;
+                e->action != LocalInstall) return false;
+            if (e->action == RommInstall && e->platformSlug == ROMM_SLUG_3DS && !e->installable) return false;
+            return true;
+        };
+        bool any = false, allSelected = true;
+        for (auto e : this->entries) {
+            if (!selectable(e)) continue;
+            any = true;
+            if (!e->selected) allSelected = false;
         }
+        if (!any) return;
+        if (allSelected) { this->clearSelection(); return; }
+        for (auto e : this->entries)
+            if (selectable(e)) e->selected = true;
     }
     void Menu::clearSelection() {
         for (auto e : this->entries) e->selected = false;
@@ -2601,27 +2631,27 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         return this->queue.size() > 0;
     }
 
-    // shared install helper: template load + buildCIA + overwrite dialog
-    static bool installForwarder(Builder* builder, C3D_RenderTarget* target, Config* config,
-                                 const std::string& romPath, bool allowRandomTid) {
-        if (!(builder->loadTemplate(config->templates.at(config->currentTemplate)))->isSuccess()) {
-            Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),gLang.getString("menu_noTemplate")},{gLang.getString("menu_ok")}).handle();
-            return false;
-        }
-        bool randomTID = allowRandomTid && config->randomTID;
-        ReturnResult* buildResult = builder->buildCIA(romPath, randomTID, "", config->forceInstall);
-        if (buildResult != nullptr && buildResult->code == ERROR_INSTALL_ALREADY_EXISTS) {
-            if (Dialog(target,0,0,320,240,{gLang.getString("error_030102"),gLang.getString("menu_overwriteQ")},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
-                delete buildResult;
-                buildResult = builder->buildCIA(romPath, randomTID, "", true);
+    // TWL forwarder duplicate-title flow (item: random tid on demand): the
+    // first build keeps the rom's own game code; when that title id is
+    // already installed (rom hacks share the original's code), ask — install
+    // as a new copy with a random title id (keeps both) or overwrite.
+    // B keeps the ALREADY_EXISTS result, which the caller reports as-is.
+    static ReturnResult* buildTwlResolvingDuplicate(Builder* builder, C3D_RenderTarget* target,
+                                                    const std::string& romPath,
+                                                    const std::string& showName,
+                                                    const std::string& customTitle,
+                                                    bool force) {
+        ReturnResult* r = builder->buildCIA(romPath, false, customTitle, force);
+        if (r != nullptr && r->code == ERROR_INSTALL_ALREADY_EXISTS) {
+            int c = actionMenu(target, "Already installed", showName, {
+                {"Install as new", "Give this copy a random title ID so both stay installed. For rom hacks that share the original's game code."},
+                {"Overwrite", "Replace the installed forwarder with this one."}});
+            if (c >= 0) {
+                delete r;
+                r = builder->buildCIA(romPath, c == 0, customTitle, true);
             }
         }
-        bool ok = buildResult->isSuccess();
-        if (!ok) {
-            Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),gLang.getErrorString(buildResult->code),gLang.parseString("format_hex",(u32)buildResult->code)},{gLang.getString("menu_ok")}).handle();
-        }
-        delete buildResult;
-        return ok;
+        return r;
     }
 
     Menu* Menu::handleQueue(Builder* builder, C3D_RenderTarget* target, Config* config) {
@@ -2662,10 +2692,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (Dialog(target,0,0,320,240,{gLang.getString("menu_installTitleQ"),entry.path.filename().generic_string()},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
                         ReturnResult* buildResult=nullptr;
                         std::string customTitle="";
-                        bool randomTID = false;
                         bool forceInstall = false;
                         if (config!=nullptr) {
-                            randomTID = config->randomTID;
                             forceInstall = config->forceInstall;
                             if (config->customTitle) {
                                 char customTitleBuffer[0x51] = {0};
@@ -2679,17 +2707,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             buildResult = builder->loadTemplate(config->templates.at(config->currentTemplate));
                             if (buildResult->isSuccess()) {
                                 delete buildResult;
-                                buildResult = builder->buildCIA(entry.path.generic_string(), randomTID, customTitle, forceInstall);
+                                buildResult = buildTwlResolvingDuplicate(builder, target,
+                                    entry.path.generic_string(), entry.path.filename().generic_string(),
+                                    customTitle, forceInstall);
                             }
                         } else {
-                            buildResult = builder->buildCIA(entry.path.generic_string());
-                        }
-
-                        if (buildResult != nullptr && (buildResult->code == ERROR_INSTALL_ALREADY_EXISTS)) {
-                            if (Dialog(target,0,0,320,240,{gLang.getString("error_030102"),gLang.getString("menu_overwriteQ")},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
-                                delete buildResult;
-                                buildResult = builder->buildCIA(entry.path.generic_string(), randomTID, customTitle, true);
-                            }
+                            buildResult = buildTwlResolvingDuplicate(builder, target,
+                                entry.path.generic_string(), entry.path.filename().generic_string(), "", false);
                         }
 
                         if (buildResult->isSuccess()) {
@@ -2719,10 +2743,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shortname},{},0).handle();
                             ReturnResult* buildResult=nullptr;
                             std::string customTitle="";
-                            bool randomTID = false;
                             bool forceInstall = false;
                             if (config!=nullptr) {
-                                randomTID = config->randomTID;
                                 forceInstall = config->forceInstall;
                                 if (config->customTitle) {
                                     char customTitleBuffer[0x51] = {0};
@@ -2733,17 +2755,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     swkbdInputText(&kbstate,customTitleBuffer,0x51);
                                     customTitle=std::string(customTitleBuffer);
                                 }
-                                buildResult = builder->buildCIA(dEntry.path().generic_string(), randomTID, customTitle, forceInstall);
-                            } else {
-                                buildResult = builder->buildCIA(dEntry.path().generic_string());
                             }
-
-                            if (buildResult != nullptr && (buildResult->code == ERROR_INSTALL_ALREADY_EXISTS)) {
-                                if (Dialog(target,0,0,320,240,{gLang.getString("error_030102"),shortname,gLang.getString("menu_overwriteQ")},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
-                                    delete buildResult;
-                                    buildResult = builder->buildCIA(dEntry.path().generic_string(), randomTID, customTitle, true);
-                                }
-                            }
+                            buildResult = buildTwlResolvingDuplicate(builder, target,
+                                dEntry.path().generic_string(), shortname, customTitle, forceInstall);
 
                             if (!buildResult->isSuccess()) {
                                 Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),shortname,gLang.getErrorString(buildResult->code),gLang.parseString("format_hex",(u32)buildResult->code)},{gLang.getString("menu_ok")}).handle();
@@ -2794,6 +2808,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     while (this->queue.size() > 0) this->queue.pop();
                     return generateSettingsMenu(this, config);
                 case SettingToggle: {
+                    // rebuilds below put the cursor back on the toggled row
+                    // instead of snapping to the top of the list
+                    size_t selIdx = (size_t)(this->selection - this->entries.begin());
                     if (entry.rommId >= SETTING_SRV_HOST && entry.rommId <= SETTING_SRV_TEST) {
                         switch (entry.rommId) {
                             case SETTING_SRV_HOST:
@@ -2816,13 +2833,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             }
                         }
                         while (this->queue.size() > 0) this->queue.pop();
-                        return generateServerMenu(this);
+                        {
+                            Menu* m = generateServerMenu(this);
+                            m->selectIndex(selIdx);
+                            return m;
+                        }
                     }
                     switch (entry.rommId) {
-                        case SETTING_RANDOM_TID:   config->randomTID = !config->randomTID; break;
                         case SETTING_CUSTOM_TITLE: config->customTitle = !config->customTitle; break;
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
-                        case SETTING_SHOW_3DS:     config->show3dsRoms = !config->show3dsRoms; break;
                         case SETTING_ART_NOTIFY:   config->artNotify = !config->artNotify; break;
                         case SETTING_GBA_SCREEN:   config->gbaScreen = (config->gbaScreen + 1) % GBA_SCREEN_COUNT; break;
                         case SETTING_MANAGE_ART:   config->manageIcons = !config->manageIcons; break;
@@ -2869,7 +2888,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     config->save();
                     while (this->queue.size() > 0) this->queue.pop();
-                    return generateSettingsMenu(this, config);
+                    {
+                        Menu* m = generateSettingsMenu(this, config);
+                        m->selectIndex(selIdx);
+                        return m;
+                    }
                 }
                 case RommInstall: {
                     bool is3ds = (entry.platformSlug == ROMM_SLUG_3DS);
@@ -2887,6 +2910,19 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (is3ds && !entry.installable) {
                         Dialog(target,0,0,320,240,{"Not a .cia — can't install here.",entry.fsName,"Convert on PC with ready3ds,","then upload the .cia to RomM."},{"OK"}).handle();
                         break;
+                    }
+                    // same title id as an installed game, but a DIFFERENT RomM
+                    // entry: a rom hack that kept the original's id. Installing
+                    // silently REPLACES the original (a .cia's id can't be
+                    // changed on device — it keys the NCCH crypto), so warn.
+                    if (is3ds && entry.titleId && installed3dsHasTitle(entry.titleId) &&
+                        installed3dsRommIdForTitle(entry.titleId) != entry.rommId) {
+                        if (Dialog(target,0,0,320,240,
+                                   {"Same title ID already installed",
+                                    "Rom hacks often keep the original","game's title ID. Installing this",
+                                    "REPLACES that game (they share","the save data)."},
+                                   {"Install anyway","Cancel"},1).handle()!=0)
+                            break;
                     }
                     std::string dir = rommDirFor(entry.platformSlug);
                     std::string dest = dir + entry.fsName;                         // download target (nds may be .zip)
@@ -2911,7 +2947,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     } else if (isGba) {
                         int c = actionMenu(target, "Install this game?",
                                            entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
-                            {"Install", "Auto art and the default screen filter. The usual choice."},
+                            {"Install", "Auto art and the default screen filter."},
                             {"Install + choose art", "Pick the HOME icon and banner before installing."},
                             {"Install + screen filter", "Pick the color preset baked into this install."},
                             {"Install + art + filter", "Customize both: art picker, then the preset."}});
@@ -2967,7 +3003,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool pickArtAll = false;
                     int batchScreen = -1;
                     std::vector<MenuOpt> bopts = {
-                        {"Install " + std::to_string(M), "Auto art, saved/default filters. The usual choice."}};
+                        {"Install " + std::to_string(M), "Auto art, saved/default filters."}};
                     if (anyGba) {
                         bopts.push_back({"Install + choose art", "Art picker for each GBA game first, then everything installs unattended."});
                         bopts.push_back({"Install + screen filter", "Pick ONE preset, baked into every GBA install in this batch."});
@@ -3094,46 +3130,77 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             break;
                         }
                         // updates (0004000E) and DLC (0004008C) of this game stay
-                        // behind unless we take them too — offer that in one go
+                        // behind unless we take them too. Default = uninstall
+                        // everything; below it, granular rows for just the
+                        // update, just the DLC, or both — game kept.
                         TitleExtras ex = findTitleExtras(entry.tid);
-                        int c;
+                        bool delGame = true;
+                        std::vector<u64> extraDel;
+                        u64 freed = entry.sizeBytes;
+                        std::string confirmTitle = "Uninstall game?";
                         if (!ex.empty()) {
-                            c = actionMenu(target, n3,
-                                           "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total", {
-                                {"Uninstall", "Remove the game AND its " +
-                                              std::to_string(ex.updates + ex.dlc) +
-                                              " update/DLC. Frees " + humanSize(entry.sizeBytes + ex.bytes) + "."},
-                                {"Remove extras only", "Keep the game; delete just the update/DLC. Frees " +
-                                                       humanSize(ex.bytes) + "."}});
+                            std::vector<MenuOpt> opts;
+                            std::vector<int> what;   // 0 all, 1 update+dlc, 2 update, 3 dlc
+                            opts.push_back({"Uninstall", "Remove the game AND its " +
+                                            std::to_string(ex.updates + ex.dlc) +
+                                            " update/DLC. Frees " + humanSize(entry.sizeBytes + ex.bytes) + "."});
+                            what.push_back(0);
+                            if (ex.updates && ex.dlc) {
+                                opts.push_back({"Remove update + DLC", "Keep the game; delete its update and DLC. Frees " +
+                                                humanSize(ex.bytes) + "."});
+                                what.push_back(1);
+                            }
+                            if (ex.updates) {
+                                opts.push_back({ex.dlc ? "Remove update only" : "Remove update",
+                                                std::string("Keep the game") + (ex.dlc ? " and DLC" : "") +
+                                                "; delete the update (back to v1.0). Frees " + humanSize(ex.updateBytes) + "."});
+                                what.push_back(2);
+                            }
+                            if (ex.dlc) {
+                                opts.push_back({ex.updates ? "Remove DLC only" : "Remove DLC",
+                                                std::string("Keep the game") + (ex.updates ? " and update" : "") +
+                                                "; delete the DLC. Frees " + humanSize(ex.dlcBytes) + "."});
+                                what.push_back(3);
+                            }
+                            int c = actionMenu(target, n3,
+                                               "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total", opts);
+                            if (c < 0) break;
+                            switch (what[c]) {
+                                case 0: extraDel = ex.tids;      freed = entry.sizeBytes + ex.bytes; break;
+                                case 1: extraDel = ex.tids;      freed = ex.bytes;       delGame = false;
+                                        confirmTitle = "Remove update + DLC?"; break;
+                                case 2: extraDel = ex.updateTids; freed = ex.updateBytes; delGame = false;
+                                        confirmTitle = "Remove the update?"; break;
+                                case 3: extraDel = ex.dlcTids;   freed = ex.dlcBytes;    delGame = false;
+                                        confirmTitle = "Remove the DLC?"; break;
+                            }
                         } else {
-                            c = actionMenu(target, n3, "Installed - " + humanSize(entry.sizeBytes), {
+                            int c = actionMenu(target, n3, "Installed - " + humanSize(entry.sizeBytes), {
                                 {"Uninstall", "Remove the game. Frees " + humanSize(entry.sizeBytes) + "."}});
+                            if (c < 0) break;
                         }
-                        if (c < 0) break;
-                        bool extrasOnly = (c == 1);
-                        u64 freed = extrasOnly ? ex.bytes : entry.sizeBytes + ex.bytes;
                         if (Dialog(target,0,0,320,240,
-                                   {extrasOnly ? "Remove update/DLC only?" : "Uninstall game?",
-                                    n3, "Frees " + humanSize(freed)},
+                                   {confirmTitle, n3, "Frees " + humanSize(freed) +
+                                    (delGame ? "" : " - the game stays installed")},
                                    {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
-                        showLoading(target, {"Uninstalling...", n3});
+                        showLoading(target, {delGame ? "Uninstalling..." : "Removing...", n3});
                         Result dr = 0;
-                        if (!extrasOnly) {
+                        if (delGame) {
                             dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
                             AM_DeleteTicket(entry.tid);
                         }
                         int extrasGone = 0;
                         if (R_SUCCEEDED(dr)) {
-                            for (u64 xt : ex.tids) {
+                            for (u64 xt : extraDel) {
                                 if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, xt))) extrasGone++;
                                 AM_DeleteTicket(xt);
                             }
                         }
                         installedTitlesInvalidate();
                         if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
-                        else if (extrasOnly)
-                            Dialog(target,0,0,320,240,{"Extras removed.",n3,
-                                   humanSize(ex.bytes)+" freed - the game stays installed."},{"OK"}).handle();
+                        else if (!delGame)
+                            Dialog(target,0,0,320,240,{"Removed.",n3,
+                                   humanSize(freed)+" freed - the game stays installed."},{"OK"}).handle();
                         else Dialog(target,0,0,320,240,{"Uninstalled.",n3,
                                     extrasGone > 0 ? "Update/DLC went with it." : ""},{"OK"}).handle();
                         while (this->queue.size() > 0) this->queue.pop();
@@ -3547,20 +3614,80 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     for (auto e : items)
                         if (!is3ds && !manageItemInstalled(slug, *e)) notInstalled++;
                     // action dialog: what's offered follows what's selected
-                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_SCREEN, A_BACK } act = A_BACK;
+                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_SCREEN, A_EXTRAS, A_BACK } act = A_BACK;
+                    std::vector<u64> extrasSel;   // 3DS: update/DLC titles to strip (A_EXTRAS)
+                    u64 extrasSelBytes = 0;
                     std::string bsub = std::to_string(M) + " selected";
-                    if (!is3ds && notInstalled == M) {
+                    if (is3ds) {
+                        // updates/DLC across the selection: same granular rows
+                        // as the single-item menu, applied to every selected
+                        // game at once. Default stays "uninstall everything".
+                        std::vector<u64> updT, dlcT;
+                        u64 updB = 0, dlcB = 0, totalB = 0;
+                        for (auto e : items) {
+                            TitleExtras ex = findTitleExtras(e->tid, true);
+                            totalB += e->sizeBytes + ex.bytes;
+                            updT.insert(updT.end(), ex.updateTids.begin(), ex.updateTids.end());
+                            dlcT.insert(dlcT.end(), ex.dlcTids.begin(), ex.dlcTids.end());
+                            updB += ex.updateBytes;
+                            dlcB += ex.dlcBytes;
+                        }
+                        std::vector<MenuOpt> mo = {
+                            {"Uninstall selected", "Remove every selected game, updates and DLC included. Frees " +
+                                                   humanSize(totalB) + "."}};
+                        std::vector<int> ma = {A_UNINSTALL};
+                        std::vector<std::pair<std::vector<u64>, u64>> mx = {{{}, 0}};
+                        if (!updT.empty() && !dlcT.empty()) {
+                            std::vector<u64> both = updT;
+                            both.insert(both.end(), dlcT.begin(), dlcT.end());
+                            mo.push_back({"Remove update + DLC", "Keep the games; strip every update and DLC. Frees " +
+                                                                 humanSize(updB + dlcB) + "."});
+                            ma.push_back(A_EXTRAS); mx.push_back({both, updB + dlcB});
+                        }
+                        if (!updT.empty()) {
+                            mo.push_back({dlcT.empty() ? "Remove updates" : "Remove updates only",
+                                          "Keep the games; delete " + std::to_string((int)updT.size()) +
+                                          " update title(s). Frees " + humanSize(updB) + "."});
+                            ma.push_back(A_EXTRAS); mx.push_back({updT, updB});
+                        }
+                        if (!dlcT.empty()) {
+                            mo.push_back({updT.empty() ? "Remove DLC" : "Remove DLC only",
+                                          "Keep the games; delete " + std::to_string((int)dlcT.size()) +
+                                          " DLC title(s). Frees " + humanSize(dlcB) + "."});
+                            ma.push_back(A_EXTRAS); mx.push_back({dlcT, dlcB});
+                        }
+                        int c = actionMenu(target, "Batch", bsub, mo);
+                        if (c >= 0) {
+                            act = (decltype(act))ma[c];
+                            extrasSel = mx[c].first;
+                            extrasSelBytes = mx[c].second;
+                        }
+                    } else if (notInstalled == M) {
                         int c = actionMenu(target, "Batch", bsub, {
                             {"Install selected", "Art first, then every game installs unattended."},
                             {"Delete ROMs", "Remove the selected ROM files from the SD card."}});
                         act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
                     } else if (notInstalled > 0) {
-                        int c = actionMenu(target, "Batch",
-                                           bsub + " - " + std::to_string(notInstalled) + " not installed", {
+                        // mixed selection (typical after R = select all): the
+                        // rebuild actions still apply to the installed rows
+                        std::vector<MenuOpt> mo = {
                             {"Install", "Install the ones that aren't installed yet."},
-                            {"Uninstall", "Uninstall the ones that are installed."}});
-                        act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
-                    } else if (is3ds || rebuildable == 0) {
+                            {"Uninstall", "Uninstall the ones that are installed."}};
+                        std::vector<int> ma = {A_INSTALL, A_UNINSTALL};
+                        if (rebuildable > 0) {
+                            mo.push_back({"Change art", slug == ROMM_SLUG_GBA
+                                ? "Art picker for each installed game, then each re-bakes in place."
+                                : "Banner picker for each installed forwarder, then each re-bakes."});
+                            ma.push_back(A_CHANGEART);
+                            if (slug == ROMM_SLUG_GBA) {
+                                mo.push_back({"Screen filter", "Pick one preset and apply it to the installed games."});
+                                ma.push_back(A_SCREEN);
+                            }
+                        }
+                        int c = actionMenu(target, "Batch",
+                                           bsub + " - " + std::to_string(notInstalled) + " not installed", mo);
+                        if (c >= 0) act = (decltype(act))ma[c];
+                    } else if (rebuildable == 0) {
                         int c = actionMenu(target, "Batch", bsub, {
                             {"Uninstall selected", "Remove every selected game."}});
                         act = (c==0) ? A_UNINSTALL : A_BACK;
@@ -3577,6 +3704,29 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
                     }
                     if (act == A_BACK) break;
+                    if (act == A_EXTRAS) {
+                        // strip the chosen update/DLC titles; the games stay
+                        if (Dialog(target,0,0,320,240,
+                                   {"Remove " + std::to_string((int)extrasSel.size()) + " update/DLC title(s)?",
+                                    "Frees " + humanSize(extrasSelBytes),
+                                    "The games stay installed."},
+                                   {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                            break;
+                        int okCount = 0;
+                        for (size_t i = 0; i < extrasSel.size(); i++) {
+                            showLoading(target, {"Removing " + std::to_string((int)i+1) + "/" +
+                                                 std::to_string((int)extrasSel.size())});
+                            if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, extrasSel[i]))) okCount++;
+                            AM_DeleteTicket(extrasSel[i]);
+                        }
+                        installedTitlesInvalidate();
+                        Dialog(target,0,0,320,240,
+                               {"Removed " + std::to_string(okCount) + " of " + std::to_string((int)extrasSel.size()),
+                                humanSize(extrasSelBytes) + " freed - the games stay installed."},{"OK"}).handle();
+                        while (this->queue.size() > 0) this->queue.pop();
+                        showLoading(target, {"Refreshing..."});
+                        return generateManageMenu(this,config->dsiwareCount,slug,target);
+                    }
                     if (act == A_SCREEN) {
                         // pick a preset once, re-bake every selected inject with it
                         int fc = pickGbaScreenPreset(target, config, std::to_string(M)+" selected");
@@ -3653,18 +3803,30 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         return generateManageMenu(this,config->dsiwareCount,slug,target);
                     }
                     if (act == A_UNINSTALL) {
-                        if (Dialog(target,0,0,320,240,{"Uninstall "+std::to_string(M)+" games?"},
+                        // mixed selections uninstall only the installed rows
+                        // (the option says so); all-not-installed = Delete ROMs
+                        std::vector<MenuSelection*> todoU = items;
+                        if (notInstalled > 0 && notInstalled < M) {
+                            todoU.clear();
+                            for (auto e : items)
+                                if (manageItemInstalled(slug, *e)) todoU.push_back(e);
+                        }
+                        int NU = (int)todoU.size();
+                        std::string q = (!is3ds && notInstalled == M)
+                            ? "Delete " + std::to_string(NU) + " ROM file(s)?"
+                            : "Uninstall " + std::to_string(NU) + " games?";
+                        if (Dialog(target,0,0,320,240,{q},
                                    {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                             break;
                         int okCount = 0;
                         std::vector<std::string> failed;
-                        for (int i = 0; i < M; i++) {
-                            showLoading(target, {"Uninstalling "+std::to_string(i+1)+"/"+std::to_string(M), items[i]->title});
-                            if (uninstallManageItem(config, *items[i])) okCount++;
-                            else failed.push_back(items[i]->title);
+                        for (int i = 0; i < NU; i++) {
+                            showLoading(target, {"Uninstalling "+std::to_string(i+1)+"/"+std::to_string(NU), todoU[i]->title});
+                            if (uninstallManageItem(config, *todoU[i])) okCount++;
+                            else failed.push_back(todoU[i]->title);
                         }
                         std::vector<std::string> msg;
-                        msg.push_back("Uninstalled "+std::to_string(okCount)+" of "+std::to_string(M));
+                        msg.push_back("Uninstalled "+std::to_string(okCount)+" of "+std::to_string(NU));
                         int shown = 0;
                         for (auto& f : failed) { if (shown++ >= 4) break; msg.push_back("x "+shorten(f,28)); }
                         if ((int)failed.size() > 4) msg.push_back("...and "+std::to_string((int)failed.size()-4)+" more");

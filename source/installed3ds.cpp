@@ -68,3 +68,11 @@ bool installed3dsIs(int rommId) {
 bool installed3dsHasTitle(unsigned long long titleId) {
     return titleId != 0 && gAmSet.count(titleId) > 0;
 }
+
+int installed3dsRommIdForTitle(unsigned long long titleId) {
+    if (!titleId) return 0;
+    loadMap();
+    for (auto& kv : gTidMap)
+        if (kv.second == titleId) return kv.first;
+    return 0;
+}

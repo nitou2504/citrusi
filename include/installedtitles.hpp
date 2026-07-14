@@ -46,13 +46,20 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos = true,
 
 // update (0004000E) / DLC (0004008C) titles that belong to an app
 struct TitleExtras {
-    std::vector<u64> tids;
+    std::vector<u64> tids;         // all extras (updates + DLC)
+    std::vector<u64> updateTids;   // just the update titles (0004000E)
+    std::vector<u64> dlcTids;      // just the DLC titles (0004008C)
     u64 bytes = 0;
+    u64 updateBytes = 0;
+    u64 dlcBytes = 0;
     u32 updates = 0;
     u32 dlc = 0;
     bool empty() const { return tids.empty(); }
 };
-TitleExtras findTitleExtras(u64 appTid);
+// cache-only by default (safe to call per frame). allowEnumerate=true lets it
+// re-enumerate AM when the cache is cold — for batch flows that invalidate
+// the cache between items; never pass true from the UI/draw path.
+TitleExtras findTitleExtras(u64 appTid, bool allowEnumerate = false);
 
 // bytes + counts per class, and SD free space. Cached until invalidated.
 struct StorageTally {

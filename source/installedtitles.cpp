@@ -345,22 +345,34 @@ std::vector<InstalledTitle> listInstalledApps(bool includeDemos, bool sortBySize
     return out;
 }
 
-TitleExtras findTitleExtras(u64 appTid) {
+TitleExtras findTitleExtras(u64 appTid, bool allowEnumerate) {
     TitleExtras ex;
     u32 uid = (u32)((appTid >> 8) & 0xFFFFFF);
     if (!appTid) return ex;
-    // cache-only: this runs from drawBottom on selection changes and must
-    // NEVER enumerate AM on the UI thread — the async tally warms the cache
-    enumLock();
-    bool warm = gSdEnumOk;
-    LightLock_Unlock(&gEnumLock);
-    if (!warm) return ex;
+    // cache-only by default: this runs from drawBottom on selection changes
+    // and must NEVER enumerate AM on the UI thread — the async tally warms
+    // the cache. Batch uninstalls pass allowEnumerate (they invalidate the
+    // cache after every item, and a stale/empty answer would orphan extras).
+    if (!allowEnumerate) {
+        enumLock();
+        bool warm = gSdEnumOk;
+        LightLock_Unlock(&gEnumLock);
+        if (!warm) return ex;
+    }
     for (auto& t : enumerateMedia(MEDIATYPE_SD)) {
         if (t.kind != TK_UPDATE && t.kind != TK_DLC) continue;
         if ((u32)((t.tid >> 8) & 0xFFFFFF) != uid) continue;
         ex.tids.push_back(t.tid);
         ex.bytes += t.sizeBytes;
-        if (t.kind == TK_UPDATE) ex.updates++; else ex.dlc++;
+        if (t.kind == TK_UPDATE) {
+            ex.updates++;
+            ex.updateTids.push_back(t.tid);
+            ex.updateBytes += t.sizeBytes;
+        } else {
+            ex.dlc++;
+            ex.dlcTids.push_back(t.tid);
+            ex.dlcBytes += t.sizeBytes;
+        }
     }
     return ex;
 }

@@ -4,6 +4,35 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
 
+### Added (2026-07-14, round 3)
+- **Granular update/DLC removal**: Manage → 3DS on a game with extras now
+  offers *Uninstall* (game + extras), *Remove update + DLC*, *Remove update
+  only*, *Remove DLC only* — each row says what it frees. The batch menu
+  gets the same rows (aggregated over the selection), and batch uninstall
+  now removes each game's updates/DLC too (they used to be left behind as
+  orphans).
+- **Batch art/filter for mixed selections**: a Manage GBA/NDS batch mixing
+  installed and not-installed rows (e.g. after R = select all) now offers
+  *Change art* and (GBA) *Screen filter* for the installed ones, next to
+  Install/Uninstall. "Delete ROMs" on not-installed GBA rows actually
+  deletes the files now.
+- **Duplicate title-id prompts, on demand**: the Random-title-ID Settings
+  toggle is gone. A TWL forwarder whose title id is already installed asks
+  *Install as new* (random id, keeps both — rom hacks sharing the
+  original's game code) or *Overwrite*. A 3DS .cia whose title id belongs
+  to a different installed game (a rom hack keeping the original's id)
+  warns that installing replaces that game, before the download.
+- **Settings QoL**: toggling a setting keeps the cursor on that row instead
+  of snapping to the top; the SteamGridDB row shows the sgdb.env format
+  (`STEAMGRIDDB_API_KEY=...`); the "Show 3DS .3ds" toggle is removed (only
+  decrypted .cia files install).
+- **GBA default filter = Brighter gamma**: new installs default to the
+  bright, punchy preset that pops like a 3DS game (marked *Recommended* in
+  the picker); "The usual choice" copy dropped from the install menus.
+- **Marking-mode hints**: with rows Y-marked the bottom bar reads
+  "Y Mark   R All/None" (the find hint hides); R on a partial selection now
+  extends it to all instead of clearing it.
+
 ### Added (2026-07-14)
 - **Per-game screen filter memory**: every GBA bake records its preset in
   art.json; reinstalls and art changes keep the game's preset instead of
@@ -16,9 +45,10 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 - **Baked-banner preview**: GBA bakes save an untiled copy of the banner and
   the Manage details card shows it — exactly what HOME displays.
 - Random title ID note: it applies to **NDS** TWL forwarders (rom hacks
-  sharing the original's game code would collide) via the existing Settings
-  toggle. GBA injects can't collide (per-filename title ids), and 3DS .cia
-  files can't be re-id'd on device (the title id keys the NCCH encryption).
+  sharing the original's game code would collide) — since round 3 asked on
+  install when the id is taken, not a Settings toggle. GBA injects can't
+  collide (per-filename title ids), and 3DS .cia files can't be re-id'd on
+  device (the title id keys the NCCH encryption).
 
 ### Fixed (2026-07-14)
 - **B goes back instantly**: every screen rebuild paused the cover worker by

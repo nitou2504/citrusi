@@ -122,6 +122,7 @@ class Menu {
         // library + Manage rows via toggleSelect (Y). START queues the batch.
         void toggleSelect();     // Y: mark/unmark the current row (skips rows that can't batch)
         void toggleSelectAll();  // R: mark every selectable row / clear all marks
+        void selectIndex(size_t i);  // move the cursor to entry i (menu rebuilds keep the row)
         int  selectedCount();    // how many rows are [x]-selected
         void clearSelection();   // drop all marks (menu rebuild / after a batch)
         // START: queue a batch for the marked rows. Returns false when there
