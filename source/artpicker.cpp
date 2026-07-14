@@ -231,7 +231,9 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
         };
         artGetUrl(gSgdb, gRomm, c.thumbUrl.empty() ? c.url : c.thumbUrl, c.thumbKey, bytes);
         gSgdb.abortCheck = nullptr;
-        if (gPendingKeys && bytes.empty()) return;   // cut for input: retry later
+        // cut for input: bytes may hold a PARTIAL transfer — decoding it
+        // failed and permanently x-ed the thumb. Always retry later instead.
+        if (gPendingKeys) return;
         aplog.info("thumb bytes: " + std::to_string(bytes.size()));
         if (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) {
             c.state = 1;
@@ -461,7 +463,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
                 snprintf(info, sizeof(info), "libretro logo");
             else
                 snprintf(info, sizeof(info), "%s", c.name.empty() ? c.source.c_str() : c.name.c_str());
-            drawText(160, 207, 0, 0.45f, COL_BG, COL_TEXT_DIM, info, C2D_AlignCenter);
+            drawText(160, 205, 0, 0.42f, COL_BG, COL_TEXT_DIM, info, C2D_AlignCenter);
         }
         if (!gameName.empty()) {
             // one clipped line between the heading and the grid — a long
@@ -469,7 +471,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
             std::string gn = gameName.size() > 42 ? gameName.substr(0, 41) + "..." : gameName;
             drawText(160, 26, 0, 0.38f, COL_BG, COL_TEXT_DIM, gn.c_str(), C2D_AlignCenter);
         }
-        drawText(160, 222, 0, 0.45f, COL_BG, COL_TEXT_DIM,
+        drawText(160, 227, 0, 0.42f, COL_BG, COL_TEXT_DIM,
                  "A use   X search   B skip   L/R pages", C2D_AlignCenter);
         C3D_FrameEnd(0);
         if (firstFrame) { firstFrame = false; aplog.info("first frame drawn"); }

@@ -394,7 +394,8 @@ struct InstallOutcome { bool ok=false; bool cancelled=false; };
 static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
                                      const MenuSelection& entry, bool needDownload,
                                      const ArtEntry& gbaArtEntry, const ArtPieces& gbaArt,
-                                     bool pickArt, bool interactive) {
+                                     bool pickArt, bool interactive,
+                                     int screenOverride = -1) {
     InstallOutcome out;
     bool is3ds = (entry.platformSlug == ROMM_SLUG_3DS);
     bool isGba = (entry.platformSlug == ROMM_SLUG_GBA);
@@ -501,7 +502,8 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
         }
         Dialog(target,0,0,320,240,{"Installing...",entry.title},{},0).handle();
         u64 lastG = 0;
-        int mode = gbaScreenFor(gbaArtEntry, config);
+        int mode = (screenOverride >= 0) ? screenOverride % GBA_SCREEN_COUNT
+                                         : gbaScreenFor(gbaArtEntry, config);
         ReturnResult* gr = gCtr.buildGbaCIA(romPath, entry.title, gtid,
                                             gbaArt.icon48, gbaArt.bannerTex,
                                             mode,
@@ -545,6 +547,60 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
 // else the Settings default. Returns the GBA_SCREEN_* index or -1 on B.
 static float drawWrapped(float x, float y, float maxW, float lineH, float scale,
                          u32 color, const std::string& text, int maxLines);
+// ---- vertical action menu -------------------------------------------------
+// One coherent options screen for every per-item action list, on Manage and
+// Browse alike: title + subtitle, options stacked vertically (the obvious
+// default action FIRST), and the highlighted option explained under the
+// list. A = pick (index), B = back (-1).
+struct MenuOpt {
+    std::string label;
+    std::string desc;
+};
+static int actionMenu(C3D_RenderTarget* target, const std::string& title,
+                      const std::string& subtitle,
+                      const std::vector<MenuOpt>& opts, int def = 0) {
+    int n = (int)opts.size();
+    if (n <= 0) return -1;
+    int sel = (def >= 0 && def < n) ? def : 0;
+    // squeeze rows when the list is long so the description always fits
+    float pitch = (n > 5) ? 20.0f : 24.0f;
+    float rowH  = pitch - 2.0f;
+    while (aptMainLoop()) {
+        hidScanInput();
+        u32 kd = hidKeysDown();
+        if (kd & KEY_UP)   sel = (sel + n - 1) % n;
+        if (kd & KEY_DOWN) sel = (sel + 1) % n;
+        if (kd & (KEY_A | KEY_START)) return sel;
+        if (kd & KEY_B) return -1;
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        C2D_TargetClear(target, COL_BG);
+        C2D_SceneBegin(target);
+        drawText(160, 16, 0.5f, 0.55f, 0, COL_TEXT, title.c_str(), C2D_AlignCenter);
+        if (!subtitle.empty()) {
+            std::string st = subtitle.size() > 46 ? subtitle.substr(0, 45) + "..." : subtitle;
+            drawText(160, 34, 0.5f, 0.42f, 0, COL_TEXT_DIM, st.c_str(), C2D_AlignCenter);
+        }
+        float y = 50;
+        for (int i = 0; i < n; i++, y += pitch) {
+            bool hot = (i == sel);
+            if (hot) C2D_DrawRectSolid(12, y, 0.4f, 296, rowH, COL_ACCENT);
+            drawText(22, y + rowH / 2, 0.5f, 0.5f, 0,
+                     hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, opts[i].label.c_str(), 0);
+        }
+        C2D_DrawRectSolid(12, y + 4, 0.4f, 296, 1, COL_ELEV);
+        if (!opts[sel].desc.empty()) {
+            float descY = y + 12;
+            int maxLines = (int)((222 - descY) / 13);
+            if (maxLines < 1) maxLines = 1;
+            if (maxLines > 3) maxLines = 3;
+            drawWrapped(16, descY, 288, 13, 0.42f, COL_TEXT_DIM, opts[sel].desc, maxLines);
+        }
+        drawText(160, 230, 0.5f, 0.4f, 0, COL_TEXT_DIM, "A select    B back", C2D_AlignCenter);
+        C3D_FrameEnd(0);
+    }
+    return -1;
+}
+
 static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
                                const std::string& title, int current = -1) {
     static const char* names[GBA_SCREEN_COUNT] = {
@@ -558,35 +614,15 @@ static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
         "AGS-101 colors plus a warm 3400K tint - easier on the eyes in the dark."};
     int def = config->gbaScreen % GBA_SCREEN_COUNT;
     if (current >= 0) current %= GBA_SCREEN_COUNT;
-    int sel = (current >= 0) ? current : def;
-    while (aptMainLoop()) {
-        hidScanInput();
-        u32 kd = hidKeysDown();
-        if (kd & KEY_UP)   sel = (sel + GBA_SCREEN_COUNT - 1) % GBA_SCREEN_COUNT;
-        if (kd & KEY_DOWN) sel = (sel + 1) % GBA_SCREEN_COUNT;
-        if (kd & (KEY_A | KEY_START)) return sel;
-        if (kd & KEY_B) return -1;
-        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-        C2D_TargetClear(target, COL_BG);
-        C2D_SceneBegin(target);
-        drawText(160, 16, 0.5f, 0.55f, 0, COL_TEXT, "Screen filter", C2D_AlignCenter);
-        drawText(160, 34, 0.5f, 0.42f, 0, COL_TEXT_DIM, title.c_str(), C2D_AlignCenter);
-        float y = 50;
-        for (int i = 0; i < GBA_SCREEN_COUNT; i++, y += 24) {
-            bool hot = (i == sel);
-            if (hot) C2D_DrawRectSolid(12, y, 0.4f, 296, 22, COL_ACCENT);
-            std::string label = names[i];
-            if (i == current)  label += "  (current)";
-            else if (i == def) label += "  (default)";
-            drawText(22, y + 11, 0.5f, 0.5f, 0,
-                     hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, label.c_str(), 0);
-        }
-        C2D_DrawRectSolid(12, y + 4, 0.4f, 296, 1, COL_ELEV);
-        drawWrapped(16, y + 12, 288, 13, 0.42f, COL_TEXT_DIM, descs[sel], 3);
-        drawText(160, 230, 0.5f, 0.4f, 0, COL_TEXT_DIM, "A apply    B cancel", C2D_AlignCenter);
-        C3D_FrameEnd(0);
+    std::vector<MenuOpt> opts;
+    for (int i = 0; i < GBA_SCREEN_COUNT; i++) {
+        std::string label = names[i];
+        if (i == current)  label += "  (current)";
+        else if (i == def) label += "  (default)";
+        opts.push_back({label, descs[i]});
     }
-    return -1;
+    return actionMenu(target, "Screen filter", title, opts,
+                      (current >= 0) ? current : def);
 }
 
 // re-bakes an installed inject with the given screen preset, reusing the
@@ -646,11 +682,13 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
     // was the only way before, and easy to fumble
     bool pIcon = true, pBanner = true;
     if (interactive) {
-        int w = Dialog(target,0,0,320,240,{"Change which art?",title},
-                       {"Icon","Banner","Both","Back"}).handle();
-        if (w < 0 || w == 3) return 0;
-        pIcon   = (w == 0 || w == 2);
-        pBanner = (w == 1 || w == 2);
+        int w = actionMenu(target, "Change which art?", title, {
+            {"Both", "Pick the HOME icon, then the banner."},
+            {"Icon only", "Just the 48px HOME icon; the banner stays."},
+            {"Banner only", "Just the big HOME banner; the icon stays."}});
+        if (w < 0) return 0;
+        pIcon   = (w == 0 || w == 1);
+        pBanner = (w == 0 || w == 2);
     }
     ArtEntry ae;
     ArtPieces pieces;
@@ -2769,23 +2807,38 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool onSD = fileExists(is3ds ? dest : romPath);
                     bool needDownload = true;
                     bool pickArt = false;    // "+ Art"/"Change art": picker before the (re)install
+                    int screenOverride = -1;   // gba: filter picked at install time
                     if (onSD && is3ds) {
-                        int c = Dialog(target,0,0,320,240,{"Already downloaded:",entry.fsName},{"Install","Redownload","Back"}).handle();
-                        if (c==2 || c==-1) break;
+                        int c = actionMenu(target, "Already downloaded", entry.fsName, {
+                            {"Install", "Install the .cia that is already on the SD card."},
+                            {"Redownload", "Fetch a fresh copy from RomM first, then install it."}});
+                        if (c < 0) break;
                         needDownload = (c==1);
                     } else if (onSD) {
-                        int c = Dialog(target,0,0,320,240,{"Already on SD:",entry.fsName},{"Install","Change art","Back"}).handle();
-                        if (c==2 || c==-1) break;
+                        int c = actionMenu(target, "Already on SD", entry.fsName, {
+                            {"Install", "Reinstall with the art (and filter) it already uses."},
+                            {"Install + choose art", "Open the art picker first, then reinstall."}});
+                        if (c < 0) break;
                         pickArt = (c==1);
                         needDownload = false;
                     } else if (isGba) {
-                        int c = Dialog(target,0,0,320,240,{"Install this game?",entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),"Choose art",gLang.getString("menu_no")}).handle();
-                        if (c==2 || c==-1) break;
+                        int c = actionMenu(target, "Install this game?",
+                                           entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
+                            {"Install", "Auto art and the default screen filter. The usual choice."},
+                            {"Install + choose art", "Pick the HOME icon and banner before installing."},
+                            {"Install + screen filter", "Pick the color preset baked into this install."}});
+                        if (c < 0) break;
                         pickArt = (c==1);
+                        if (c==2) {
+                            screenOverride = pickGbaScreenPreset(target, config, entry.title,
+                                                                 artStoreGet(entry.fsName).screen);
+                            if (screenOverride < 0) break;
+                        }
                     } else {
-                        const char* q = "Install this game?";
-                        if (Dialog(target,0,0,320,240,{q,entry.fsName,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
-                            break;
+                        int c = actionMenu(target, "Install this game?",
+                                           entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
+                            {"Install", "Download the ROM and install its forwarder."}});
+                        if (c < 0) break;
                     }
                     if (!is3ds && !ensureCtrBuilder(target)) break;  // CIA shell template (nds fwd + gba inject)
                     // GBA art resolves BEFORE the long download — correcting a
@@ -2796,7 +2849,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         resolveGbaArtInteractive(target, config, entry.fsName, entry.title,
                                                  entry.coverPath, gbaArtEntry, gbaArt, pickArt);
                     InstallOutcome io = installOneRomm(target, config, entry, needDownload,
-                                                       gbaArtEntry, gbaArt, pickArt, true);
+                                                       gbaArtEntry, gbaArt, pickArt, true,
+                                                       screenOverride);
                     if (io.ok) {
                         Dialog(target,0,0,320,240,{"Installed!",entry.title},{"OK"}).handle();
                         for (auto e : this->entries) {
@@ -2937,20 +2991,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         TitleExtras ex = findTitleExtras(entry.tid);
                         int c;
                         if (!ex.empty()) {
-                            // Uninstall = everything (game + update/DLC);
-                            // Extras only keeps the game, frees the extras
-                            c = Dialog(target,0,0,320,240,
-                                       {n3, "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total",
-                                        "extras: " + std::to_string(ex.updates + ex.dlc) +
-                                        " update/DLC (" + humanSize(ex.bytes) + ")"},
-                                       {"Uninstall","Extras only","Back"}).handle();
+                            c = actionMenu(target, n3,
+                                           "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total", {
+                                {"Uninstall", "Remove the game AND its " +
+                                              std::to_string(ex.updates + ex.dlc) +
+                                              " update/DLC. Frees " + humanSize(entry.sizeBytes + ex.bytes) + "."},
+                                {"Remove extras only", "Keep the game; delete just the update/DLC. Frees " +
+                                                       humanSize(ex.bytes) + "."}});
                         } else {
-                            c = Dialog(target,0,0,320,240,
-                                       {n3, "Installed - " + humanSize(entry.sizeBytes)},
-                                       {"Uninstall","Back"}).handle();
-                            if (c == 1) c = 2;   // "Back" is the second button here
+                            c = actionMenu(target, n3, "Installed - " + humanSize(entry.sizeBytes), {
+                                {"Uninstall", "Remove the game. Frees " + humanSize(entry.sizeBytes) + "."}});
                         }
-                        if (c != 0 && c != 1) break;
+                        if (c < 0) break;
                         bool extrasOnly = (c == 1);
                         u64 freed = extrasOnly ? ex.bytes : entry.sizeBytes + ex.bytes;
                         if (Dialog(target,0,0,320,240,
@@ -2986,7 +3038,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (entry.installed) {
                             std::string romBase = entry.path.filename().generic_string();
                             bool weakArt = artStoreGet(romBase).weak;
-                            int c = Dialog(target,0,0,320,240,{ng,weakArt?"Installed - using fallback art":"Installed"},{"Change art","Screen","Uninstall","Back"}).handle();
+                            int m = actionMenu(target, ng,
+                                               weakArt ? "Installed - using fallback art" : "Installed", {
+                                {"Uninstall", "Remove the inject from HOME and delete the ROM file."},
+                                {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
+                                {"Screen filter", "Re-bake with a different color preset; art and save kept."}});
+                            if (m < 0) break;
+                            int c = (m == 1) ? 0 : (m == 2) ? 1 : 2;   // old order: art/screen/uninstall
                             if (c==0) {
                                 // rebuild in place: same TID keeps the HOME
                                 // position and save data, only the art changes
@@ -3023,7 +3081,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Uninstalled.",ng},{"OK"}).handle();
                             }
                         } else {
-                            int c = Dialog(target,0,0,320,240,{ng,"Not installed."},{"Install","+ Art","Delete ROM","Back"}).handle();
+                            int c = actionMenu(target, ng, "Not installed - ROM on SD", {
+                                {"Install", "Bake the inject with auto art and its saved filter."},
+                                {"Install + choose art", "Open the art picker first, then install."},
+                                {"Delete ROM", "Remove the ROM file from the SD card."}});
+                            if (c < 0) break;
                             if (c==0 || c==1) {
                                 bool pickArt = (c==1);   // "+ Art": picker first, like the library flow
                                 if (!ensureCtrBuilder(target)) break;
@@ -3071,7 +3133,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (!hasFwd) {
                         if (!entry.fwdCia.empty()) {
                             // an uninstalled forwarder .cia exists on SD: offer to install it directly
-                            int c = Dialog(target,0,0,320,240,{name,"Not installed.","A ready .cia is on your SD."},{"Install","Rebuild","Delete ROM","Back"}).handle();
+                            int c = actionMenu(target, name, "Not installed - a ready .cia is on your SD", {
+                                {"Install", "Install the forwarder .cia that is already on the card."},
+                                {"Rebuild", "Build a fresh forwarder (new art) instead of using the .cia."},
+                                {"Delete ROM", "Remove the ROM file from the SD card."}});
                             if (c==0) {
                                 showLoading(target, {"Installing..."});
                                 std::string ierr;
@@ -3102,8 +3167,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         // no forwarder yet: offer to build one
                         int c = entry.fwdCia.empty()
-                            ? Dialog(target,0,0,320,240,{name,"Not installed."},{"Install","Delete ROM","Back"}).handle()
+                            ? actionMenu(target, name, "Not installed - ROM on SD", {
+                                  {"Install", "Build and install the forwarder for this ROM."},
+                                  {"Delete ROM", "Remove the ROM file from the SD card."}})
                             : 0;
+                        if (c < 0) break;
                         if (c==0) {
                             if (config->dsiwareCount >= MAX_DSIWARE) {
                                 Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
@@ -3131,7 +3199,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (artStoreGet(name).weak) fwdState += " - using fallback art";
                     // Change art only for our own forwarders (romm3ds TID range)
                     if (entry.rtid) {
-                        int c = Dialog(target,0,0,320,240,{name,fwdState},{"Change art","Uninstall","Back"}).handle();
+                        int m = actionMenu(target, name, fwdState, {
+                            {"Uninstall", "Remove the forwarder from HOME and delete the ROM file."},
+                            {"Change art", "Pick a new HOME banner; same slot, save kept."}});
+                        if (m < 0) break;
+                        int c = (m == 1) ? 0 : 1;   // old order: art / uninstall
                         if (c==0) {
                             // picker (banner page only — the icon stays the DS
                             // icon), then rebuild in place: same TID
@@ -3147,7 +3219,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (c!=1) break;
                     } else {
                         // single-pass: uninstall removes the forwarder AND the ROM file
-                        if (Dialog(target,0,0,320,240,{name,fwdState},{"Uninstall","Back"}).handle()!=0) break;
+                        if (actionMenu(target, name, fwdState, {
+                                {"Uninstall", "Remove the forwarder from HOME and delete the ROM file."}}) < 0)
+                            break;
                     }
                     bool delFwd = true;
                     bool delRom = true;
@@ -3367,26 +3441,32 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (!is3ds && !manageItemInstalled(slug, *e)) notInstalled++;
                     // action dialog: what's offered follows what's selected
                     enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_SCREEN, A_BACK } act = A_BACK;
+                    std::string bsub = std::to_string(M) + " selected";
                     if (!is3ds && notInstalled == M) {
-                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
-                                       {"Install selected","Delete ROMs","Back"}).handle();
+                        int c = actionMenu(target, "Batch", bsub, {
+                            {"Install selected", "Art first, then every game installs unattended."},
+                            {"Delete ROMs", "Remove the selected ROM files from the SD card."}});
                         act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
                     } else if (notInstalled > 0) {
-                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected",
-                                       std::to_string(notInstalled)+" not installed"},
-                                       {"Install","Uninstall","Back"}).handle();
+                        int c = actionMenu(target, "Batch",
+                                           bsub + " - " + std::to_string(notInstalled) + " not installed", {
+                            {"Install", "Install the ones that aren't installed yet."},
+                            {"Uninstall", "Uninstall the ones that are installed."}});
                         act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
                     } else if (is3ds || rebuildable == 0) {
-                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
-                                       {"Uninstall selected","Back"}).handle();
+                        int c = actionMenu(target, "Batch", bsub, {
+                            {"Uninstall selected", "Remove every selected game."}});
                         act = (c==0) ? A_UNINSTALL : A_BACK;
                     } else if (slug == ROMM_SLUG_GBA) {
-                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
-                                       {"Uninstall","Change art","Screen","Back"}).handle();
+                        int c = actionMenu(target, "Batch", bsub, {
+                            {"Uninstall", "Remove every selected inject and its ROM file."},
+                            {"Change art", "Art picker per game, then each re-bakes in place."},
+                            {"Screen filter", "Pick one preset and apply it to all selected."}});
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : (c==2) ? A_SCREEN : A_BACK;
                     } else {
-                        int c = Dialog(target,0,0,320,240,{std::to_string(M)+" selected"},
-                                       {"Uninstall selected","Change art selected","Back"}).handle();
+                        int c = actionMenu(target, "Batch", bsub, {
+                            {"Uninstall selected", "Remove every selected forwarder and ROM."},
+                            {"Change art selected", "Banner picker per game, then each re-bakes."}});
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
                     }
                     if (act == A_BACK) break;
