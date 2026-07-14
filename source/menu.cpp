@@ -2029,8 +2029,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->platformSlug = slug;
             entries.push_back(e);
         };
-        add("Nintendo DS", OpenPlatform, ROMM_SLUG_NDS);
         add("Nintendo 3DS", OpenPlatform, ROMM_SLUG_3DS);
+        add("Nintendo DS", OpenPlatform, ROMM_SLUG_NDS);
         add("Game Boy Advance", OpenPlatform, ROMM_SLUG_GBA);
         add("Search all systems", OpenSearchAll, "");
         add("Refresh from server", RefreshLibraries, "");
@@ -2116,8 +2116,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->display = label; e->action = OpenManage; e->platformSlug = slug;
             entries.push_back(e);
         };
-        add("Nintendo DS", ROMM_SLUG_NDS);
         add("Nintendo 3DS", ROMM_SLUG_3DS);
+        add("Nintendo DS", ROMM_SLUG_NDS);
         add("Game Boy Advance", ROMM_SLUG_GBA);
         Menu* menu = new Menu(entries);
         menu->currentDirectory = std::filesystem::path("/");
