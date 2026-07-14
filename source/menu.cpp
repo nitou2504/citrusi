@@ -223,11 +223,13 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
     ArtEntry ae = artStoreGet(fsName);
     if (ae.valid && !forcePicker) {   // F6: reinstall reuses silently, cache-first
         showLoading(target, {"Preparing art...", title});
-        if (!artBuildFromEntry(gSgdb, gRomm, fsName, coverPath, ae, piecesOut)) {
-            // a named source vanished: quietly fill the gaps from the cover
+        artBuildFromEntry(gSgdb, gRomm, fsName, coverPath, ae, piecesOut);
+        // fill gaps from the cover even when the entry "rebuilt" fine: an
+        // entry whose art came from the cover fallback has no sources, and
+        // an empty rebuild must never bake the template over existing art
+        if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty())
             artFromRommCover(gSgdb, gRomm, coverPath,
                              piecesOut.icon48.empty(), piecesOut.bannerTex.empty(), piecesOut);
-        }
         entryOut = ae;
         return;
     }
@@ -596,7 +598,11 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
     ensureSgdb();
     ArtEntry ae = artStoreGet(romBase);
     ArtPieces pieces;
-    if (ae.valid && !artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, pieces))
+    if (ae.valid) artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, pieces);
+    // ALWAYS fill gaps from the cover: a game whose art came from the cover
+    // fallback has no recorded sources, and re-baking it with empty pieces
+    // used to silently replace its icon/banner with the template art
+    if (pieces.icon48.empty() || pieces.bannerTex.empty())
         artFromRommCover(gSgdb, gRomm, coverPath,
                          pieces.icon48.empty(), pieces.bannerTex.empty(), pieces);
     u64 gtid = gCtr.allocateGbaTID(romBase);
@@ -1499,47 +1505,41 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             y += 21;
             y = cardDivider(y) + 5;
-            char tid[64];
-            u32 lineCol = C2D_Color32(0xC6,0xCF,0xE2,255);
             if (m3ds) {
-                snprintf(tid, sizeof(tid), "title  %016llX", (unsigned long long)sel->tid);
-                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
+                // no raw title-id hex here: it means nothing to the user
                 if (hasExtras) {
                     char bd[96];
                     snprintf(bd, sizeof(bd), "Game %s  +  %u update/DLC %s",
                              humanSize(sel->sizeBytes).c_str(),
                              (unsigned)(gExtras.updates + gExtras.dlc),
                              humanSize(gExtras.bytes).c_str());
-                    drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, bd, 2);
-                    drawWrapped(CTX, y + 46, CTW, 14, 0.45f, COL_TEXT_DIM,
+                    drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, bd, 2);
+                    drawWrapped(CTX, y + 30, CTW, 14, 0.45f, COL_TEXT_DIM,
                                 "Press A to uninstall - the extras can go with it.", 2);
                 } else {
-                    drawWrapped(CTX, y + 16, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
+                    drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
                 }
                 return;
             }
-            if (sel->rtid) {
-                snprintf(tid, sizeof(tid), "romm3ds  %016llX", sel->rtid);
-                y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
-            }
-            if (sel->installed) {
-                snprintf(tid, sizeof(tid), "TWL  %016llX", sel->tid);
-                y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
-            }
-            if (sel->ytid) {
-                snprintf(tid, sizeof(tid), "YANBF  %016llX", sel->ytid);
-                y = drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, tid, 1);
-            }
-            if (!sel->rtid && !sel->installed && !sel->ytid)
+            if (!sel->installed && !sel->rtid && !sel->ytid) {
                 drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM,
                             sel->fwdCia.empty()
                                 ? "Not installed — the ROM is on your SD card. Press A to install."
                                 : "Not installed — a ready .cia is on your SD card. Press A to install.", 3);
-            // baked-banner preview (GBA injects save one on every bake): shows
-            // exactly the art installed on HOME, so Change art is informed
-            if (gBannerPrev.tex && gBannerPrevTid && gBannerPrevTid == manageIconTid(sel))
-                C2D_DrawImageAt(gBannerPrev, CARD_X + (CARD_W - 128) / 2, BAR_Y - 64 - 6,
-                                0.57f, NULL, 0.5f, 0.5f);
+                return;
+            }
+            // installed: the baked banner, big and centered — exactly what
+            // HOME shows — with the size as the focus line underneath
+            if (gBannerPrev.tex && gBannerPrevTid && gBannerPrevTid == manageIconTid(sel)) {
+                C2D_DrawImageAt(gBannerPrev, CARD_X + (CARD_W - 192) / 2, y,
+                                0.57f, NULL, 0.75f, 0.75f);
+                y += 96 + 8;
+            } else {
+                y += 4;
+            }
+            char szl[48];
+            snprintf(szl, sizeof(szl), "%s on SD", humanSize(sel->sizeBytes).c_str());
+            drawText(160, y + 8, 0.56f, 0.5f, 0, COL_TEXT, szl, C2D_AlignCenter);
             return;
         }
         if (this->type == MENU_SETTINGS || this->type == MENU_SERVER) {
