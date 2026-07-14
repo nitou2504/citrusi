@@ -1213,6 +1213,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // storage breakdown for the Manage system picker: AM enumeration is too
     // slow to redo every frame, so it's computed once in generateManageSystemMenu
     static StorageTally gManageTally;
+    static bool gManageTallyStale = false;   // async recompute in flight
 
     // description scroll state
     static int gDescForId = -1;
@@ -1669,7 +1670,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             bool manage = (this->heading.rfind("Manage", 0) == 0);
             if (manage) {
                 // what the installed titles actually cost, per system.
-                // gManageTally is filled once, when this menu is generated.
+                // gManageTally is filled once, when this menu is generated;
+                // a stale one refreshes here as soon as the worker finishes
+                if (gManageTallyStale && storageTallyCached()) {
+                    gManageTally = computeStorageTally();
+                    gManageTallyStale = false;
+                }
                 const StorageTally& s = gManageTally;
                 float y = CARD_Y + PAD;
                 drawLineTop(CTX, y, 17, 0.58f, COL_TEXT, "Installed");
@@ -1694,6 +1700,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 y += 4;
                 y = cardDivider(y) + 8;
                 drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
+                if (gManageTallyStale)
+                    drawText(CARD_X + CARD_W - PAD, y + CHIP_H/2, 0.55f, 0.4f, 0,
+                             COL_TEXT_DIM, "updating sizes...", C2D_AlignRight);
                 y += CHIP_H + 8;
                 drawWrapped(CTX, y, CTW, 14, 0.42f, COL_TEXT_DIM,
                             "Pick a system to see what's installed, and uninstall or change art.", 3);
@@ -2130,14 +2139,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // Manage system-selection screen (NDS / 3DS), mirrors the library flow
     Menu* generateManageSystemMenu(Menu* prev) {
         delete prev;
-        // storage breakdown for the bottom panel. computeStorageTally() is
-        // cached until an install/uninstall invalidates it; only a recompute
-        // needs the cover worker paused — B from a system tab must be instant
+        // storage breakdown for the bottom panel. Cached -> instant; stale
+        // (an install/uninstall happened) -> recompute on a WORKER while the
+        // panel keeps the old numbers, so B here never blocks on AM/SD
         if (storageTallyCached()) {
             gManageTally = computeStorageTally();
+            gManageTallyStale = false;
         } else {
-            CoverCachePause coverPause;
-            gManageTally = computeStorageTally();
+            gManageTallyStale = true;
+            storageTallyKickAsync();
         }
         std::vector<MenuSelection*> entries;
         auto add = [&](const std::string& label, const std::string& slug){
@@ -2892,7 +2902,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     std::vector<std::string> msg;
                     msg.push_back(std::to_string((int)done.size()) + " installed .cia files - " + humanSize(doneBytes));
-                    msg.push_back("The games stay installed. Only the installer files are deleted.");
+                    for (size_t i = 0; i < done.size() && i < 4; i++)
+                        msg.push_back(shorten(done[i].name, 34));
+                    if (done.size() > 4)
+                        msg.push_back("... and " + std::to_string((int)done.size() - 4) + " more");
+                    msg.push_back("The games stay installed. Only these files are deleted.");
                     if (otherCount > 0)
                         msg.push_back(std::to_string(otherCount) + " not-installed files (" + humanSize(otherBytes) + ") are kept.");
                     if (Dialog(target,0,0,320,240, msg, {"Delete","Back"}, 1).handle() != 0) break;

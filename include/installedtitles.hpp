@@ -91,6 +91,9 @@ StorageTally computeStorageTally();
 // true while computeStorageTally() would return the cached value (callers can
 // skip a CoverCachePause for the cache-hit path)
 bool storageTallyCached();
+// recompute the tally on a worker thread (no-op when cached or running);
+// poll storageTallyCached() and re-call computeStorageTally() when true
+void storageTallyKickAsync();
 
 // drop the cached tally (and reload the name cache) after an install/uninstall
 void installedTitlesInvalidate();
