@@ -24,6 +24,14 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   notify, Template) open a vertical picker on A — each choice explained
   under the list — instead of blind value cycling; the row descriptions
   drop the cramped ;-separated enumerations.
+- **Manage from the library**: A on an installed game in the RomM browse
+  opens the Manage actions right there (hint reads "A Manage"). 3DS:
+  Reinstall / Redownload plus the granular uninstall rows (update/DLC).
+  GBA: Change art / Screen filter / Art + screen filter / Reinstall /
+  Uninstall. NDS: Reinstall / Change art (romm3ds forwarders) / Uninstall.
+  Uninstalling clears the row's installed marker in place. A rom hack
+  sharing an installed game's title id still gets the replace warning, not
+  the hub.
 - **Duplicate title-id prompts, on demand**: the Random-title-ID Settings
   toggle is gone. A TWL forwarder whose title id is already installed asks
   *Install as new* (random id, keeps both — rom hacks sharing the

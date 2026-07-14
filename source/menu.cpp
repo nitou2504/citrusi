@@ -837,6 +837,85 @@ static bool uninstallManageItem(Config* config, const MenuSelection& it) {
     return !err;
 }
 
+// granular uninstall rows for an installed 3DS title — shared by Manage and
+// the library browse (an installed game's A-menu offers the same actions in
+// both places). what codes: 0 = game + extras, 1 = update + DLC only,
+// 2 = update only, 3 = DLC only.
+static void addUninstall3dsOpts(std::vector<MenuOpt>& opts, std::vector<int>& what,
+                                u64 gameBytes, const TitleExtras& ex) {
+    if (ex.empty()) {
+        opts.push_back({"Uninstall", "Remove the game. Frees " + humanSize(gameBytes) + "."});
+        what.push_back(0);
+        return;
+    }
+    opts.push_back({"Uninstall", "Remove the game AND its " + std::to_string(ex.updates + ex.dlc) +
+                    " update/DLC. Frees " + humanSize(gameBytes + ex.bytes) + "."});
+    what.push_back(0);
+    if (ex.updates && ex.dlc) {
+        opts.push_back({"Remove update + DLC", "Keep the game; delete its update and DLC. Frees " +
+                        humanSize(ex.bytes) + "."});
+        what.push_back(1);
+    }
+    if (ex.updates) {
+        opts.push_back({ex.dlc ? "Remove update only" : "Remove update",
+                        std::string("Keep the game") + (ex.dlc ? " and DLC" : "") +
+                        "; delete the update (back to v1.0). Frees " + humanSize(ex.updateBytes) + "."});
+        what.push_back(2);
+    }
+    if (ex.dlc) {
+        opts.push_back({ex.updates ? "Remove DLC only" : "Remove DLC",
+                        std::string("Keep the game") + (ex.updates ? " and update" : "") +
+                        "; delete the DLC. Frees " + humanSize(ex.dlcBytes) + "."});
+        what.push_back(3);
+    }
+}
+
+// confirm + delete for a what code from addUninstall3dsOpts. Returns true
+// when anything was deleted, so the caller refreshes its list/markers.
+static bool execUninstall3ds(C3D_RenderTarget* target, const std::string& n3,
+                             u64 tid, u64 gameBytes, const TitleExtras& ex, int what) {
+    bool delGame = (what == 0);
+    std::vector<u64> extraDel;
+    u64 freed = gameBytes;
+    std::string confirmTitle = "Uninstall game?";
+    switch (what) {
+        case 0: extraDel = ex.tids;       freed = gameBytes + ex.bytes; break;
+        case 1: extraDel = ex.tids;       freed = ex.bytes;       confirmTitle = "Remove update + DLC?"; break;
+        case 2: extraDel = ex.updateTids; freed = ex.updateBytes; confirmTitle = "Remove the update?"; break;
+        case 3: extraDel = ex.dlcTids;    freed = ex.dlcBytes;    confirmTitle = "Remove the DLC?"; break;
+    }
+    if (Dialog(target,0,0,320,240,
+               {confirmTitle, n3, "Frees " + humanSize(freed) +
+                (delGame ? "" : " - the game stays installed")},
+               {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) return false;
+    showLoading(target, {delGame ? "Uninstalling..." : "Removing...", n3});
+    Result dr = 0;
+    if (delGame) {
+        dr = AM_DeleteTitle(MEDIATYPE_SD, tid);
+        AM_DeleteTicket(tid);
+    }
+    int extrasGone = 0;
+    if (R_SUCCEEDED(dr)) {
+        for (u64 xt : extraDel) {
+            if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, xt))) extrasGone++;
+            AM_DeleteTicket(xt);
+        }
+    }
+    installedTitlesInvalidate();
+    installed3dsRefresh();   // library markers read the AM set
+    if (R_FAILED(dr)) {
+        Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
+        return false;
+    }
+    if (!delGame)
+        Dialog(target,0,0,320,240,{"Removed.",n3,
+               humanSize(freed)+" freed - the game stays installed."},{"OK"}).handle();
+    else
+        Dialog(target,0,0,320,240,{"Uninstalled.",n3,
+               extrasGone > 0 ? "Update/DLC went with it." : ""},{"OK"}).handle();
+    return true;
+}
+
 RommClient gRomm;
 
 // selected-game cover (shared by top rail + tick loader). gCover BORROWS the
@@ -1553,7 +1632,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             // marking mode drops the find hint so "R All/None" reads clearly.
             std::string hint = (nsel > 0)
                 ? "A Install " + std::to_string(nsel) + "   Y Mark   R All/None   B Back"
-                : std::string("A Install   Y Mark   SEL Find   B Back");
+                : std::string(onSD ? "A Manage" : "A Install") +
+                  "   Y Mark   SEL Find   B Back";
             if (maxScroll > 0) hint += "   X/L Scroll";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
             return;
@@ -2941,11 +3021,25 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         Dialog(target,0,0,320,240,{"Not a .cia — can't install here.",entry.fsName,"Convert on PC with ready3ds,","then upload the .cia to RomM."},{"OK"}).handle();
                         break;
                     }
+                    std::string dir = rommDirFor(entry.platformSlug);
+                    std::string dest = dir + entry.fsName;                         // download target (nds may be .zip)
+                    std::string romPath = rommLocalPath(entry.fsName, entry.platformSlug); // playable file
+                    std::string romBase = std::filesystem::path(romPath).filename().generic_string();
+                    bool onSD = fileExists(is3ds ? dest : romPath);
+                    bool needDownload = true;
+                    bool pickArt = false;    // "+ Art"/"Change art": picker before the (re)install
+                    int screenOverride = -1;   // gba: filter picked at install time
+                    // installed state, per system — same checks as the list markers
+                    u64 gbaTid = isGba ? gbaTidForRom(romBase) : 0;
+                    bool inst = is3ds ? installed3dsHasTitle(entry.titleId)
+                              : isGba ? installed3dsHasTitle(gbaTid)
+                                      : ndsForwarderInstalled(entry.fsName);
                     // same title id as an installed game, but a DIFFERENT RomM
                     // entry: a rom hack that kept the original's id. Installing
                     // silently REPLACES the original (a .cia's id can't be
-                    // changed on device — it keys the NCCH crypto), so warn.
-                    if (is3ds && entry.titleId && installed3dsHasTitle(entry.titleId) &&
+                    // changed on device — it keys the NCCH crypto), so warn —
+                    // and don't offer the installed-game hub for it.
+                    if (is3ds && inst &&
                         installed3dsRommIdForTitle(entry.titleId) != entry.rommId) {
                         if (Dialog(target,0,0,320,240,
                                    {"Same title ID already installed",
@@ -2953,24 +3047,151 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     "REPLACES that game (they share","the save data)."},
                                    {"Install anyway","Cancel"},1).handle()!=0)
                             break;
+                        inst = false;   // proceed as a fresh install
                     }
-                    std::string dir = rommDirFor(entry.platformSlug);
-                    std::string dest = dir + entry.fsName;                         // download target (nds may be .zip)
-                    std::string romPath = rommLocalPath(entry.fsName, entry.platformSlug); // playable file
-                    bool onSD = fileExists(is3ds ? dest : romPath);
-                    bool needDownload = true;
-                    bool pickArt = false;    // "+ Art"/"Change art": picker before the (re)install
-                    int screenOverride = -1;   // gba: filter picked at install time
-                    if (onSD && is3ds) {
+                    if (is3ds && inst) {
+                        // installed: the Manage actions live right here too
+                        TitleExtras ex = findTitleExtras(entry.titleId, true);
+                        std::vector<MenuOpt> mo = {
+                            {"Reinstall", onSD ? "Install the .cia already on the SD card again."
+                                               : "Download from RomM and install over the current copy."}};
+                        std::vector<int> ma = {-1};
+                        if (onSD) {
+                            mo.push_back({"Redownload", "Fetch a fresh copy from RomM first, then install it."});
+                            ma.push_back(-2);
+                        }
+                        addUninstall3dsOpts(mo, ma, entry.sizeBytes, ex);
+                        int c = actionMenu(target, entry.title, "Installed", mo);
+                        if (c < 0) break;
+                        if (ma[c] >= 0) {   // one of the uninstall/extras rows
+                            if (execUninstall3ds(target, entry.title, entry.titleId,
+                                                 entry.sizeBytes, ex, ma[c]) && ma[c] == 0) {
+                                for (auto e : this->entries)
+                                    if (e->action==RommInstall && e->titleId==entry.titleId &&
+                                        e->display.rfind("* ",0)==0)
+                                        e->display = "  " + e->display.substr(2);
+                                gDescForId = -1;   // refresh the INSTALLED chip
+                            }
+                            break;
+                        }
+                        needDownload = (ma[c] == -2) || !onSD;
+                    } else if (onSD && is3ds) {
                         int c = actionMenu(target, "Already downloaded", entry.fsName, {
                             {"Install", "Install the .cia that is already on the SD card."},
                             {"Redownload", "Fetch a fresh copy from RomM first, then install it."}});
                         if (c < 0) break;
                         needDownload = (c==1);
+                    } else if (isGba && inst && onSD) {
+                        // installed inject: the Manage actions, plus reinstall
+                        int c = actionMenu(target, entry.title, "Installed", {
+                            {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
+                            {"Screen filter", "Re-bake with a different color preset; art and save kept."},
+                            {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."},
+                            {"Reinstall", "Reinstall with the art and filter it already uses."},
+                            {"Uninstall", "Remove the inject from HOME and delete the ROM file."}});
+                        if (c < 0) break;
+                        if (c == 0 || c == 2) {
+                            int fc = -1;
+                            if (c == 2) {
+                                fc = pickGbaScreenPreset(target, config, entry.title,
+                                                         artStoreGet(romBase).screen);
+                                if (fc < 0) break;
+                            }
+                            changeArtGbaItem(target, config, romBase, entry.title,
+                                             entry.coverPath, romPath, true, fc);
+                            break;
+                        }
+                        if (c == 1) {
+                            int fc = pickGbaScreenPreset(target, config, entry.title,
+                                                         artStoreGet(romBase).screen);
+                            if (fc < 0) break;
+                            applyGbaScreenItem(target, config, romBase, entry.title,
+                                               entry.coverPath, romPath, true, fc);
+                            break;
+                        }
+                        if (c == 4) {
+                            if (Dialog(target,0,0,320,240,{"Uninstall game?",entry.title},
+                                       {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                                break;
+                            showLoading(target, {"Uninstalling...", entry.title});
+                            Result drg = AM_DeleteTitle(MEDIATYPE_SD, gbaTid);
+                            AM_DeleteTicket(gbaTid);
+                            if (R_FAILED(drg)) {
+                                Dialog(target,0,0,320,240,{"Uninstall failed",entry.title},{"OK"}).handle();
+                                break;
+                            }
+                            std::error_code ecu;
+                            std::filesystem::remove(romPath, ecu);   // single-pass: inject + ROM
+                            installedTitlesInvalidate();
+                            installed3dsRefresh();
+                            Dialog(target,0,0,320,240,{"Uninstalled.",entry.title},{"OK"}).handle();
+                            for (auto e : this->entries)
+                                if (e->action==RommInstall && e->fsName==entry.fsName &&
+                                    e->display.rfind("* ",0)==0)
+                                    e->display = "  " + e->display.substr(2);
+                            gDescForId = -1;
+                            break;
+                        }
+                        needDownload = false;   // c == 3: reinstall, art + filter reused
+                    } else if (!is3ds && !isGba && inst) {
+                        // forwarder on HOME: the Manage actions, plus reinstall.
+                        // tids come from the manage scan (matched like the marker)
+                        u64 ntid = 0, nytid = 0, nrtid = 0;
+                        std::string nrompath = romPath;
+                        for (auto& m : scanManagedRoms(ROMM_NDS_DIR)) {
+                            if (normNds(m.display) != normNds(entry.fsName)) continue;
+                            ntid = m.tid; nytid = m.yanbfTid; nrtid = m.rommTid;
+                            nrompath = m.path;
+                            break;
+                        }
+                        std::vector<MenuOpt> mo = {
+                            {"Reinstall", onSD ? "Rebuild the forwarder with the art it already uses."
+                                               : "Download the ROM again and rebuild the forwarder."}};
+                        std::vector<int> ma = {0};
+                        if (nrtid && onSD) {
+                            mo.push_back({"Change art", "Pick a new HOME banner; same slot, save kept."});
+                            ma.push_back(1);
+                        }
+                        mo.push_back({"Uninstall", "Remove the forwarder from HOME and delete the ROM file."});
+                        ma.push_back(2);
+                        int c = actionMenu(target, entry.title, "Installed", mo);
+                        if (c < 0) break;
+                        if (ma[c] == 1) {
+                            std::string nbase = std::filesystem::path(nrompath).filename().generic_string();
+                            changeArtNdsRommItem(target, config, nbase, entry.title,
+                                                 entry.coverPath, nrompath, nrtid, true);
+                            break;
+                        }
+                        if (ma[c] == 2) {
+                            if (Dialog(target,0,0,320,240,{"Uninstall game?",entry.title},
+                                       {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                                break;
+                            showLoading(target, {"Uninstalling...", entry.title});
+                            MenuSelection um;
+                            um.platformSlug = ROMM_SLUG_NDS;
+                            um.installed = (ntid != 0);
+                            um.tid = ntid; um.ytid = nytid; um.rtid = nrtid;
+                            um.path = std::filesystem::path(nrompath);
+                            bool uok = uninstallManageItem(config, um);
+                            gFwdReady = false; invalidateManagedRoms(); invalidateYanbfCache();
+                            installedTitlesInvalidate();
+                            if (!uok) {
+                                Dialog(target,0,0,320,240,{"Uninstall failed",entry.title},{"OK"}).handle();
+                                break;
+                            }
+                            Dialog(target,0,0,320,240,{"Uninstalled.",entry.title},{"OK"}).handle();
+                            for (auto e : this->entries)
+                                if (e->action==RommInstall && e->fsName==entry.fsName &&
+                                    e->display.rfind("* ",0)==0)
+                                    e->display = "  " + e->display.substr(2);
+                            gDescForId = -1;
+                            break;
+                        }
+                        needDownload = !onSD;
                     } else if (onSD) {
                         int c = actionMenu(target, "Already on SD", entry.fsName, {
-                            {"Install", "Reinstall with the art (and filter) it already uses."},
-                            {"Install + choose art", "Open the art picker first, then reinstall."}});
+                            {"Install", "Install with the art (and filter) it already uses."},
+                            {"Install + choose art", "Open the art picker first, then install."}});
                         if (c < 0) break;
                         pickArt = (c==1);
                         needDownload = false;
@@ -3164,75 +3385,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         // everything; below it, granular rows for just the
                         // update, just the DLC, or both — game kept.
                         TitleExtras ex = findTitleExtras(entry.tid);
-                        bool delGame = true;
-                        std::vector<u64> extraDel;
-                        u64 freed = entry.sizeBytes;
-                        std::string confirmTitle = "Uninstall game?";
-                        if (!ex.empty()) {
-                            std::vector<MenuOpt> opts;
-                            std::vector<int> what;   // 0 all, 1 update+dlc, 2 update, 3 dlc
-                            opts.push_back({"Uninstall", "Remove the game AND its " +
-                                            std::to_string(ex.updates + ex.dlc) +
-                                            " update/DLC. Frees " + humanSize(entry.sizeBytes + ex.bytes) + "."});
-                            what.push_back(0);
-                            if (ex.updates && ex.dlc) {
-                                opts.push_back({"Remove update + DLC", "Keep the game; delete its update and DLC. Frees " +
-                                                humanSize(ex.bytes) + "."});
-                                what.push_back(1);
-                            }
-                            if (ex.updates) {
-                                opts.push_back({ex.dlc ? "Remove update only" : "Remove update",
-                                                std::string("Keep the game") + (ex.dlc ? " and DLC" : "") +
-                                                "; delete the update (back to v1.0). Frees " + humanSize(ex.updateBytes) + "."});
-                                what.push_back(2);
-                            }
-                            if (ex.dlc) {
-                                opts.push_back({ex.updates ? "Remove DLC only" : "Remove DLC",
-                                                std::string("Keep the game") + (ex.updates ? " and update" : "") +
-                                                "; delete the DLC. Frees " + humanSize(ex.dlcBytes) + "."});
-                                what.push_back(3);
-                            }
-                            int c = actionMenu(target, n3,
-                                               "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total", opts);
-                            if (c < 0) break;
-                            switch (what[c]) {
-                                case 0: extraDel = ex.tids;      freed = entry.sizeBytes + ex.bytes; break;
-                                case 1: extraDel = ex.tids;      freed = ex.bytes;       delGame = false;
-                                        confirmTitle = "Remove update + DLC?"; break;
-                                case 2: extraDel = ex.updateTids; freed = ex.updateBytes; delGame = false;
-                                        confirmTitle = "Remove the update?"; break;
-                                case 3: extraDel = ex.dlcTids;   freed = ex.dlcBytes;    delGame = false;
-                                        confirmTitle = "Remove the DLC?"; break;
-                            }
-                        } else {
-                            int c = actionMenu(target, n3, "Installed - " + humanSize(entry.sizeBytes), {
-                                {"Uninstall", "Remove the game. Frees " + humanSize(entry.sizeBytes) + "."}});
-                            if (c < 0) break;
-                        }
-                        if (Dialog(target,0,0,320,240,
-                                   {confirmTitle, n3, "Frees " + humanSize(freed) +
-                                    (delGame ? "" : " - the game stays installed")},
-                                   {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
-                        showLoading(target, {delGame ? "Uninstalling..." : "Removing...", n3});
-                        Result dr = 0;
-                        if (delGame) {
-                            dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
-                            AM_DeleteTicket(entry.tid);
-                        }
-                        int extrasGone = 0;
-                        if (R_SUCCEEDED(dr)) {
-                            for (u64 xt : extraDel) {
-                                if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, xt))) extrasGone++;
-                                AM_DeleteTicket(xt);
-                            }
-                        }
-                        installedTitlesInvalidate();
-                        if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
-                        else if (!delGame)
-                            Dialog(target,0,0,320,240,{"Removed.",n3,
-                                   humanSize(freed)+" freed - the game stays installed."},{"OK"}).handle();
-                        else Dialog(target,0,0,320,240,{"Uninstalled.",n3,
-                                    extrasGone > 0 ? "Update/DLC went with it." : ""},{"OK"}).handle();
+                        std::vector<MenuOpt> opts;
+                        std::vector<int> what;
+                        addUninstall3dsOpts(opts, what, entry.sizeBytes, ex);
+                        int c = actionMenu(target, n3,
+                                           "Installed - " + humanSize(entry.sizeBytes + ex.bytes) +
+                                           (ex.empty() ? "" : " total"), opts);
+                        if (c < 0) break;
+                        if (!execUninstall3ds(target, n3, entry.tid, entry.sizeBytes, ex, what[c]))
+                            break;
                         while (this->queue.size() > 0) this->queue.pop();
                         showLoading(target, {"Refreshing..."});
                         return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
