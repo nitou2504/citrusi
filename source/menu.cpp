@@ -1250,7 +1250,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 char bp[96];
                 snprintf(bp, sizeof(bp), "%s/banners-cache/%016llX.raw",
                          FORWARDER_DIR.c_str(), (unsigned long long)mtid);
-                std::string raw = fileExists(bp) ? readEntireFile(bp) : std::string();
+                // no cached preview yet: pull it from the installed title's
+                // own banner (works for every existing inject/forwarder)
+                std::string raw = ensureBannerPreview(mtid) ? readEntireFile(bp) : std::string();
                 if (raw.size() == 256*128*4) {
                     if (gBannerPrev.tex) freeTexImage(&gBannerPrev);
                     if (texFromRGBA((const unsigned char*)raw.data(), 256, 128, &gBannerPrev))

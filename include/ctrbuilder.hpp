@@ -71,3 +71,8 @@ class CtrBuilder {
 u64 gbaTidForRom(const std::string& romBase);
 // drop the in-RAM ownership-file cache (call after installs write new files)
 void ctrTidCacheInvalidate();
+
+// make sure banners-cache/<tid>.raw exists for one of OUR installed titles
+// (inject/forwarder tid ranges only): pulled from the title's ExeFS banner,
+// CBMD unpacked, texture untiled. true = the preview file is there.
+bool ensureBannerPreview(u64 tid);
