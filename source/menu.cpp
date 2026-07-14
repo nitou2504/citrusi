@@ -558,9 +558,11 @@ struct MenuOpt {
 };
 static int actionMenu(C3D_RenderTarget* target, const std::string& title,
                       const std::string& subtitle,
-                      const std::vector<MenuOpt>& opts, int def = 0) {
+                      const std::vector<MenuOpt>& opts, int def = 0,
+                      const char* xLabel = nullptr, bool* xOut = nullptr) {
     int n = (int)opts.size();
     if (n <= 0) return -1;
+    if (xOut) *xOut = false;
     int sel = (def >= 0 && def < n) ? def : 0;
     // squeeze rows when the list is long so the description always fits
     float pitch = (n > 5) ? 20.0f : 24.0f;
@@ -571,6 +573,7 @@ static int actionMenu(C3D_RenderTarget* target, const std::string& title,
         if (kd & KEY_UP)   sel = (sel + n - 1) % n;
         if (kd & KEY_DOWN) sel = (sel + 1) % n;
         if (kd & (KEY_A | KEY_START)) return sel;
+        if (xLabel && (kd & KEY_X)) { if (xOut) *xOut = true; return sel; }
         if (kd & KEY_B) return -1;
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         C2D_TargetClear(target, COL_BG);
@@ -595,7 +598,9 @@ static int actionMenu(C3D_RenderTarget* target, const std::string& title,
             if (maxLines > 3) maxLines = 3;
             drawWrapped(16, descY, 288, 13, 0.42f, COL_TEXT_DIM, opts[sel].desc, maxLines);
         }
-        drawText(160, 230, 0.5f, 0.4f, 0, COL_TEXT_DIM, "A select    B back", C2D_AlignCenter);
+        std::string hint = xLabel ? ("A select    X " + std::string(xLabel) + "    B back")
+                                  : "A select    B back";
+        drawText(160, 230, 0.5f, 0.4f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
         C3D_FrameEnd(0);
     }
     return -1;
@@ -612,17 +617,30 @@ static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
         "The raw palette, no filter at all. Brightest picture; colors look washed out.",
         "A gentler gamma correction - halfway between AGS-101 and unfiltered.",
         "AGS-101 colors plus a warm 3400K tint - easier on the eyes in the dark."};
-    int def = config->gbaScreen % GBA_SCREEN_COUNT;
     if (current >= 0) current %= GBA_SCREEN_COUNT;
-    std::vector<MenuOpt> opts;
-    for (int i = 0; i < GBA_SCREEN_COUNT; i++) {
-        std::string label = names[i];
-        if (i == current)  label += "  (current)";
-        else if (i == def) label += "  (default)";
-        opts.push_back({label, descs[i]});
+    int sel = -1;
+    for (;;) {
+        int def = config->gbaScreen % GBA_SCREEN_COUNT;
+        std::vector<MenuOpt> opts;
+        for (int i = 0; i < GBA_SCREEN_COUNT; i++) {
+            std::string label = names[i];
+            if (i == current)  label += "  (current)";
+            if (i == def)      label += "  (default)";
+            opts.push_back({label, descs[i]});
+        }
+        bool setDef = false;
+        sel = actionMenu(target, "Screen filter", title, opts,
+                         (sel >= 0) ? sel : (current >= 0) ? current : def,
+                         "set default", &setDef);
+        if (sel >= 0 && setDef) {
+            // X: the highlighted preset becomes the Settings default for
+            // every future install; stay in the menu with the tag moved
+            config->gbaScreen = sel;
+            config->save();
+            continue;
+        }
+        return sel;
     }
-    return actionMenu(target, "Screen filter", title, opts,
-                      (current >= 0) ? current : def);
 }
 
 // re-bakes an installed inject with the given screen preset, reusing the
@@ -1252,6 +1270,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // slow to redo every frame, so it's computed once in generateManageSystemMenu
     static StorageTally gManageTally;
     static bool gManageTallyStale = false;   // async recompute in flight
+    static bool gManageTallyEver = false;    // any numbers shown yet this run
 
     // description scroll state
     static int gDescForId = -1;
@@ -1513,7 +1532,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     drawArrow(CARD_X + CARD_W - 12, BAR_Y - 12, 0.56f, 7, 7, COL_ACCENT, true);
             }
             int nsel = this->selectedCount();
-            std::string hint = "A Install   Y Select   B Back";
+            std::string hint = "A Install   Y Select   SEL Find   B Back";
             if (maxScroll > 0) hint += "   X/L Scroll";
             hint += nsel > 0 ? "   START Install " + std::to_string(nsel) : "   START Quit";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM, hint.c_str(), C2D_AlignCenter);
@@ -1523,7 +1542,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             int nsel = this->selectedCount();
             std::string mhint = this->entries.empty()
                 ? std::string("A Manage    B Back    START Quit")
-                : ("A Manage   Y Select   B Back" +
+                : ("A Manage   Y Select   SEL Find   B Back" +
                    std::string(nsel > 0 ? "   START Batch " + std::to_string(nsel) : "   START Quit"));
             drawBottomFrame(mhint.c_str());
             if (this->entries.empty()) {
@@ -1713,12 +1732,21 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (gManageTallyStale && storageTallyCached()) {
                     gManageTally = computeStorageTally();
                     gManageTallyStale = false;
+                    gManageTallyEver = true;
                 }
                 const StorageTally& s = gManageTally;
                 float y = CARD_Y + PAD;
                 drawLineTop(CTX, y, 17, 0.58f, COL_TEXT, "Installed");
                 y += 17 + 4;
                 y = cardDivider(y) + 6;
+                if (gManageTallyStale && !gManageTallyEver) {
+                    // first run: no old numbers to show — say so instead of zeros
+                    drawWrapped(CTX, y + 8, CTW, 15, 0.45f, COL_TEXT_DIM,
+                                "Calculating space usage...", 2);
+                    drawWrapped(CTX, y + 40, CTW, 14, 0.42f, COL_TEXT_DIM,
+                                "Pick a system to see what's installed, and uninstall or change art.", 3);
+                    return;
+                }
                 auto row = [&](const char* label, u32 count, u64 bytes) {
                     drawLineTop(CTX, y, 15, 0.45f, COL_TEXT, label);
                     char v[64];
@@ -2162,7 +2190,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
 
     Menu* Menu::searchPrompt() {
-        if (this->type != MENU_ROMM) return this;
+        if (this->type != MENU_ROMM && this->type != MENU_MANAGE) return this;
         char buf[64] = {0};
         SwkbdState kb;
         swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 63);
@@ -2171,6 +2199,33 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (!this->filter.empty()) swkbdSetInitialText(&kb, this->filter.c_str());
         if (swkbdInputText(&kb, buf, sizeof(buf)) != SWKBD_BUTTON_CONFIRM)
             return this;
+        if (this->type == MENU_MANAGE) {
+            // filter the manage list in place; empty query = full list again
+            std::string q = toLowerCase(std::string(buf));
+            std::string slug = this->platformSlug;
+            if (q.empty()) {
+                while (this->queue.size() > 0) this->queue.pop();
+                return generateManageMenu(this, 0, slug, nullptr);
+            }
+            std::vector<MenuSelection*> keep;
+            for (auto e : this->entries) {
+                if (toLowerCase(e->title).find(q) != std::string::npos ||
+                    toLowerCase(e->display).find(q) != std::string::npos)
+                    keep.push_back(e);
+                else
+                    delete e;
+            }
+            this->entries.clear();          // survivors now belong to the new menu
+            Menu* m = new Menu(keep);
+            m->type = MENU_MANAGE;
+            m->platformSlug = slug;
+            m->filter = std::string(buf);
+            m->currentDirectory = std::filesystem::path("/");
+            m->heading = "\"" + std::string(buf) + "\" - " + std::to_string((int)keep.size()) + " found";
+            m->init();
+            delete this;
+            return m;
+        }
         const std::vector<RommRom>& src = this->crossSystem ? gCombined : gCache[this->platformSlug];
         return buildRommMenu(this, std::string(buf), src, this->platformSlug, this->crossSystem);
     }
@@ -2183,6 +2238,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (storageTallyCached()) {
             gManageTally = computeStorageTally();
             gManageTallyStale = false;
+            gManageTallyEver = true;
         } else {
             gManageTallyStale = true;
             storageTallyKickAsync();
@@ -2826,10 +2882,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                            entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
                             {"Install", "Auto art and the default screen filter. The usual choice."},
                             {"Install + choose art", "Pick the HOME icon and banner before installing."},
-                            {"Install + screen filter", "Pick the color preset baked into this install."}});
+                            {"Install + screen filter", "Pick the color preset baked into this install."},
+                            {"Install + art + filter", "Customize both: art picker, then the preset."}});
                         if (c < 0) break;
-                        pickArt = (c==1);
-                        if (c==2) {
+                        pickArt = (c==1 || c==3);
+                        if (c==2 || c==3) {
                             screenOverride = pickGbaScreenPreset(target, config, entry.title,
                                                                  artStoreGet(entry.fsName).screen);
                             if (screenOverride < 0) break;
