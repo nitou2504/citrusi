@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -235,8 +236,23 @@ static TitleKind classify(u64 tid, FS_MediaType media, bool& prot) {
 // step was what made that list crawl. Invalidated with the tally.
 static std::vector<InstalledTitle> gSdEnum;
 static bool gSdEnumOk = false;
+// the async tally worker and the UI both touch the SD cache
+static LightLock gEnumLock;
+static bool gEnumLockInit = false;
+static void enumLock() {
+    if (!gEnumLockInit) { LightLock_Init(&gEnumLock); gEnumLockInit = true; }
+    LightLock_Lock(&gEnumLock);
+}
 static std::vector<InstalledTitle> enumerateMedia(FS_MediaType media) {
-    if (media == MEDIATYPE_SD && gSdEnumOk) return gSdEnum;
+    if (media == MEDIATYPE_SD) {
+        enumLock();
+        if (gSdEnumOk) {
+            std::vector<InstalledTitle> c = gSdEnum;
+            LightLock_Unlock(&gEnumLock);
+            return c;
+        }
+        LightLock_Unlock(&gEnumLock);
+    }
     std::vector<InstalledTitle> out;
     u32 count = 0;
     if (R_FAILED(AM_GetTitleCount(media, &count)) || count == 0) return out;
@@ -257,7 +273,12 @@ static std::vector<InstalledTitle> enumerateMedia(FS_MediaType media) {
         t.kind = classify(t.tid, media, t.protectedTitle);
         out.push_back(t);
     }
-    if (media == MEDIATYPE_SD) { gSdEnum = out; gSdEnumOk = true; }
+    if (media == MEDIATYPE_SD) {
+        enumLock();
+        gSdEnum = out;
+        gSdEnumOk = true;
+        LightLock_Unlock(&gEnumLock);
+    }
     return out;
 }
 
@@ -328,6 +349,12 @@ TitleExtras findTitleExtras(u64 appTid) {
     TitleExtras ex;
     u32 uid = (u32)((appTid >> 8) & 0xFFFFFF);
     if (!appTid) return ex;
+    // cache-only: this runs from drawBottom on selection changes and must
+    // NEVER enumerate AM on the UI thread — the async tally warms the cache
+    enumLock();
+    bool warm = gSdEnumOk;
+    LightLock_Unlock(&gEnumLock);
+    if (!warm) return ex;
     for (auto& t : enumerateMedia(MEDIATYPE_SD)) {
         if (t.kind != TK_UPDATE && t.kind != TK_DLC) continue;
         if ((u32)((t.tid >> 8) & 0xFFFFFF) != uid) continue;
@@ -345,7 +372,31 @@ static StorageTally gTally;
 
 // after an install/uninstall the numbers moved. names stay valid: they are
 // keyed by tid|version, so a new/updated title simply misses the cache.
-void installedTitlesInvalidate() { gTallyOk = false; gSdEnumOk = false; gIconRam.clear(); }
+void installedTitlesInvalidate() {
+    gTallyOk = false;
+    enumLock();
+    gSdEnumOk = false;
+    LightLock_Unlock(&gEnumLock);
+    gIconRam.clear();
+}
+
+// ---- async tally (B back to the Manage picker must never block on it) ------
+static Thread gTallyThread = nullptr;
+static std::atomic<bool> gTallyBusy(false);
+static void tallyWorker(void*) {
+    computeStorageTally();
+    gTallyBusy = false;
+}
+void storageTallyKickAsync() {
+    if (gTallyOk || gTallyBusy) return;
+    if (gTallyThread) { threadJoin(gTallyThread, U64_MAX); threadFree(gTallyThread); gTallyThread = nullptr; }
+    installed3dsRefresh();   // pre-warm the AM set the worker only reads
+    gTallyBusy = true;
+    s32 prio = 0x30;
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    gTallyThread = threadCreate(tallyWorker, nullptr, 64 * 1024, prio + 4, -1, false);
+    if (!gTallyThread) gTallyBusy = false;
+}
 
 // a rebake changed the title's SMDH: the on-SD icon copy is stale, drop it
 // (and the RAM copy) so the next ask re-reads the new SMDH

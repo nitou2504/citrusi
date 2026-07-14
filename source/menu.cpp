@@ -215,7 +215,8 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
                                      const std::string& fsName, const std::string& title,
                                      const std::string& coverPath,
                                      ArtEntry& entryOut, ArtPieces& piecesOut,
-                                     bool forcePicker = false) {
+                                     bool forcePicker = false,
+                                     bool pickIcon = true, bool pickBanner = true) {
     // own the network while art resolves: the cover prefetch worker shares
     // httpc and the SD card with us
     CoverCachePause coverPause;
@@ -237,7 +238,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
         entryOut = ae;
         bool iCh = false, bCh = false;
         artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
-                     entryOut, piecesOut, true, true, &iCh, &bCh);
+                     entryOut, piecesOut, pickIcon, pickBanner, &iCh, &bCh);
         // pages the user skipped keep their stored art
         if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty()) {
             ArtPieces re;
@@ -261,7 +262,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
                   [&](const std::string& msg) { showLoading(target, {msg, title}); });
     if (forcePicker) {
         artPickerRun(target, fsName, title, coverPath, ROMM_SLUG_GBA,
-                     entryOut, piecesOut, true, true);
+                     entryOut, piecesOut, pickIcon, pickBanner);
     }
     bool iconMiss = piecesOut.icon48.empty();
     bool bannerMiss = piecesOut.bannerTex.empty();
@@ -641,9 +642,20 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
                             const std::string& coverPath, const std::string& romPath,
                             bool interactive) {
     if (!ensureCtrBuilder(target)) return -1;
+    // ask WHICH art up front — skipping an unwanted page with a well-timed B
+    // was the only way before, and easy to fumble
+    bool pIcon = true, pBanner = true;
+    if (interactive) {
+        int w = Dialog(target,0,0,320,240,{"Change which art?",title},
+                       {"Icon","Banner","Both","Back"}).handle();
+        if (w < 0 || w == 3) return 0;
+        pIcon   = (w == 0 || w == 2);
+        pBanner = (w == 1 || w == 2);
+    }
     ArtEntry ae;
     ArtPieces pieces;
-    resolveGbaArtInteractive(target, config, romBase, title, coverPath, ae, pieces, true);
+    resolveGbaArtInteractive(target, config, romBase, title, coverPath, ae, pieces, true,
+                             pIcon, pBanner);
     if (pieces.icon48.empty() && pieces.bannerTex.empty()) return 0;   // picker cancelled
     u64 gtid = gCtr.allocateGbaTID(romBase);
     if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
@@ -1201,6 +1213,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // storage breakdown for the Manage system picker: AM enumeration is too
     // slow to redo every frame, so it's computed once in generateManageSystemMenu
     static StorageTally gManageTally;
+    static bool gManageTallyStale = false;   // async recompute in flight
 
     // description scroll state
     static int gDescForId = -1;
@@ -1657,7 +1670,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             bool manage = (this->heading.rfind("Manage", 0) == 0);
             if (manage) {
                 // what the installed titles actually cost, per system.
-                // gManageTally is filled once, when this menu is generated.
+                // gManageTally is filled once, when this menu is generated;
+                // a stale one refreshes here as soon as the worker finishes
+                if (gManageTallyStale && storageTallyCached()) {
+                    gManageTally = computeStorageTally();
+                    gManageTallyStale = false;
+                }
                 const StorageTally& s = gManageTally;
                 float y = CARD_Y + PAD;
                 drawLineTop(CTX, y, 17, 0.58f, COL_TEXT, "Installed");
@@ -1682,6 +1700,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 y += 4;
                 y = cardDivider(y) + 8;
                 drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
+                if (gManageTallyStale)
+                    drawText(CARD_X + CARD_W - PAD, y + CHIP_H/2, 0.55f, 0.4f, 0,
+                             COL_TEXT_DIM, "updating sizes...", C2D_AlignRight);
                 y += CHIP_H + 8;
                 drawWrapped(CTX, y, CTW, 14, 0.42f, COL_TEXT_DIM,
                             "Pick a system to see what's installed, and uninstall or change art.", 3);
@@ -2118,14 +2139,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // Manage system-selection screen (NDS / 3DS), mirrors the library flow
     Menu* generateManageSystemMenu(Menu* prev) {
         delete prev;
-        // storage breakdown for the bottom panel. computeStorageTally() is
-        // cached until an install/uninstall invalidates it; only a recompute
-        // needs the cover worker paused — B from a system tab must be instant
+        // storage breakdown for the bottom panel. Cached -> instant; stale
+        // (an install/uninstall happened) -> recompute on a WORKER while the
+        // panel keeps the old numbers, so B here never blocks on AM/SD
         if (storageTallyCached()) {
             gManageTally = computeStorageTally();
+            gManageTallyStale = false;
         } else {
-            CoverCachePause coverPause;
-            gManageTally = computeStorageTally();
+            gManageTallyStale = true;
+            storageTallyKickAsync();
         }
         std::vector<MenuSelection*> entries;
         auto add = [&](const std::string& label, const std::string& slug){
@@ -2880,7 +2902,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     std::vector<std::string> msg;
                     msg.push_back(std::to_string((int)done.size()) + " installed .cia files - " + humanSize(doneBytes));
-                    msg.push_back("The games stay installed. Only the installer files are deleted.");
+                    for (size_t i = 0; i < done.size() && i < 4; i++)
+                        msg.push_back(shorten(done[i].name, 34));
+                    if (done.size() > 4)
+                        msg.push_back("... and " + std::to_string((int)done.size() - 4) + " more");
+                    msg.push_back("The games stay installed. Only these files are deleted.");
                     if (otherCount > 0)
                         msg.push_back(std::to_string(otherCount) + " not-installed files (" + humanSize(otherBytes) + ") are kept.");
                     if (Dialog(target,0,0,320,240, msg, {"Delete","Back"}, 1).handle() != 0) break;
@@ -2997,8 +3023,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 Dialog(target,0,0,320,240,{"Uninstalled.",ng},{"OK"}).handle();
                             }
                         } else {
-                            int c = Dialog(target,0,0,320,240,{ng,"Not installed."},{"Install","Delete ROM","Back"}).handle();
-                            if (c==0) {
+                            int c = Dialog(target,0,0,320,240,{ng,"Not installed."},{"Install","+ Art","Delete ROM","Back"}).handle();
+                            if (c==0 || c==1) {
+                                bool pickArt = (c==1);   // "+ Art": picker first, like the library flow
                                 if (!ensureCtrBuilder(target)) break;
                                 std::string romBase = entry.path.filename().generic_string();
                                 u64 gtid = gCtr.allocateGbaTID(romBase);
@@ -3006,7 +3033,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 ArtEntry gbaArtEntry;
                                 ArtPieces gbaArt;
                                 resolveGbaArtInteractive(target, config, romBase, ng,
-                                                         entry.coverPath, gbaArtEntry, gbaArt);
+                                                         entry.coverPath, gbaArtEntry, gbaArt, pickArt);
                                 Dialog(target,0,0,320,240,{"Installing...",ng},{},0).handle();
                                 u64 lastG = 0;
                                 int mode = gbaScreenFor(gbaArtEntry, config);
@@ -3028,7 +3055,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     Dialog(target,0,0,320,240,{"Installed!",ng},{"OK"}).handle();
                                 } else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Install cancelled":"Install failed",gr->message},{"OK"}).handle();
                                 delete gr;
-                            } else if (c==1) {
+                            } else if (c==2) {
                                 if (Dialog(target,0,0,320,240,{"Delete ROM file?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                                 showLoading(target, {"Deleting..."});
                                 std::error_code ec;

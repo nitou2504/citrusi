@@ -208,8 +208,11 @@ void buildBannerCands(int gameId, const std::string& query, const std::string& f
     aplog.info("banner cands: " + std::to_string(out.size()));
 }
 
-// set when B cut an in-flight thumb download — consumed as a Skip press
-static bool gThumbSkip = false;
+// keys pressed while a thumb transfer was in flight: the transfer is cut so
+// input wins, and the presses are replayed into the picker's next frame
+#define PICKER_KEYS (KEY_A | KEY_B | KEY_X | KEY_Y | KEY_L | KEY_R | \
+                     KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT)
+static u32 gPendingKeys = 0;
 
 // fetch + decode ONE pending thumb (called once per frame; blocking but short)
 void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW, int maxH) {
@@ -218,16 +221,17 @@ void loadOneThumb(std::vector<Cand>& cands, size_t first, size_t last, int maxW,
         if (c.state != 0) continue;
         aplog.info("thumb fetch: " + c.thumbKey);
         std::string bytes;
-        // B during the transfer aborts it (curl progress hook) so Skip is
-        // instant instead of waiting out a slow cdn
+        // ANY picker key during the transfer aborts it (curl progress hook):
+        // moving the cursor or picking must never wait for a slow cdn. The
+        // aborted thumb stays pending and refetches on a later idle frame.
         gSgdb.abortCheck = []() -> bool {
             hidScanInput();
-            if (hidKeysDown() & KEY_B) gThumbSkip = true;
-            return gThumbSkip;
+            gPendingKeys |= hidKeysDown() & PICKER_KEYS;
+            return gPendingKeys != 0;
         };
         artGetUrl(gSgdb, gRomm, c.thumbUrl.empty() ? c.url : c.thumbUrl, c.thumbKey, bytes);
         gSgdb.abortCheck = nullptr;
-        if (gThumbSkip) return;   // cut on purpose: not a fetch failure
+        if (gPendingKeys && bytes.empty()) return;   // cut for input: retry later
         aplog.info("thumb bytes: " + std::to_string(bytes.size()));
         if (!bytes.empty() && loadTexImage(bytes, &c.img, maxW, maxH)) {
             c.state = 1;
@@ -320,13 +324,15 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
         const int cellW = (page == 0) ? 48 : 128;
         const int cellH = (page == 0) ? 48 : 64;
         const int pitchX = (page == 0) ? 56 : 150;
-        const int pitchY = (page == 0) ? 56 : 76;
+        // tighter rows: the third icon row used to run under the footer info
+        const int pitchY = (page == 0) ? 52 : 74;
         const int gridX = (320 - (cols - 1) * pitchX - cellW) / 2;
-        const int gridY = 36;
+        const int gridY = 38;
 
         hidScanInput();
         u32 kDown = hidKeysDown();
-        if (gThumbSkip) { gThumbSkip = false; kDown |= KEY_B; }   // cut fetch = Skip
+        kDown |= gPendingKeys;   // replay presses that cut an in-flight fetch
+        gPendingKeys = 0;
         int count = (int)cands.size();
 
         if (kDown & KEY_B) {                       // skip this page
@@ -455,10 +461,14 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
                 snprintf(info, sizeof(info), "libretro logo");
             else
                 snprintf(info, sizeof(info), "%s", c.name.empty() ? c.source.c_str() : c.name.c_str());
-            drawText(160, 204, 0, 0.45f, COL_BG, COL_TEXT_DIM, info, C2D_AlignCenter);
+            drawText(160, 207, 0, 0.45f, COL_BG, COL_TEXT_DIM, info, C2D_AlignCenter);
         }
-        if (!gameName.empty() && page == 0)
-            drawText(160, 22, 0, 0.42f, COL_BG, COL_TEXT_DIM, gameName.c_str(), C2D_AlignCenter);
+        if (!gameName.empty()) {
+            // one clipped line between the heading and the grid — a long
+            // (refined) name used to paint over the heading and the top row
+            std::string gn = gameName.size() > 42 ? gameName.substr(0, 41) + "..." : gameName;
+            drawText(160, 26, 0, 0.38f, COL_BG, COL_TEXT_DIM, gn.c_str(), C2D_AlignCenter);
+        }
         drawText(160, 222, 0, 0.45f, COL_BG, COL_TEXT_DIM,
                  "A use   X search   B skip   L/R pages", C2D_AlignCenter);
         C3D_FrameEnd(0);
