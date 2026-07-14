@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <functional>
 
 // SteamGridDB client over curl+mbedtls (TLS 1.2 — the 3DS sslc tops out at
 // TLS 1.1 and can't reach SGDB's ECDSA-only cert, see docs/GBA-PLAN.md).
@@ -54,4 +55,7 @@ class SgdbClient {
     // from the art flow hung the app while curl kept working.
     bool fetchUrl(const std::string& url, std::string& out,
                   const std::string& headerLine = "");
+    // polled between transfer chunks; return true to abort the transfer
+    // (used by the art picker so Skip cuts an in-flight thumb download)
+    std::function<bool()> abortCheck;
 };

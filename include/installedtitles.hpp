@@ -32,6 +32,7 @@ struct InstalledTitle {
     u64 sizeBytes = 0;
     u16 version = 0;
     std::string name;              // SMDH English short title (product code / hex tid as fallback)
+    u32 region = 0;                // SMDH region lockout (0 = unknown)
     TitleKind kind = TK_APP;
     bool protectedTitle = false;   // never list, never uninstall (this app, system titles)
 };
@@ -100,3 +101,5 @@ std::vector<CiaFile> listCiaFiles();
 // the title's own 48x48 HOME icon, saved from its SMDH: raw RGBA8 (48*48*4).
 // "" when we've never read that title's SMDH. Free art for every 3DS game.
 std::string titleIconRGBA(u64 tid);
+// drop the cached icon for one title (call after a rebake changed its SMDH)
+void titleIconInvalidate(u64 tid);

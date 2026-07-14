@@ -1170,7 +1170,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     C2D_DrawImageAt(gTitleIcon, cx - d/2, MENU_HEADING_HEIGHT + 24, 0.57f, NULL, 2.0f, 2.0f);
                     iy = py + ph + 8;
                 } else {
-                    const char* ph = (gCoverFailedId == sel->rommId || (sel->coverPath.empty() && sel->coverSmallPath.empty())) ? "no art" : "...";
+                    const char* ph;
+                    u64 mtid = (this->type == MENU_MANAGE) ? manageIconTid(sel) : 0;
+                    if (mtid) {
+                        // icon rows: "..." until the debounced load actually
+                        // ran and came back empty (matches the other systems)
+                        ph = (gTitleIconTid == mtid && !gTitleIcon.tex) ? "no art" : "...";
+                    } else {
+                        ph = (gCoverFailedId == sel->rommId ||
+                              (sel->coverPath.empty() && sel->coverSmallPath.empty())) ? "no art" : "...";
+                    }
                     drawText(cx, MENU_HEADING_HEIGHT + 72, 0.56f, 0.45f, COL_SURFACE, COL_TEXT_DIM, ph, C2D_AlignCenter);
                 }
                 // condensed info under the art
@@ -1340,6 +1349,24 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     // small flat metadata chip with y as its TOP; returns x after the chip
     #define CHIP_H 16.0f
+    // short region tag from the SMDH region lockout (nullptr = unknown)
+    static const char* regionChipText(u32 r) {
+        if (!r) return nullptr;
+        if (r == 0x7FFFFFFF) return "World";
+        int n = 0;
+        for (u32 b = r & 0x7F; b; b >>= 1) n += (int)(b & 1);
+        if (n >= 3) return "World";
+        if ((r & 2) && (r & 4)) return "USA/EUR";
+        if (r & 2)  return "USA";
+        if (r & 4)  return "EUR";
+        if (r & 1)  return "JPN";
+        if (r & 8)  return "AUS";
+        if (r & 16) return "CHN";
+        if (r & 32) return "KOR";
+        if (r & 64) return "TWN";
+        return nullptr;
+    }
+
     static float drawChip(float x, float y, const std::string& label, u32 fg) {
         float fscale = getFontScale(0.42f);
         float w = measureText(label, fscale) + 14;
@@ -1485,17 +1512,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             u64 totalBytes = sel->sizeBytes + (hasExtras ? gExtras.bytes : 0);
             float cxp = drawChip(CTX, y, humanSize(totalBytes), COL_TEXT_DIM);
             if (m3ds) {
-                cxp = drawChip(cxp, y, "3DS", COL_TEXT_DIM);
+                // the tab already says 3DS; the slot goes to the region.
+                // extras collapse into one short chip — "update + DLC" plus
+                // the rest overflowed the row; the breakdown lives below.
+                if (const char* rg = regionChipText(sel->region))
+                    cxp = drawChip(cxp, y, rg, COL_TEXT_DIM);
                 cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
                 if (sel->rommId > 0) cxp = drawChip(cxp, y, "on RomM", COL_TEXT_DIM);
-                if (hasExtras) {
-                    char ex[40];
-                    snprintf(ex, sizeof(ex), "%s%s%s",
-                             gExtras.updates ? "update" : "",
-                             (gExtras.updates && gExtras.dlc) ? " + " : "",
-                             gExtras.dlc ? "DLC" : "");
-                    drawChip(cxp, y, ex, COL_ACCENT);
-                }
+                if (hasExtras) drawChip(cxp, y, "extras", COL_ACCENT);
             } else {
                 if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
                 if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
@@ -1515,7 +1539,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                              humanSize(gExtras.bytes).c_str());
                     drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, bd, 2);
                     drawWrapped(CTX, y + 30, CTW, 14, 0.45f, COL_TEXT_DIM,
-                                "Press A to uninstall - the extras can go with it.", 2);
+                                "Press A to manage: uninstall everything, or remove just the update/DLC.", 2);
                 } else {
                     drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
                 }
@@ -1648,11 +1672,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 };
                 // DS/GBA sizes include the rom files on the card — the
                 // forwarder/inject titles alone say nothing about the space used
+                row("Nintendo 3DS", s.appCount, s.appBytes);
                 row("Nintendo DS", s.dsCount(), s.dsBytes());
                 row("Game Boy Advance", s.gbaCount, s.gbaTotalBytes());
-                row("Nintendo 3DS", s.appCount, s.appBytes);
                 if (s.extraCount > 0) row("Updates and DLC", s.extraCount, s.extraBytes);
-                if (s.ciaCount > 0) row("Installer files (.cia)", s.ciaCount, s.ciaBytes);
+                // plain installer files aren't the user's problem; only the
+                // duplicates of already-installed games are reclaimable
+                if (s.ciaDoneCount > 0) row("Duplicates - can be freed", s.ciaDoneCount, s.ciaDoneBytes);
                 y += 4;
                 y = cardDivider(y) + 8;
                 drawChip(CTX, y, "SD free  " + humanSize(s.sdFreeBytes), COL_ACCENT);
@@ -2020,8 +2046,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->platformSlug = slug;
             entries.push_back(e);
         };
-        add("Nintendo DS", OpenPlatform, ROMM_SLUG_NDS);
         add("Nintendo 3DS", OpenPlatform, ROMM_SLUG_3DS);
+        add("Nintendo DS", OpenPlatform, ROMM_SLUG_NDS);
         add("Game Boy Advance", OpenPlatform, ROMM_SLUG_GBA);
         add("Search all systems", OpenSearchAll, "");
         add("Refresh from server", RefreshLibraries, "");
@@ -2107,8 +2133,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->display = label; e->action = OpenManage; e->platformSlug = slug;
             entries.push_back(e);
         };
-        add("Nintendo DS", ROMM_SLUG_NDS);
         add("Nintendo 3DS", ROMM_SLUG_3DS);
+        add("Nintendo DS", ROMM_SLUG_NDS);
         add("Game Boy Advance", ROMM_SLUG_GBA);
         Menu* menu = new Menu(entries);
         menu->currentDirectory = std::filesystem::path("/");
@@ -2123,6 +2149,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         (void)dsiwareCount;
         delete prev;
         CoverCachePause coverPause;   // the AM/SD scans own the card while they run
+        // drop the rail art slots: after a rebake the same tid must reload
+        // its (new) icon and banner instead of showing the old textures
+        if (gTitleIcon.tex) freeTexImage(&gTitleIcon);
+        gTitleIconTid = 0; gIconWantTid = 0;
+        if (gBannerPrev.tex) freeTexImage(&gBannerPrev);
+        gBannerPrevTid = 0; gBannerWantTid = 0;
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
         installed3dsRefresh();   // the .cia scan below needs the AM set
@@ -2168,6 +2200,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->action = ManageRom;
             e->platformSlug = ROMM_SLUG_3DS;
             e->tid = t.tid;
+            e->region = t.region;
             e->installed = true;
             e->protectedTitle = t.protectedTitle;
             e->sizeBytes = t.sizeBytes;   // installed size, not the server's file size
@@ -2878,12 +2911,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         TitleExtras ex = findTitleExtras(entry.tid);
                         int c;
                         if (!ex.empty()) {
-                            std::string what = (ex.updates && ex.dlc) ? "update + DLC"
-                                             : ex.updates ? "update" : "DLC";
+                            // Uninstall = everything (game + update/DLC);
+                            // Extras only keeps the game, frees the extras
                             c = Dialog(target,0,0,320,240,
-                                       {n3, "Installed - " + humanSize(entry.sizeBytes),
-                                        what + " also installed (" + humanSize(ex.bytes) + ")"},
-                                       {"Uninstall","+ extras","Back"}).handle();
+                                       {n3, "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total",
+                                        "extras: " + std::to_string(ex.updates + ex.dlc) +
+                                        " update/DLC (" + humanSize(ex.bytes) + ")"},
+                                       {"Uninstall","Extras only","Back"}).handle();
                         } else {
                             c = Dialog(target,0,0,320,240,
                                        {n3, "Installed - " + humanSize(entry.sizeBytes)},
@@ -2891,13 +2925,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (c == 1) c = 2;   // "Back" is the second button here
                         }
                         if (c != 0 && c != 1) break;
-                        bool withExtras = (c == 1);
-                        if (Dialog(target,0,0,320,240,{withExtras?"Uninstall game + extras?":"Uninstall game?",n3},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        bool extrasOnly = (c == 1);
+                        u64 freed = extrasOnly ? ex.bytes : entry.sizeBytes + ex.bytes;
+                        if (Dialog(target,0,0,320,240,
+                                   {extrasOnly ? "Remove update/DLC only?" : "Uninstall game?",
+                                    n3, "Frees " + humanSize(freed)},
+                                   {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                         showLoading(target, {"Uninstalling...", n3});
-                        Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
-                        AM_DeleteTicket(entry.tid);
+                        Result dr = 0;
+                        if (!extrasOnly) {
+                            dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
+                            AM_DeleteTicket(entry.tid);
+                        }
                         int extrasGone = 0;
-                        if (withExtras && R_SUCCEEDED(dr)) {
+                        if (R_SUCCEEDED(dr)) {
                             for (u64 xt : ex.tids) {
                                 if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, xt))) extrasGone++;
                                 AM_DeleteTicket(xt);
@@ -2905,10 +2946,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         installedTitlesInvalidate();
                         if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
-                        else if (extrasGone > 0)
-                            Dialog(target,0,0,320,240,{"Uninstalled.",n3,
-                                   "Also removed "+std::to_string(extrasGone)+" extra"+(extrasGone>1?"s.":".")},{"OK"}).handle();
-                        else Dialog(target,0,0,320,240,{"Uninstalled.",n3},{"OK"}).handle();
+                        else if (extrasOnly)
+                            Dialog(target,0,0,320,240,{"Extras removed.",n3,
+                                   humanSize(ex.bytes)+" freed - the game stays installed."},{"OK"}).handle();
+                        else Dialog(target,0,0,320,240,{"Uninstalled.",n3,
+                                    extrasGone > 0 ? "Update/DLC went with it." : ""},{"OK"}).handle();
                         while (this->queue.size() > 0) this->queue.pop();
                         showLoading(target, {"Refreshing..."});
                         return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
