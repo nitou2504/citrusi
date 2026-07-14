@@ -50,6 +50,12 @@ static void saveBannerPreview(u64 tid, const std::string& tex) {
     fclose(f);
 }
 
+static std::string bannerPreviewPath(u64 tid) {
+    char name[24];
+    snprintf(name, sizeof(name), "%016llX.raw", (unsigned long long)tid);
+    return FORWARDER_DIR + "/banners-cache/" + name;
+}
+
 static inline u32 rd32(const std::string& b, u32 o) { u32 v; memcpy(&v, b.data()+o, 4); return v; }
 static inline void wr32(std::string& b, u32 o, u32 v) { memcpy(&b[o], &v, 4); }
 static inline u64 rd64(const std::string& b, u32 o) { u64 v; memcpy(&v, b.data()+o, 8); return v; }
@@ -301,6 +307,44 @@ static bool titleInstalledOn(FS_MediaType media, u64 tid) {
     return false;
 }
 
+bool ensureBannerPreview(u64 tid) {
+    // only our own template-based banners have the texture at the known
+    // offset — retail CGFX layouts differ and would untile to noise
+    if ((u32)(tid >> 32) != 0x00040000 || (tid & 0xFF)) return false;
+    u32 u24 = (u32)((tid >> 8) & 0xFFFFFF);
+    if (u24 < 0xFF400) return false;
+    std::string full = bannerPreviewPath(tid);
+    if (fileExists(full)) return true;
+    // exefs:/banner of the installed SD title (readable cross-title; only
+    // RomFS is blocked — same trick as the SMDH icon reads)
+    u32 archPath[4] = { (u32)(tid & 0xFFFFFFFF), (u32)(tid >> 32), MEDIATYPE_SD, 0 };
+    u32 filePath[5] = { 0, 0, 2, 0x6E6E6162 /*'bann'*/, 0x00007265 /*'er'*/ };
+    FS_Path ap = { PATH_BINARY, sizeof(archPath), archPath };
+    FS_Path fp = { PATH_BINARY, sizeof(filePath), filePath };
+    Handle h = 0;
+    if (R_FAILED(FSUSER_OpenFileDirectly(&h, ARCHIVE_SAVEDATA_AND_CONTENT, ap, fp, FS_OPEN_READ, 0)))
+        return false;
+    u64 sz = 0;
+    if (R_FAILED(FSFILE_GetSize(h, &sz)) || sz < 0x90 || sz > 4 * 1024 * 1024) {
+        FSFILE_Close(h);
+        return false;
+    }
+    std::string bnr((size_t)sz, '\0');
+    u32 read = 0;
+    Result rr = FSFILE_Read(h, &read, 0, &bnr[0], (u32)sz);
+    FSFILE_Close(h);
+    if (R_FAILED(rr) || read != sz) return false;
+    if (memcmp(bnr.data(), "CBMD", 4) != 0) return false;
+    u32 cwavOff = rd32(bnr, 0x84);
+    if (cwavOff <= 0x88 || cwavOff > sz) return false;
+    std::string cgfx = lz11Decompress(bnr.substr(0x88, cwavOff - 0x88));
+    if (cgfx.size() < BANNER_TEX_OFFSET + BANNER_TEX_SIZE ||
+        memcmp(cgfx.data(), "CGFX", 4) != 0)
+        return false;
+    saveBannerPreview(tid, cgfx.substr(BANNER_TEX_OFFSET, BANNER_TEX_SIZE));
+    return fileExists(full);
+}
+
 ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string& title,
                                    u64 tid, const std::string& etc1a4, const std::string& cwav) {
     if (!parsed) return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "template not loaded");
@@ -456,6 +500,7 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     o << launchPath;
     o.close();
     ctrTidCacheInvalidate();
+    saveBannerPreview(tid, etc1a4);   // same template texture layout as GBA
 
     return new ReturnResult(ERROR_SUCCESS, "");
 }
