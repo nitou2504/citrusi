@@ -972,16 +972,20 @@ static bool gBattCharging = false;
 static u32 gBattLastTick = 0;
 static bool gBattEver = false;
 static C2D_Image gBattImg[6];    // levels 0-4 + [5] charging
+static C2D_SpriteSheet gBattSheet = nullptr;
 static bool gBattImgTried = false;
 static void ensureBatterySprites() {
     if (gBattImgTried) return;
     gBattImgTried = true;
-    static const char* names[6] = {"battery0", "battery1", "battery2",
-                                   "battery3", "battery4", "batteryCharge"};
-    for (int i = 0; i < 6; i++) {
-        std::string b = readEntireFile(std::string("romfs:/ui/") + names[i] + ".png");
-        if (!b.empty()) loadTexImage(b, &gBattImg[i], 32, 32);
-    }
+    // hbmenu's way: the PNGs are compiled at build time (tex3ds) into a
+    // pre-tiled t3x atlas, imported here with a plain memcpy — no GX
+    // display transfer, so this is safe even before the first frame.
+    // (runtime stb decode + SyncDisplayTransfer hung the GPU at boot.)
+    gBattSheet = C2D_SpriteSheetLoad("romfs:/gfx/battery.t3x");
+    if (!gBattSheet) return;
+    size_t n = C2D_SpriteSheetCount(gBattSheet);
+    for (size_t i = 0; i < 6 && i < n; i++)
+        gBattImg[i] = C2D_SpriteSheetGetImage(gBattSheet, i);
 }
 static void drawHeaderStatus() {
     // sprites are loaded in tickBottom — texture uploads (GX transfer +

@@ -48,7 +48,9 @@ build_template() {
 
 build_3dsx() {
   echo ">> building .3dsx"
-  docker run --rm -v "$ROOT":/romm3ds -w /romm3ds "$DKA" sh -c "make clean >/dev/null && make"
+  # UI sprite atlas (hbmenu-style): gfx/*.png -> pre-tiled romfs t3x
+  docker run --rm -v "$ROOT":/romm3ds -w /romm3ds "$DKA" sh -c \
+    "mkdir -p romfs/gfx && cd gfx && tex3ds -i battery.t3s -o ../romfs/gfx/battery.t3x && cd .. && make clean >/dev/null && make"
 }
 
 build_cia() {
