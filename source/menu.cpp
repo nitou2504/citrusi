@@ -692,10 +692,12 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
     return rc;
 }
 
+// screenOverride >= 0 bakes that preset in the same pass ("Art + screen
+// filter": one re-bake instead of two); -1 keeps the game's preset.
 static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
                             const std::string& romBase, const std::string& title,
                             const std::string& coverPath, const std::string& romPath,
-                            bool interactive) {
+                            bool interactive, int screenOverride = -1) {
     if (!ensureCtrBuilder(target)) return -1;
     // ask WHICH art up front — skipping an unwanted page with a well-timed B
     // was the only way before, and easy to fumble
@@ -718,7 +720,9 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
     if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
     Dialog(target,0,0,320,240,{"Updating art...",title},{},0).handle();
     u64 lastG = 0;
-    int mode = gbaScreenFor(ae, config);   // art change keeps the game's preset
+    // art change keeps the game's preset unless the caller picked one
+    int mode = (screenOverride >= 0) ? screenOverride % GBA_SCREEN_COUNT
+                                     : gbaScreenFor(ae, config);
     ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid,
                                         pieces.icon48, pieces.bannerTex,
                                         mode,
@@ -1681,10 +1685,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 int id = sel->rommId;
                 const char* d = nullptr;
                 if (id >= 0 && id <= 5) d = descs[id];
-                else if (id == SETTING_ART_NOTIFY) d = "When icon/banner art isn't found at install, ask before falling back to the RomM cover. Off = silent fallback (marked in Manage).";
+                else if (id == SETTING_ART_NOTIFY) d = "What happens when icon/banner art isn't found at install. Press A to choose - each choice is explained there.";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/romm3ds/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
-                else if (id == SETTING_GBA_SCREEN) d = "Filter baked into new GBA installs. Brighter gamma = bright, pops like 3DS games (recommended). AGS-101 = backlit GBA look; original = dark; unfiltered = washed; night = warm. Per game: Manage -> Screen filter.";
-                else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage. Title icons = each game's own HOME icon (fast, always available); RomM covers = box art from the server for library matches.";
+                else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. Press A to pick from the presets, each explained there. Per game: Manage -> game -> Screen filter.";
+                else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage: each game's own HOME icon, or its RomM cover. Press A to choose.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
                 if (d)
                     drawWrapped(CTX, y, CTW, 14, 0.45f, C2D_Color32(0xC6,0xCF,0xE2,255), d, 4);
@@ -2839,12 +2843,33 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             return m;
                         }
                     }
+                    // multi-option settings open a vertical picker (same menu
+                    // as everywhere else) instead of cycling values blind;
+                    // plain on/off rows still just toggle
                     switch (entry.rommId) {
                         case SETTING_CUSTOM_TITLE: config->customTitle = !config->customTitle; break;
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
-                        case SETTING_ART_NOTIFY:   config->artNotify = !config->artNotify; break;
-                        case SETTING_GBA_SCREEN:   config->gbaScreen = (config->gbaScreen + 1) % GBA_SCREEN_COUNT; break;
-                        case SETTING_MANAGE_ART:   config->manageIcons = !config->manageIcons; break;
+                        case SETTING_ART_NOTIFY: {
+                            int c = actionMenu(target, "Missing art at install", "", {
+                                {"Notify", "Ask before falling back to the RomM cover, with the option to search by name."},
+                                {"Silent fallback", "Use the RomM cover without asking; such games get a [!] mark in Manage."}},
+                                config->artNotify ? 0 : 1);
+                            if (c >= 0) config->artNotify = (c == 0);
+                            break;
+                        }
+                        case SETTING_GBA_SCREEN: {
+                            int sel = pickGbaScreenPreset(target, config, "Default for new GBA installs");
+                            if (sel >= 0) config->gbaScreen = sel;
+                            break;
+                        }
+                        case SETTING_MANAGE_ART: {
+                            int c = actionMenu(target, "Manage art", "Art for installed games in Manage", {
+                                {"Title icons", "Each game's own HOME icon - fast, always available, exactly what HOME shows."},
+                                {"RomM covers", "Box art from the server, for games matched in the library."}},
+                                config->manageIcons ? 0 : 1);
+                            if (c >= 0) config->manageIcons = (c == 0);
+                            break;
+                        }
                         case SETTING_SGDB_KEY: {
                             gSgdbKeyTried = false;   // re-read sgdb.env on demand
                             int c;
@@ -2879,9 +2904,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             }
                             break;
                         }
-                        case SETTING_TEMPLATE:
-                            config->currentTemplate = (config->currentTemplate + 1) % config->templates.size();
+                        case SETTING_TEMPLATE: {
+                            std::vector<MenuOpt> topts;
+                            for (auto& t : config->templates) topts.push_back({t, ""});
+                            int c = actionMenu(target, "DSiWare template", "Used by SD card installs",
+                                               topts, (int)config->currentTemplate);
+                            if (c >= 0) config->currentTemplate = c;
                             break;
+                        }
                         case SETTING_SERVER:
                             while (this->queue.size() > 0) this->queue.pop();
                             return generateServerMenu(this);
@@ -3216,9 +3246,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                                weakArt ? "Installed - using fallback art" : "Installed", {
                                 {"Uninstall", "Remove the inject from HOME and delete the ROM file."},
                                 {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                                {"Screen filter", "Re-bake with a different color preset; art and save kept."}});
+                                {"Screen filter", "Re-bake with a different color preset; art and save kept."},
+                                {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."}});
                             if (m < 0) break;
-                            int c = (m == 1) ? 0 : (m == 2) ? 1 : 2;   // old order: art/screen/uninstall
+                            // old order: art / screen / uninstall; 3 = art + screen
+                            int c = (m == 1) ? 0 : (m == 2) ? 1 : (m == 3) ? 3 : 2;
                             if (c==0) {
                                 // rebuild in place: same TID keeps the HOME
                                 // position and save data, only the art changes
@@ -3237,6 +3269,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 if (fc < 0) break;
                                 applyGbaScreenItem(target, config, romBase, ng,
                                                    entry.coverPath, entry.path.generic_string(), true, fc);
+                                while (this->queue.size() > 0) this->queue.pop();
+                                showLoading(target, {"Refreshing..."});
+                                return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
+                            }
+                            if (c==3) {
+                                // both in one pass: preset first (cheap to back
+                                // out of), then the art picker, ONE re-bake
+                                int fc = pickGbaScreenPreset(target, config, ng,
+                                                             artStoreGet(romBase).screen);
+                                if (fc < 0) break;
+                                int rc = changeArtGbaItem(target, config, romBase, ng,
+                                                          entry.coverPath, entry.path.generic_string(),
+                                                          true, fc);
+                                if (rc == 0) break;   // picker cancelled — stay put
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
@@ -3614,7 +3660,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     for (auto e : items)
                         if (!is3ds && !manageItemInstalled(slug, *e)) notInstalled++;
                     // action dialog: what's offered follows what's selected
-                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_SCREEN, A_EXTRAS, A_BACK } act = A_BACK;
+                    enum { A_INSTALL, A_UNINSTALL, A_CHANGEART, A_SCREEN, A_ARTSCREEN, A_EXTRAS, A_BACK } act = A_BACK;
                     std::vector<u64> extrasSel;   // 3DS: update/DLC titles to strip (A_EXTRAS)
                     u64 extrasSelBytes = 0;
                     std::string bsub = std::to_string(M) + " selected";
@@ -3682,6 +3728,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (slug == ROMM_SLUG_GBA) {
                                 mo.push_back({"Screen filter", "Pick one preset and apply it to the installed games."});
                                 ma.push_back(A_SCREEN);
+                                mo.push_back({"Art + screen filter", "One preset for all, then the art picker per game - a single re-bake each."});
+                                ma.push_back(A_ARTSCREEN);
                             }
                         }
                         int c = actionMenu(target, "Batch",
@@ -3695,8 +3743,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         int c = actionMenu(target, "Batch", bsub, {
                             {"Uninstall", "Remove every selected inject and its ROM file."},
                             {"Change art", "Art picker per game, then each re-bakes in place."},
-                            {"Screen filter", "Pick one preset and apply it to all selected."}});
-                        act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : (c==2) ? A_SCREEN : A_BACK;
+                            {"Screen filter", "Pick one preset and apply it to all selected."},
+                            {"Art + screen filter", "One preset for all, then the art picker per game - a single re-bake each."}});
+                        act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : (c==2) ? A_SCREEN
+                            : (c==3) ? A_ARTSCREEN : A_BACK;
                     } else {
                         int c = actionMenu(target, "Batch", bsub, {
                             {"Uninstall selected", "Remove every selected forwarder and ROM."},
@@ -3831,7 +3881,15 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         for (auto& f : failed) { if (shown++ >= 4) break; msg.push_back("x "+shorten(f,28)); }
                         if ((int)failed.size() > 4) msg.push_back("...and "+std::to_string((int)failed.size()-4)+" more");
                         Dialog(target,0,0,320,240, msg, {"OK"}).handle();
-                    } else {   // A_CHANGEART: sequential picker per rebuildable item
+                    } else {   // A_CHANGEART / A_ARTSCREEN: sequential picker per rebuildable item
+                        // Art + filter: ONE preset picked up front, baked into
+                        // the same re-bake as each game's new art (never two)
+                        int fc = -1;
+                        if (act == A_ARTSCREEN) {
+                            fc = pickGbaScreenPreset(target, config,
+                                                     std::to_string(rebuildable) + " selected");
+                            if (fc < 0) break;
+                        }
                         int okCount = 0, skipped = 0, done = 0;
                         std::vector<std::string> failed;
                         for (int i = 0; i < M; i++) {
@@ -3842,8 +3900,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             showLoading(target, {"Art "+std::to_string(done)+"/"+std::to_string(rebuildable), it->title});
                             std::string base = it->path.filename().generic_string();
                             int rc = (slug == ROMM_SLUG_GBA)
-                                ? changeArtGbaItem(target, config, base, it->title, it->coverPath, it->path.generic_string(), false)
+                                ? changeArtGbaItem(target, config, base, it->title, it->coverPath, it->path.generic_string(), false, fc)
                                 : changeArtNdsRommItem(target, config, base, it->title, it->coverPath, it->path.generic_string(), it->rtid, false);
+                            // Art + filter with the art picker skipped: the
+                            // game still gets the preset it was promised
+                            if (rc == 0 && act == A_ARTSCREEN)
+                                rc = applyGbaScreenItem(target, config, base, it->title,
+                                                        it->coverPath, it->path.generic_string(), false, fc);
                             if (rc == 1) okCount++;
                             else if (rc == 0) skipped++;
                             else failed.push_back(it->title);

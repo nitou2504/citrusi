@@ -16,6 +16,14 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   *Change art* and (GBA) *Screen filter* for the installed ones, next to
   Install/Uninstall. "Delete ROMs" on not-installed GBA rows actually
   deletes the files now.
+- **Art + screen filter in one pass**: Manage GBA (single and batch) has an
+  *Art + screen filter* action — one preset picked up front, the art picker
+  per game, one re-bake for both (was two full re-bakes). Batch: a game
+  whose art picker is skipped still gets the preset.
+- **Settings pickers**: multi-option settings (GBA screen, Manage art, Art
+  notify, Template) open a vertical picker on A — each choice explained
+  under the list — instead of blind value cycling; the row descriptions
+  drop the cramped ;-separated enumerations.
 - **Duplicate title-id prompts, on demand**: the Random-title-ID Settings
   toggle is gone. A TWL forwarder whose title id is already installed asks
   *Install as new* (random id, keeps both — rom hacks sharing the
