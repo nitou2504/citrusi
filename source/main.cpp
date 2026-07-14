@@ -188,6 +188,11 @@ int main()
 
 			else if(kDown & KEY_L) menu->scrollDesc(-1); // desc scroll up (Y toggles selection)
 
+			else if(kDown & KEY_R) {
+				if (menu->type == MENU_ROMM || menu->type == MENU_MANAGE || menu->type == MENU_LOCAL)
+					menu->toggleSelectAll();   // R: select all / none
+			}
+
 			else if(kDown & KEY_Y) {
 				if (menu->type == MENU_ROMM || menu->type == MENU_MANAGE) menu->toggleSelect();
 				else menu->toggleMark();   // Install-from-SD marks; other screens scroll
