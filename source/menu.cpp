@@ -1539,7 +1539,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                              humanSize(gExtras.bytes).c_str());
                     drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, bd, 2);
                     drawWrapped(CTX, y + 30, CTW, 14, 0.45f, COL_TEXT_DIM,
-                                "Press A to uninstall - the extras can go with it.", 2);
+                                "Press A to manage: uninstall everything, or remove just the update/DLC.", 2);
                 } else {
                     drawWrapped(CTX, y, CTW, 14, 0.45f, COL_TEXT_DIM, "Installed. Press A to uninstall.", 2);
                 }
@@ -2909,12 +2909,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         TitleExtras ex = findTitleExtras(entry.tid);
                         int c;
                         if (!ex.empty()) {
-                            std::string what = (ex.updates && ex.dlc) ? "update + DLC"
-                                             : ex.updates ? "update" : "DLC";
+                            // Uninstall = everything (game + update/DLC);
+                            // Extras only keeps the game, frees the extras
                             c = Dialog(target,0,0,320,240,
-                                       {n3, "Installed - " + humanSize(entry.sizeBytes),
-                                        what + " also installed (" + humanSize(ex.bytes) + ")"},
-                                       {"Uninstall","+ extras","Back"}).handle();
+                                       {n3, "Installed - " + humanSize(entry.sizeBytes + ex.bytes) + " total",
+                                        "extras: " + std::to_string(ex.updates + ex.dlc) +
+                                        " update/DLC (" + humanSize(ex.bytes) + ")"},
+                                       {"Uninstall","Extras only","Back"}).handle();
                         } else {
                             c = Dialog(target,0,0,320,240,
                                        {n3, "Installed - " + humanSize(entry.sizeBytes)},
@@ -2922,13 +2923,20 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             if (c == 1) c = 2;   // "Back" is the second button here
                         }
                         if (c != 0 && c != 1) break;
-                        bool withExtras = (c == 1);
-                        if (Dialog(target,0,0,320,240,{withExtras?"Uninstall game + extras?":"Uninstall game?",n3},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        bool extrasOnly = (c == 1);
+                        u64 freed = extrasOnly ? ex.bytes : entry.sizeBytes + ex.bytes;
+                        if (Dialog(target,0,0,320,240,
+                                   {extrasOnly ? "Remove update/DLC only?" : "Uninstall game?",
+                                    n3, "Frees " + humanSize(freed)},
+                                   {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                         showLoading(target, {"Uninstalling...", n3});
-                        Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
-                        AM_DeleteTicket(entry.tid);
+                        Result dr = 0;
+                        if (!extrasOnly) {
+                            dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
+                            AM_DeleteTicket(entry.tid);
+                        }
                         int extrasGone = 0;
-                        if (withExtras && R_SUCCEEDED(dr)) {
+                        if (R_SUCCEEDED(dr)) {
                             for (u64 xt : ex.tids) {
                                 if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, xt))) extrasGone++;
                                 AM_DeleteTicket(xt);
@@ -2936,10 +2944,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         installedTitlesInvalidate();
                         if (R_FAILED(dr)) Dialog(target,0,0,320,240,{"Uninstall failed",n3},{"OK"}).handle();
-                        else if (extrasGone > 0)
-                            Dialog(target,0,0,320,240,{"Uninstalled.",n3,
-                                   "Also removed "+std::to_string(extrasGone)+" extra"+(extrasGone>1?"s.":".")},{"OK"}).handle();
-                        else Dialog(target,0,0,320,240,{"Uninstalled.",n3},{"OK"}).handle();
+                        else if (extrasOnly)
+                            Dialog(target,0,0,320,240,{"Extras removed.",n3,
+                                   humanSize(ex.bytes)+" freed - the game stays installed."},{"OK"}).handle();
+                        else Dialog(target,0,0,320,240,{"Uninstalled.",n3,
+                                    extrasGone > 0 ? "Update/DLC went with it." : ""},{"OK"}).handle();
                         while (this->queue.size() > 0) this->queue.pop();
                         showLoading(target, {"Refreshing..."});
                         return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
