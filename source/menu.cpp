@@ -984,7 +984,8 @@ static void ensureBatterySprites() {
     }
 }
 static void drawHeaderStatus() {
-    ensureBatterySprites();
+    // sprites are loaded in tickBottom — texture uploads (GX transfer +
+    // gspWaitForPPF) hang the GPU when done inside a C3D frame
     if (!gBattEver || gTick - gBattLastTick >= 300) {
         gBattEver = true;
         gBattLastTick = gTick;
@@ -1455,6 +1456,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     }
 
     void Menu::tickBottom() {
+        ensureBatterySprites();   // texture upload — must run OUTSIDE the C3D frame
         if ((this->type != MENU_ROMM && this->type != MENU_MANAGE) || this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
         if (sel->action != RommInstall && sel->action != ManageRom) return;
