@@ -1001,17 +1001,19 @@ static void drawHeaderStatus() {
     // hbmenu's level -> sprite mapping (0 and 1 share the empty glyph)
     static const int lvlImg[6] = {0, 0, 1, 2, 3, 4};
     C2D_Image bat = gBattCharging ? gBattImg[5] : gBattImg[lvlImg[gBattLevel]];
-    float timeRight = 396;
+    // right cluster, all centered on the header's midline (y=13.5):
+    // [time]  [battery] with real gaps — the counter sits further left
+    float timeRight = 392;
     if (bat.tex) {
-        C2D_DrawImageAt(bat, 400 - 27 - 2, 5, 0.35f);   // 27x18 sprite, header-centered
-        timeRight = 400 - 27 - 2 - 5;
+        C2D_DrawImageAt(bat, 400 - 27 - 4, 5, 0.35f);   // 27x18 sprite, 4px margin
+        timeRight = 400 - 27 - 4 - 6;
     }
     time_t now = time(NULL);
     struct tm* lt = localtime(&now);
     char clk[8] = {0};
     if (lt) snprintf(clk, sizeof(clk), "%02d:%02d", lt->tm_hour, lt->tm_min);
     if (clk[0])
-        drawText(timeRight, 14, 0.5f, 0.45f, COL_BG, COL_TEXT_DIM, clk, C2D_AlignRight);
+        drawText(timeRight, 13, 0.5f, 0.5f, COL_BG, COL_TEXT, clk, C2D_AlignRight);
 }
 
 // cached libraries per platform slug, for instant search filtering
@@ -1274,21 +1276,23 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 for (auto e : this->entries) if (e->selected) nSel++;
                 if (nSel > 0) title += "  " + std::to_string(nSel) + " selected";
             }
-            // flat background + header (clock + battery live at the right edge)
+            // flat background + header. Everything in the bar sits on its
+            // vertical midline: title left, position counter, then the
+            // clock + battery cluster at the right edge (with real gaps).
             C2D_DrawRectSolid(0, 0, 0, 400, 240, COL_BG);
-            drawText(12, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
+            drawText(12, 13, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, title.c_str(), 0);
             drawHeaderStatus();
             if (!this->entries.empty() && this->type != MENU_MAIN && this->type != MENU_SETTINGS && this->type != MENU_SERVER) {
                 int nsel = this->selectedCount();
                 char pos[24];
                 if (nsel > 0) {          // multiselect: show the count in the accent color
                     snprintf(pos, sizeof(pos), "%d selected", nsel);
-                    drawText(330, 7, 0.5f, 0.5f, COL_BG, COL_ACCENT, pos, C2D_AlignRight);
+                    drawText(312, 13, 0.5f, 0.5f, COL_BG, COL_ACCENT, pos, C2D_AlignRight);
                 } else {
                     snprintf(pos, sizeof(pos), "%d/%d",
                              (int)(this->selection - this->entries.begin()) + 1,
                              (int)this->entries.size());
-                    drawText(330, 7, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, pos, C2D_AlignRight);
+                    drawText(312, 13, 0.5f, 0.5f, COL_BG, COL_TEXT_DIM, pos, C2D_AlignRight);
                 }
             }
             C2D_DrawRectSolid(0, MENU_HEADING_HEIGHT-1, 0.1f, 400, 1, COL_ELEV);
