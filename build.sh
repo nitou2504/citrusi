@@ -59,7 +59,7 @@ build_cia() {
   "$BANNERTOOL" makebanner -i cia/banner.png -a ctr-template/dsboot.wav -o cia/app.bnr >/dev/null
   "$MAKEROM" -f cia -target t -exefslogo -rsf cia/app.rsf \
     -elf romm3ds.elf -icon romm3ds.smdh -banner cia/app.bnr \
-    -major 0 -minor 2 -micro 0 -DAPP_TITLE=romm3ds \
+    -major 1 -minor 0 -micro 0 -DAPP_TITLE=romm3ds \
     -o romm3ds.cia
   echo ">> romm3ds.cia ready"
   ls -la romm3ds.cia

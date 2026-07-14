@@ -2,7 +2,7 @@
 
 All notable changes to romm3ds. Dates are the working days the changes landed.
 
-## [Unreleased] — the GBA + art release (app v0.2, 2026-07-11/12)
+## v1.0 — the GBA + art + UX release (2026-07-14)
 
 ### Added (2026-07-14, round 3)
 - **Granular update/DLC removal**: Manage → 3DS on a game with extras now
