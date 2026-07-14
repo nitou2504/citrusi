@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <sys/stat.h>
 #include "ciainstall.hpp"
+#include "installedtitles.hpp"   // installedTitlesInvalidate after installs
 #include "logger.hpp"
 
 static Logger cilog("ciainst");
@@ -209,5 +210,9 @@ bool installCiaFromFile(const std::string& path, std::string& err, bool force,
         }
     }
     fclose(f);
+    // titles changed: drop the enumeration/tally/icon caches so Manage and
+    // the icon rail pick the new state up (a cached icon MISS from before
+    // the install would otherwise stick until the app restarts)
+    if (rc == 0) installedTitlesInvalidate();
     return rc == 0;
 }

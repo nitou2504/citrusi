@@ -10,6 +10,7 @@
 #include <algorithm>
 #include "ctrbuilder.hpp"
 #include "ciainstall.hpp"
+#include "installedtitles.hpp"
 #include "helpers.hpp"
 #include "lz11.hpp"
 #include "logger.hpp"
@@ -500,6 +501,7 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     o << launchPath;
     o.close();
     ctrTidCacheInvalidate();
+    installedTitlesInvalidate();      // new title: refresh tally/icon caches
     saveBannerPreview(tid, etc1a4);   // same template texture layout as GBA
 
     return new ReturnResult(ERROR_SUCCESS, "");
