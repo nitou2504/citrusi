@@ -2544,6 +2544,24 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         add("Nintendo 3DS", ROMM_SLUG_3DS);
         add("Nintendo DS", ROMM_SLUG_NDS);
         add("Game Boy Advance", ROMM_SLUG_GBA);
+        // Duplicate installers: .cia files still on the card whose title is
+        // already installed - pure duplicates of what's in the title database.
+        // Its own top-level entry now (was buried in the 3DS list), so freeing
+        // that space is a deliberate, visible action.
+        installed3dsRefresh();
+        {
+            u64 dupBytes = 0; int dupCount = 0;
+            for (auto& c : listCiaFiles()) if (c.installed) { dupBytes += c.sizeBytes; dupCount++; }
+            if (dupCount > 0) {
+                MenuSelection* e = new MenuSelection();
+                e->action = CleanupCias;
+                e->title = "Duplicate installers";
+                e->display = "Duplicate installers - " + humanSize(dupBytes);
+                e->sizeBytes = dupBytes;
+                e->rommId = dupCount;   // count, for the details panel
+                entries.push_back(e);
+            }
+        }
         Menu* menu = new Menu(entries);
         menu->currentDirectory = std::filesystem::path("/");
         menu->type = MENU_SYSTEMS;   // back -> main
@@ -2598,21 +2616,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         std::vector<MenuSelection*> entries;
       if (slug == ROMM_SLUG_3DS) {
         installed3dsRefresh();   // the .cia scan below needs the AM set
-        // .cia installers left on the card: once the title is installed the
-        // file is a duplicate — offer to reclaim the space
-        {
-            u64 doneBytes = 0; int doneCount = 0;
-            for (auto& c : listCiaFiles()) if (c.installed) { doneBytes += c.sizeBytes; doneCount++; }
-            if (doneCount > 0) {
-                MenuSelection* e = new MenuSelection();
-                e->action = CleanupCias;
-                e->title = "Duplicate files";
-                e->display = "  Duplicates - " + humanSize(doneBytes);
-                e->sizeBytes = doneBytes;
-                e->rommId = doneCount;   // count, for the details panel
-                entries.push_back(e);
-            }
-        }
+        // (Duplicate installers moved to their own row on the Manage picker.)
         // 3DS: EVERY installed app on SD (not just the ones on RomM). Titles
         // that match a library entry borrow its display name/year; art is
         // always the title's own HOME icon (never the RomM cover — cover
@@ -3638,7 +3642,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                                humanSize(freed) + " reclaimed"},{"OK"}).handle();
                     while (this->queue.size() > 0) this->queue.pop();
                     showLoading(target, {"Refreshing..."});
-                    return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
+                    // Duplicates lives on the Manage picker now -> rebuild that
+                    return generateManageSystemMenu(this);
                 }
                 case ManageZip: {
                     // interrupted download: finish it (extract + install, same
