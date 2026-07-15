@@ -2,7 +2,32 @@
 
 All notable changes to romm3ds. Dates are the working days the changes landed.
 
-## [Unreleased]
+## v1.1 — offline-first, plain language & menu coherence (2026-07-15)
+
+### Changed (2026-07-15) — plain language & consolidation
+- **The UI speaks in plain terms.** The mechanism is hidden: no more
+  "forwarder", "inject", "bake", "batch", "title database", "TWL", "YANBF",
+  "DSiWare". You only ever see **install · art · filter · manage**, and *the
+  game*. ~90 strings rewritten ("build the forwarder / bake the inject" →
+  "install the game"; "stream into the title database" → "install to the HOME
+  menu"; "batch" → "selected"/"all"; "screen filter" → "filter"). An installed
+  DS game shows one "installed" chip instead of its engine (romm3ds/TWL/YANBF).
+- **Same operation, same words, every screen.** RomM / Browse / Manage now
+  share one vocabulary and matching option sets. Browse's installed **GBA** and
+  **NDS** games gained **Uninstall** (parity — NDS reuses Manage's uninstall
+  path, not a copy).
+- **Duplicate installers is its own entry** on the Manage picker (was buried in
+  the 3DS list) — reclaiming that space is now a deliberate, visible action.
+
+### Fixed (2026-07-15)
+- **Confirm / OK dialogs redesigned** — compact, centered pill buttons instead
+  of a full-width accent bar; the selected label is no longer hidden behind the
+  highlight, and the redundant "OK" hint row is gone.
+- **Latent bug**: pressing A copied the selected row through a ctor that dropped
+  5 fields (`fwdCia`/`region`/`gbaScreen`/…), leaving the NDS "install the ready
+  .cia on SD" option unreachable. Now copies in full.
+- Removed dead code (legacy NDS browser, `Install`/`Install_All`/
+  `EditRommConfig` paths, `ReturnToMenu`, `refreshStrings`).
 
 ### Changed (2026-07-15) — offline-first refocus
 - **"Browse SD Card" is now a real folder browser, and leads the main menu.**
