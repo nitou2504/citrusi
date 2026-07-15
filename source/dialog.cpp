@@ -57,35 +57,40 @@ void Dialog::draw() {
     C2D_SceneBegin(this->target);
     drawPanel(this->x,this->y,0,this->width, this->height,MENU_BORDER_HEIGHT,BGColor,BORDER_COLOR);
     float cx = this->x + this->width/2;
-    // options stack VERTICALLY, bottom-anchored, accent highlight — same look
-    // as the actionMenu vertical picker (horizontal button rows read as cramped)
+    // Rendered like the actionMenu picker: centered message (the prompt) as a
+    // title block, then left-aligned accent-bar option rows, a bottom hint.
+    // The whole message+options group is centered vertically in the card.
     size_t n = this->options.size();
-    float pitch = 26.0f, rowH = 22.0f;
-    float oy = this->y + this->height - MENU_BORDER_HEIGHT - 8 - (float)n*pitch;
-    // message band: top padding down to just above the options. Clamp the
-    // number of lines so a tall wrapped message can never paint under the
-    // accent bar ("text behind a color bar"). Shrink line pitch when crowded.
-    float lineH  = 1.0f + textheight;
-    float msgTop = this->y + this->height*2.0f/12.0f;
-    float msgBot = oy - 6.0f;                       // 6px gap above the first option
-    float band   = msgBot - msgTop;
     size_t M = this->message.size();
-    if (M > 0 && lineH * (float)M > band)           // squeeze to fit the band
-        lineH = band / (float)M;
-    size_t maxMsg = (band > 0) ? (size_t)(band / lineH) : 1;
-    if (maxMsg < 1) maxMsg = 1;
-    for (size_t i=0;i<M && i<maxMsg;i++)
-        drawText(cx, msgTop + lineH*(float)i, 0, 0.67, 0, FOREGROUND_COLOR,
-                 this->message[i].c_str(), C2D_AlignCenter);
+    float pitch = 24.0f, rowH = 22.0f;      // same row metrics as actionMenu
+    float lineH = 1.0f + textheight;
+    float gap   = M ? 12.0f : 0.0f;         // message -> options
+    float hintY = this->y + this->height - 12.0f;
+    float areaT = this->y + MENU_BORDER_HEIGHT + 8.0f;
+    float areaB = hintY - 16.0f;
+    // clamp message lines so the group always fits above the hint
+    float roomForMsg = areaB - areaT - (float)n*pitch - gap;
+    size_t maxMsg = (lineH > 0 && roomForMsg > 0) ? (size_t)(roomForMsg / lineH) : 0;
+    if (M > maxMsg) M = maxMsg;
+    float blockH = (float)M*lineH + gap + (float)n*pitch;
+    float top = areaT + (areaB - areaT - blockH) * 0.5f;
+    if (top < areaT) top = areaT;
+    // message (prompt): centered lines, vertically centered per line
+    float my = top + lineH*0.5f;
+    for (size_t i=0;i<M;i++, my += lineH)
+        drawText(cx, my, 0, 0.62f, 0, FOREGROUND_COLOR, this->message[i].c_str(), C2D_AlignCenter);
+    // options: left-aligned rows, accent bar behind the selected one, label
+    // vertically centered in the row and drawn ABOVE the bar (z 0.5 > 0.4)
+    float oy = top + (float)M*lineH + gap;
     for (size_t i=0;i<n;i++) {
         float ry = oy + (float)i*pitch;
         bool hot = (this->selected==(int)i);
-        if (hot) C2D_DrawRectSolid(this->x+12, ry, 0.4f, this->width-24, rowH, HIGHLIGHT_BGCOLOR);
-        // text z (0.5) MUST sit above the highlight rect (0.4) or the accent bar
-        // paints over the selected label (higher z = nearer, as in actionMenu)
-        drawText(cx, ry+rowH/2 - 6, 0.5f, 0.6f, 0,
-                 hot?HIGHLIGHT_FOREGROUND:FOREGROUND_COLOR, this->options[i].c_str(), C2D_AlignCenter);
+        if (hot) C2D_DrawRectSolid(this->x+12, ry, 0.4f, this->width-24, rowH, COL_ACCENT);
+        drawText(this->x+22, ry + rowH*0.5f, 0.5f, 0.5f, 0,
+                 hot?HIGHLIGHT_FOREGROUND:COL_TEXT_DIM, this->options[i].c_str(), 0);
     }
+    drawText(cx, hintY, 0.5f, 0.4f, 0, COL_TEXT_DIM,
+             (n>1?"A select    B back":"A OK"), C2D_AlignCenter);
     C3D_FrameEnd(0);
 }
 int Dialog::handle() {
