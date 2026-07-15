@@ -902,6 +902,30 @@ static bool manageItemInstalled(const std::string& slug, const MenuSelection& it
     return true;   // the 3DS tab only lists installed titles
 }
 
+// One installed-GBA menu, shared by RomM / Browse / Manage so they can't
+// drift. Top level is [Uninstall, Art & filter >, Reinstall] (destructive
+// first, art/filter grouped behind a submenu, reinstall last); the submenu
+// returns the specific art/filter action. The caller dispatches the returned
+// action its own way (uninstall/reinstall differ per source).
+enum GbaChoice { GBA_NONE=-1, GBA_UNINSTALL, GBA_CHG_ART, GBA_FILTER, GBA_ART_FILTER, GBA_REINSTALL };
+static GbaChoice gbaInstalledMenu(C3D_RenderTarget* target, const std::string& title,
+                                  bool hasReinstall) {
+    std::vector<MenuOpt> mo = {
+        {"Uninstall", "Uninstall and delete the game file."},
+        {"Art & filter", "Change the icon, banner, or the color filter."}};
+    if (hasReinstall) mo.push_back({"Reinstall", "Install again with the art and filter it already uses."});
+    int c = actionMenu(target, title, "Installed", mo);
+    if (c < 0) return GBA_NONE;
+    if (c == 0) return GBA_UNINSTALL;
+    if (c == 2) return GBA_REINSTALL;   // only present when hasReinstall
+    int s = actionMenu(target, title, "Art & filter", {
+        {"Change art", "Pick a new HOME icon and/or banner; the save is kept."},
+        {"Filter", "Change the color filter; art and save kept."},
+        {"Art + filter", "Pick the filter, then the art."}});
+    if (s < 0) return GBA_NONE;
+    return (s==0) ? GBA_CHG_ART : (s==1) ? GBA_FILTER : GBA_ART_FILTER;
+}
+
 static bool uninstallManageItem(Config* config, const MenuSelection& it) {
     if (it.platformSlug == ROMM_SLUG_3DS) {
         if (it.protectedTitle) return false;   // this app / a system title
@@ -3228,15 +3252,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (is3ds && inst) {
                         // installed: the Manage actions live right here too
                         TitleExtras ex = findTitleExtras(entry.titleId, true);
-                        std::vector<MenuOpt> mo = {
-                            {"Reinstall", onSD ? "Install again from the .cia on the SD card."
-                                               : "Download from RomM and install over the current copy."}};
-                        std::vector<int> ma = {-1};
+                        // uninstall (+ update/DLC) first, reinstall last
+                        std::vector<MenuOpt> mo; std::vector<int> ma;
+                        addUninstall3dsOpts(mo, ma, entry.sizeBytes, ex);
+                        mo.push_back({"Reinstall", onSD ? "Install again from the .cia on the SD card."
+                                                        : "Download from RomM and install over the current copy."});
+                        ma.push_back(-1);
                         if (onSD) {
                             mo.push_back({"Download again", "Fetch a fresh copy from RomM first, then install it."});
                             ma.push_back(-2);
                         }
-                        addUninstall3dsOpts(mo, ma, entry.sizeBytes, ex);
                         int c = actionMenu(target, entry.title, "Installed", mo);
                         if (c < 0) break;
                         if (ma[c] >= 0) {   // one of the uninstall/extras rows
@@ -3258,34 +3283,21 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (c < 0) break;
                         needDownload = (c==1);
                     } else if (isGba && inst && onSD) {
-                        // installed inject: the Manage actions, plus reinstall
-                        int c = actionMenu(target, entry.title, "Installed", {
-                            {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                            {"Filter", "Change the color filter; art and save kept."},
-                            {"Art + filter", "Pick the filter, then the art."},
-                            {"Reinstall", "Reinstall with the art and filter it already uses."},
-                            {"Uninstall", "Uninstall and delete the game file."}});
-                        if (c < 0) break;
-                        if (c == 0 || c == 2) {
-                            int fc = -1;
-                            if (c == 2) {
-                                fc = pickGbaScreenPreset(target, config, entry.title,
-                                                         artStoreGet(romBase).screen);
-                                if (fc < 0) break;
-                            }
-                            changeArtGbaItem(target, config, romBase, entry.title,
-                                             entry.coverPath, romPath, true, fc);
+                        // installed game: shared [Uninstall, Art & filter >, Reinstall]
+                        GbaChoice gc = gbaInstalledMenu(target, entry.title, true);
+                        if (gc == GBA_NONE) break;
+                        if (gc == GBA_CHG_ART) {
+                            changeArtGbaItem(target, config, romBase, entry.title, entry.coverPath, romPath, true, -1);
                             break;
                         }
-                        if (c == 1) {
-                            int fc = pickGbaScreenPreset(target, config, entry.title,
-                                                         artStoreGet(romBase).screen);
+                        if (gc == GBA_FILTER || gc == GBA_ART_FILTER) {
+                            int fc = pickGbaScreenPreset(target, config, entry.title, artStoreGet(romBase).screen);
                             if (fc < 0) break;
-                            applyGbaScreenItem(target, config, romBase, entry.title,
-                                               entry.coverPath, romPath, true, fc);
+                            if (gc == GBA_FILTER) applyGbaScreenItem(target, config, romBase, entry.title, entry.coverPath, romPath, true, fc);
+                            else                  changeArtGbaItem(target, config, romBase, entry.title, entry.coverPath, romPath, true, fc);
                             break;
                         }
-                        if (c == 4) {
+                        if (gc == GBA_UNINSTALL) {
                             if (Dialog(target,0,0,320,240,{"Uninstall game?",entry.title},
                                        {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                                 break;
@@ -3308,7 +3320,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             gDescForId = -1;
                             break;
                         }
-                        needDownload = false;   // c == 3: reinstall, art + filter reused
+                        needDownload = false;   // GBA_REINSTALL: art + filter reused
                     } else if (!is3ds && !isGba && inst) {
                         // forwarder on HOME: the Manage actions, plus reinstall.
                         // tids come from the manage scan (matched like the marker)
@@ -3320,16 +3332,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             nrompath = m.path;
                             break;
                         }
-                        std::vector<MenuOpt> mo = {
-                            {"Reinstall", onSD ? "Install again with the art it already uses."
-                                               : "Download again and reinstall the game."}};
-                        std::vector<int> ma = {0};
+                        // uninstall-first, reinstall-last (ma codes unchanged)
+                        std::vector<MenuOpt> mo = {{"Uninstall", "Uninstall and delete the game file."}};
+                        std::vector<int> ma = {2};
                         if (nrtid && onSD) {
                             mo.push_back({"Change art", "Pick a new HOME banner; same slot, save kept."});
                             ma.push_back(1);
                         }
-                        mo.push_back({"Uninstall", "Uninstall and delete the game file."});
-                        ma.push_back(2);
+                        mo.push_back({"Reinstall", onSD ? "Install again with the art it already uses."
+                                                        : "Download again and reinstall the game."});
+                        ma.push_back(0);
                         int c = actionMenu(target, entry.title, "Installed", mo);
                         if (c < 0) break;
                         if (ma[c] == 1) {
@@ -3761,54 +3773,36 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string ng = entry.title;
                         if (entry.installed) {
                             std::string romBase = entry.path.filename().generic_string();
-                            bool weakArt = artStoreGet(romBase).weak;
-                            int m = actionMenu(target, ng,
-                                               weakArt ? "Installed - using fallback art" : "Installed", {
-                                {"Uninstall", "Uninstall and delete the game file."},
-                                {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                                {"Filter", "Change the color filter; art and save kept."},
-                                {"Art + filter", "Pick the filter, then the art."}});
-                            if (m < 0) break;
-                            // old order: art / screen / uninstall; 3 = art + screen
-                            int c = (m == 1) ? 0 : (m == 2) ? 1 : (m == 3) ? 3 : 2;
-                            if (c==0) {
-                                // rebuild in place: same TID keeps the HOME
-                                // position and save data, only the art changes
-                                int rc = changeArtGbaItem(target, config, romBase, ng,
-                                                          entry.coverPath, entry.path.generic_string(), true);
-                                if (rc == 0) break;   // picker cancelled — stay put
+                            std::string gp = entry.path.generic_string();
+                            GbaChoice gc = gbaInstalledMenu(target, ng, true);
+                            if (gc == GBA_NONE) break;
+                            if (gc == GBA_CHG_ART) {
+                                // rebuild in place: same TID keeps HOME slot + save
+                                if (changeArtGbaItem(target, config, romBase, ng, entry.coverPath, gp, true, -1) == 0) break;
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
-                            if (c==1) {
-                                // pick a preset (preselected on the Settings default),
-                                // then re-bake in place — art untouched, save kept
-                                int fc = pickGbaScreenPreset(target, config, ng,
-                                                             artStoreGet(romBase).screen);
+                            if (gc == GBA_FILTER || gc == GBA_ART_FILTER) {
+                                int fc = pickGbaScreenPreset(target, config, ng, artStoreGet(romBase).screen);
                                 if (fc < 0) break;
-                                applyGbaScreenItem(target, config, romBase, ng,
-                                                   entry.coverPath, entry.path.generic_string(), true, fc);
+                                if (gc == GBA_FILTER) applyGbaScreenItem(target, config, romBase, ng, entry.coverPath, gp, true, fc);
+                                else if (changeArtGbaItem(target, config, romBase, ng, entry.coverPath, gp, true, fc) == 0) break;
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
-                            if (c==3) {
-                                // both in one pass: preset first (cheap to back
-                                // out of), then the art picker, ONE re-bake
-                                int fc = pickGbaScreenPreset(target, config, ng,
-                                                             artStoreGet(romBase).screen);
-                                if (fc < 0) break;
-                                int rc = changeArtGbaItem(target, config, romBase, ng,
-                                                          entry.coverPath, entry.path.generic_string(),
-                                                          true, fc);
-                                if (rc == 0) break;   // picker cancelled — stay put
+                            if (gc == GBA_REINSTALL) {
+                                // re-bake in place with the art + filter it already uses
+                                if (!ensureCtrBuilder(target)) break;
+                                ArtEntry ae; ArtPieces pieces;
+                                resolveGbaArtInteractive(target, config, romBase, ng, entry.coverPath, ae, pieces, false);
+                                if (!installGbaInject(target, config, gp, ng, romBase, ae, pieces)) break;
                                 while (this->queue.size() > 0) this->queue.pop();
                                 showLoading(target, {"Refreshing..."});
                                 return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                             }
-                            if (c!=2) break;
-                            // single-pass: uninstall removes the inject AND the ROM file
+                            // GBA_UNINSTALL: remove the inject AND the ROM file
                             if (Dialog(target,0,0,320,240,{"Uninstall game?",ng},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                             showLoading(target, {"Uninstalling...", ng});
                             Result dr = AM_DeleteTitle(MEDIATYPE_SD, entry.tid);
@@ -4181,28 +4175,37 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     // act and return; the rest fall through to (re)install.
                     if (entry.installed) {
                         if (is3ds) {
-                            int c = actionMenu(target, name, "Installed",
-                                {{"Reinstall", "Install to the HOME menu again."}});
+                            // parity with RomM/Manage: Uninstall (+ update/DLC
+                            // rows) first, Reinstall last. Reuses the shared 3DS
+                            // uninstall helpers.
+                            u64 tid3 = entry.titleId ? entry.titleId : ciaFileTitleId(romPath);
+                            TitleExtras ex = findTitleExtras(tid3, true);
+                            std::vector<MenuOpt> mo; std::vector<int> ma;
+                            addUninstall3dsOpts(mo, ma, entry.sizeBytes, ex);
+                            mo.push_back({"Reinstall", "Install to the HOME menu again."}); ma.push_back(-1);
+                            int c = actionMenu(target, name, "Installed", mo);
                             if (c < 0) break;
-                        } else if (isGba && !isZip) {
-                            // same option set + order as RomM/Manage: safe first,
-                            // destructive (Uninstall) last
-                            int c = actionMenu(target, name, "Installed", {
-                                {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                                {"Filter", "Change the color filter; art and save kept."},
-                                {"Art + filter", "Pick the filter, then the art."},
-                                {"Reinstall", "Reinstall with the art and filter it already uses."},
-                                {"Uninstall", "Uninstall and delete the game file."}});
-                            if (c < 0) break;
-                            if (c == 0) { changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true); break; }
-                            if (c == 1 || c == 2) {
-                                int fc = pickGbaScreenPreset(target, config, name, artStoreGet(romBase).screen);
-                                if (fc < 0) break;
-                                if (c == 1) applyGbaScreenItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
-                                else        changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
+                            if (ma[c] >= 0) {   // an uninstall / extras row
+                                if (execUninstall3ds(target, name, tid3, entry.sizeBytes, ex, ma[c])) {
+                                    while (this->queue.size() > 0) this->queue.pop();
+                                    return generateLocalMenu(this, this->currentDirectory);
+                                }
                                 break;
                             }
-                            if (c == 4) {   // uninstall inject + delete ROM (as in RomM/Manage)
+                            // ma[c] == -1: Reinstall -> fall through to the install
+                        } else if (isGba && !isZip) {
+                            // shared installed-GBA menu: [Uninstall, Art & filter >, Reinstall]
+                            GbaChoice gc = gbaInstalledMenu(target, name, true);
+                            if (gc == GBA_NONE) break;
+                            if (gc == GBA_CHG_ART) { changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true, -1); break; }
+                            if (gc == GBA_FILTER || gc == GBA_ART_FILTER) {
+                                int fc = pickGbaScreenPreset(target, config, name, artStoreGet(romBase).screen);
+                                if (fc < 0) break;
+                                if (gc == GBA_FILTER) applyGbaScreenItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
+                                else                  changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
+                                break;
+                            }
+                            if (gc == GBA_UNINSTALL) {
                                 if (Dialog(target,0,0,320,240,{"Uninstall game?",name},
                                            {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                                     break;
@@ -4220,14 +4223,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 while (this->queue.size() > 0) this->queue.pop();
                                 return generateLocalMenu(this, this->currentDirectory);
                             }
-                            // c == 3: reinstall, art + filter reused -> fall through
+                            // GBA_REINSTALL: art + filter reused -> fall through
                         } else {   // installed NDS (or an installed zip row: reinstall)
                             int c = actionMenu(target, name, "Installed", {
-                                {"Reinstall", "Install the game again."},
+                                {"Uninstall", "Uninstall and delete the game file."},
                                 {"Change art", "Pick a new HOME banner/icon, then reinstall."},
-                                {"Uninstall", "Uninstall and delete the game file."}});
+                                {"Reinstall", "Install the game again."}});
                             if (c < 0) break;
-                            if (c == 2) {   // reuse the Manage uninstall (resolve tids by name)
+                            if (c == 0) {   // reuse the Manage uninstall (resolve tids by name)
                                 if (Dialog(target,0,0,320,240,{"Uninstall game?",name},
                                            {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                                     break;

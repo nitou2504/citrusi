@@ -43,80 +43,41 @@ void Dialog::wrapText(std::string text) {
     C2D_TextBufDelete(buf);
 }
 
-// measure a string's width at a given (already-scaled) font size
-static float dlgTextW(const std::string& s, float fscale) {
-    C2D_TextBuf b = C2D_TextBufNew(1024);
-    C2D_Text t; C2D_Font f = getFont();
-    if (f) C2D_TextFontParse(&t, f, b, s.c_str()); else C2D_TextParse(&t, b, s.c_str());
-    float w = 0; C2D_TextGetDimensions(&t, fscale, fscale, &w, NULL);
-    C2D_TextBufDelete(b);
-    return w;
-}
-// filled rounded rectangle (pill) — rects + corner circles
-static void dlgPill(float x, float y, float z, float w, float h, float r, u32 c) {
-    if (r*2 > h) r = h/2;
-    if (r*2 > w) r = w/2;
-    C2D_DrawRectSolid(x+r, y, z, w-2*r, h, c);
-    C2D_DrawRectSolid(x, y+r, z, w, h-2*r, c);
-    C2D_DrawCircleSolid(x+r,   y+r,   z, r, c);
-    C2D_DrawCircleSolid(x+w-r, y+r,   z, r, c);
-    C2D_DrawCircleSolid(x+r,   y+h-r, z, r, c);
-    C2D_DrawCircleSolid(x+w-r, y+h-r, z, r, c);
-}
-
+// A Dialog renders with the SAME visual language as actionMenu (menu.cpp):
+// full-screen, centered title + subtitle from the message lines, then
+// full-width left-aligned accent option rows, and a bottom hint. This is the
+// one surface every confirm / OK / error uses, matching the pickers.
 void Dialog::draw() {
-    C2D_TextBuf buf = C2D_TextBufNew(4096);
-    C2D_Text ctext;
-    C2D_TextParse(&ctext,buf,"0");
-    float textheight=0;
-    float scale = getFontScale(0.67);
-    C2D_TextGetDimensions(&ctext,scale,scale,NULL,&textheight);
-    C2D_TextBufDelete(buf);
-
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-    C2D_TargetClear(this->target, BGColor); // avoid stale double-buffer bleed
+    C2D_TargetClear(this->target, COL_BG);
     C2D_SceneBegin(this->target);
-    drawPanel(this->x,this->y,0,this->width, this->height,MENU_BORDER_HEIGHT,BGColor,BORDER_COLOR);
     float cx = this->x + this->width/2;
-    // A confirm modal: centered message (the prompt), then compact, content-
-    // sized pill buttons centered below it — not full-width list bars (a lone
-    // OK as a screen-wide bar reads as heavy/unbalanced). Selected pill = accent
-    // fill + light label; the rest = elevated fill + dim label. No separate hint
-    // row: the highlighted pill is the affordance (A confirms, B cancels).
     size_t n = this->options.size();
     size_t M = this->message.size();
-    float lineH = 1.0f + textheight;
-    float gap   = M ? 14.0f : 0.0f;         // message -> buttons
-    float bh = 30.0f, bgap = 10.0f;         // pill height, gap between pills
-    float bscale = 0.5f, bfs = getFontScale(bscale);
-    // uniform pill width = widest label + padding, clamped to the card
-    float bw = 84.0f;
-    for (auto& o : this->options) { float w = dlgTextW(o, bfs) + 40.0f; if (w > bw) bw = w; }
-    if (bw > this->width - 36.0f) bw = this->width - 36.0f;
-    float areaT = this->y + MENU_BORDER_HEIGHT + 10.0f;
-    float areaB = this->y + this->height - MENU_BORDER_HEIGHT - 10.0f;
-    // clamp message lines so the group always fits
-    float btnBlock = (float)n*bh + (n>0?(float)(n-1)*bgap:0.0f);
-    float roomForMsg = areaB - areaT - btnBlock - gap;
-    size_t maxMsg = (lineH > 0 && roomForMsg > 0) ? (size_t)(roomForMsg / lineH) : 0;
-    if (M > maxMsg) M = maxMsg;
-    float blockH = (float)M*lineH + gap + btnBlock;
-    float top = areaT + (areaB - areaT - blockH) * 0.5f;
-    if (top < areaT) top = areaT;
-    // message (prompt): centered lines
-    float my = top + lineH*0.5f;
-    for (size_t i=0;i<M;i++, my += lineH)
-        drawText(cx, my, 0, 0.62f, 0, FOREGROUND_COLOR, this->message[i].c_str(), C2D_AlignCenter);
-    // pill buttons, centered and stacked
-    float oy = top + (float)M*lineH + gap;
-    float bx = cx - bw*0.5f;
-    for (size_t i=0;i<n;i++) {
-        float by = oy + (float)i*(bh+bgap);
-        bool hot = (this->selected==(int)i);
-        dlgPill(bx, by, 0.4f, bw, bh, 8.0f, hot?COL_ACCENT:COL_ELEV);
-        drawText(cx, by + bh*0.5f, 0.5f, bscale, 0,
-                 hot?HIGHLIGHT_FOREGROUND:COL_TEXT_DIM, this->options[i].c_str(), C2D_AlignCenter);
+    // message[0] = title; message[1..] = subtitle lines (as in actionMenu)
+    if (M > 0)
+        drawText(cx, this->y + 16, 0.5f, 0.55f, 0, COL_TEXT, this->message[0].c_str(), C2D_AlignCenter);
+    float sy = this->y + 34;
+    for (size_t i = 1; i < M; i++, sy += 14.0f)
+        drawText(cx, sy, 0.5f, 0.42f, 0, COL_TEXT_DIM, this->message[i].c_str(), C2D_AlignCenter);
+    // option rows: identical geometry/colours to actionMenu (rect x+12 w-24 h22,
+    // label x+22, vertically centred, accent when selected)
+    float pitch = 24.0f, rowH = 22.0f;
+    float hintY = this->y + this->height - 10.0f;
+    float oy = (M > 1) ? sy + 8.0f : this->y + 50.0f;   // below subtitle, else actionMenu default
+    float maxOy = hintY - 12.0f - (float)n*pitch;       // never overlap the hint
+    if (oy > maxOy) oy = maxOy;
+    if (oy < this->y + 30.0f) oy = this->y + 30.0f;
+    for (size_t i = 0; i < n; i++) {
+        float ry = oy + (float)i*pitch;
+        bool hot = (this->selected == (int)i);
+        if (hot) C2D_DrawRectSolid(this->x+12, ry, 0.4f, this->width-24, rowH, COL_ACCENT);
+        drawText(this->x+22, ry + rowH*0.5f, 0.5f, 0.5f, 0,
+                 hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, this->options[i].c_str(), 0);
     }
+    if (n > 0)
+        drawText(cx, hintY, 0.5f, 0.4f, 0, COL_TEXT_DIM,
+                 (n > 1 ? "A select    B back" : "A OK"), C2D_AlignCenter);
     C3D_FrameEnd(0);
 }
 int Dialog::handle() {
