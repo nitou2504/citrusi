@@ -1966,14 +1966,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (sel->selected)  drawChip(cxp, y, "SELECTED", COL_ACCENT);
                 y += 21;
                 y = cardDivider(y) + 5;
-                // 3DS = a plain title-DB install; no art/screen options there
+                // per platform: 3DS has no art/filter (its .cia carries the
+                // icon); NDS has art but no filter; GBA has both
                 bool is3 = (sel->platformSlug == ROMM_SLUG_3DS);
+                bool isG = (sel->platformSlug == ROMM_SLUG_GBA);
                 const char* desc =
                     sel->installed
                       ? (is3 ? "Installed. A reinstalls. Y marks several to install."
-                             : "Installed. A: reinstall, change art or filter. Y marks several.")
+                         : isG ? "Installed. A: reinstall, change art or filter. Y marks several."
+                               : "Installed. A: reinstall or change art. Y marks several.")
                       : (is3 ? "A installs it to the HOME menu. Y marks several to install."
-                             : "A: install, with art / filter options. Y marks several to install.");
+                         : isG ? "A: install, with art / filter options. Y marks several."
+                               : "A: install, with an art option. Y marks several to install.");
                 drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, desc, 3);
             } else {   // folder or ".." row
                 bool up = (sel->display.find("..") != std::string::npos);
@@ -3360,9 +3364,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             break;
                         }
                         needDownload = !onSD;
+                    } else if (is3ds) {
+                        // not installed, not on SD. A 3DS .cia carries its own
+                        // icon - nothing to pick, so just confirm the install.
+                        int c = actionMenu(target, "Install this game?",
+                                           entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")",
+                                           {{"Install", "Download and install to the HOME menu."}});
+                        if (c < 0) break;
+                        needDownload = true;
                     } else if (onSD) {
                         int c = actionMenu(target, "Already on SD", entry.fsName, {
-                            {"Install", "Install with the art (and filter) it already uses."},
+                            {"Install", "Install with the art it already uses."},
                             {"Install + choose art", "Open the art picker first, then install."}});
                         if (c < 0) break;
                         pickArt = (c==1);
@@ -3525,7 +3537,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool pickArtAll = false;
                     int batchScreen = -1;
                     std::vector<MenuOpt> bopts = {
-                        {"Install " + std::to_string(M), "Automatic art, saved/default filters."}};
+                        {"Install " + std::to_string(M),
+                         anyCtr ? "Automatic art for each." : "Install to the HOME menu."}};
                     if (anyGba) {
                         bopts.push_back({"Install + choose art", "Art picker for each GBA game first, then everything installs unattended."});
                         bopts.push_back({"Install + filter", "One color filter for every game installed here."});
