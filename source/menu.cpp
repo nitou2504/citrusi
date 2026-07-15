@@ -1306,29 +1306,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         this->display=s;
         this->path=p;
     }
-    MenuSelection::MenuSelection(MenuSelection* old) {
-        this->display=old->display;
-        this->path=old->path;
-        this->action=old->action;
-        this->rommId=old->rommId;
-        this->fsName=old->fsName;
-        this->fileId=old->fileId;
-        this->titleId=old->titleId;
-        this->platformSlug=old->platformSlug;
-        this->installable=old->installable;
-        this->title=old->title;
-        this->coverPath=old->coverPath;
-        this->coverSmallPath=old->coverSmallPath;
-        this->summary=old->summary;
-        this->genres=old->genres;
-        this->year=old->year;
-        this->rating=old->rating;
-        this->sizeBytes=old->sizeBytes;
-        this->tid=old->tid;
-        this->ytid=old->ytid;
-        this->rtid=old->rtid;
-        this->installed=old->installed;
-    }
     MenuSelection* MenuSelection::setPath(std::filesystem::path p) {
         this->path=p;
         return this;
@@ -1352,13 +1329,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     Menu* Menu::addEntry(MenuSelection* s) {
         this->entries.push_back(s);
         return this;
-    }
-    void Menu::refreshStrings() {
-        for (auto entry : this->entries) {
-            if (entry->action == Install_All) {
-                entry->display = gLang.getString("menu_installAll");
-            }
-        }
     }
     // Browse SD Card walks the SD folders, which also hold everything
     // downloaded from RomM — so installed files are hidden by default and X
@@ -2098,61 +2068,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         }
     }
 
-    bool validExtension(const char* extension) {
-        char extensions[][5] = {".nds", ".srl", ".ids"};
-        for (int i=0;i<3;i++) {
-            if (strcasecmp(extension,extensions[i])==0) return true;
-        }
-        return false;
-    }
-    Menu* generateMenu(std::filesystem::path path, Menu* prev) {
-        delete prev;
-        std::vector<MenuSelection*> entries;
-
-        bool ndsFilesVisible=false;
-        for (const auto & entry : std::filesystem::directory_iterator(path)) {
-            std::string filename = entry.path().filename();
-            if (
-                filename[0]=='.' ||
-                !(entry.is_directory() || validExtension(entry.path().extension().c_str())) ||
-                (filename=="_nds" && path.generic_string()=="/")
-            )
-                continue;
-            MenuSelection* menuEntry = new MenuSelection();
-            menuEntry->path=entry.path();
-            menuEntry->display=filename;
-            if (entry.is_directory())  {
-                menuEntry->action=OpenFolder;
-
-            }else{
-                menuEntry->action=Install;
-                ndsFilesVisible=true;
-
-            }
-            entries.push_back(menuEntry);
-        }
-        std::sort(entries.begin(), entries.end(), sortMenuSelections);
-
-        if (path.has_parent_path() && path.parent_path().compare(path)) {
-            MenuSelection* prevFolder = new MenuSelection();
-            prevFolder->display="..";
-            prevFolder->action=OpenFolder;
-            prevFolder->path=path.parent_path();
-            entries.insert(entries.begin(),prevFolder);
-        }
-        if (ndsFilesVisible) {
-            MenuSelection* installAll = new MenuSelection();
-            installAll->action=Install_All;
-            installAll->display=gLang.getString("menu_installAll");
-            installAll->path=path;
-            entries.insert(entries.begin(),installAll);
-        }
-        Menu* menu = new Menu(entries);
-        menu->currentDirectory=path.generic_string();
-        menu->type=MENU_SD;
-        menu->init();
-        return menu;
-    }
     // "Browse SD Card": a real folder browser, offline-first. Starts at the
     // roms folder (sdmc:/roms) and walks up to the SD root and into any
     // sibling folder — so a .cia the user keeps in sdmc:/cias, or roms parked
@@ -2898,7 +2813,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         // A on an unmarked row still manages/installs just that one
         MenuSelection* sel = *this->selection;
         if (sel->selected && this->selectedCount() > 0 && this->startBatch()) return;
-        this->queue.push(MenuSelection(*this->selection));
+        // copy the pointed-to row in full (implicit copy ctor = all fields).
+        // NB double deref: entries holds MenuSelection*, so *selection is the
+        // pointer; **selection is the object. The old MenuSelection(ptr) ctor
+        // copied only 21/26 fields and silently dropped fwdCia/region/gbaScreen.
+        this->queue.push(MenuSelection(**this->selection));
     }
     // Y: toggle the batch mark on the current row. Only the installable
     // library rows and the manage rows (zip archives included) can be
@@ -3016,11 +2935,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (parent.empty()) return generateMainMenu(this);
                 return generateLocalMenu(this, std::filesystem::path(parent));
             }
-            case MENU_SD:
             default:
-                if (this->currentDirectory.generic_string()=="/" || !this->currentDirectory.has_parent_path())
-                    return generateMainMenu(this);
-                return generateMenu(this->currentDirectory.parent_path(),this);
+                return generateMainMenu(this);
         }
     }
     bool Menu::hasQueue() {
@@ -3076,101 +2992,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         while (queue.size() > 0) {
             MenuSelection entry = this->queue.front();
             switch (entry.action) {
-                case Install:
-                    if (config->dsiwareCount >= MAX_DSIWARE) {
-                        Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
-                        break;
-                    }
-                    if (!(builder->loadTemplate(config->templates.at(config->currentTemplate)))->isSuccess()) {
-                        Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),gLang.getString("menu_noTemplate")},{gLang.getString("menu_ok")}).handle();
-                        break;
-                    }
-                    if (Dialog(target,0,0,320,240,{gLang.getString("menu_installTitleQ"),entry.path.filename().generic_string()},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
-                        ReturnResult* buildResult=nullptr;
-                        std::string customTitle="";
-                        bool forceInstall = false;
-                        if (config!=nullptr) {
-                            forceInstall = config->forceInstall;
-                            if (config->customTitle) {
-                                char customTitleBuffer[0x51] = {0};
-                                SwkbdState kbstate;
-                                swkbdInit(&kbstate,SWKBD_TYPE_NORMAL,2,0x50);
-                                swkbdSetHintText(&kbstate,gLang.getString("menu_customTitleQ").c_str());
-                                swkbdSetFeatures(&kbstate,SWKBD_MULTILINE | SWKBD_DEFAULT_QWERTY);
-                                swkbdInputText(&kbstate,customTitleBuffer,0x51);
-                                customTitle=std::string(customTitleBuffer);
-                            }
-                            buildResult = builder->loadTemplate(config->templates.at(config->currentTemplate));
-                            if (buildResult->isSuccess()) {
-                                delete buildResult;
-                                buildResult = buildTwlResolvingDuplicate(builder, target,
-                                    entry.path.generic_string(), entry.path.filename().generic_string(),
-                                    customTitle, forceInstall);
-                            }
-                        } else {
-                            buildResult = buildTwlResolvingDuplicate(builder, target,
-                                entry.path.generic_string(), entry.path.filename().generic_string(), "", false);
-                        }
-
-                        if (buildResult->isSuccess()) {
-                            config->dsiwareCount++;
-                            Dialog(target,0,0,320,240,gLang.getString("menu_installComplete"),{gLang.getString("menu_ok")}).handle();
-                        }else{
-                            Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),gLang.getErrorString(buildResult->code),gLang.parseString("format_hex",(u32)buildResult->code)},{gLang.getString("menu_ok")}).handle();
-                        }
-                        delete buildResult;
-                    }
-                    break;
-                case Install_All:
-                    if (Dialog(target,0,0,320,240,{gLang.getString("menu_installTitleQ"),gLang.getString("menu_allForwarders"),(!entry.path.filename().generic_string().empty())?entry.path.filename().generic_string():"/"},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
-                        if (!(builder->loadTemplate(config->templates.at(config->currentTemplate)))->isSuccess()) {
-                            Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),gLang.getString("menu_noTemplate")},{gLang.getString("menu_ok")}).handle();
-                            break;
-                        }
-                        for (const auto & dEntry : std::filesystem::directory_iterator(entry.path)) {
-                            if (config->dsiwareCount >= MAX_DSIWARE) {
-                                Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
-                                break;
-                            }
-                            std::string filename = dEntry.path().filename();
-                            if (filename[0]=='.' || !validExtension(dEntry.path().extension().c_str()))
-                                continue;
-                            std::string shortname = shorten(dEntry.path().filename().generic_string(),25);
-                            Dialog(target,0,0,320,240,{gLang.getString("menu_installing"),shortname},{},0).handle();
-                            ReturnResult* buildResult=nullptr;
-                            std::string customTitle="";
-                            bool forceInstall = false;
-                            if (config!=nullptr) {
-                                forceInstall = config->forceInstall;
-                                if (config->customTitle) {
-                                    char customTitleBuffer[0x51] = {0};
-                                    SwkbdState kbstate;
-                                    swkbdInit(&kbstate,SWKBD_TYPE_NORMAL,2,0x50);
-                                    swkbdSetHintText(&kbstate,shortname.c_str());
-                                    swkbdSetFeatures(&kbstate,SWKBD_MULTILINE | SWKBD_DEFAULT_QWERTY);
-                                    swkbdInputText(&kbstate,customTitleBuffer,0x51);
-                                    customTitle=std::string(customTitleBuffer);
-                                }
-                            }
-                            buildResult = buildTwlResolvingDuplicate(builder, target,
-                                dEntry.path().generic_string(), shortname, customTitle, forceInstall);
-
-                            if (!buildResult->isSuccess()) {
-                                Dialog(target,0,0,320,240,{gLang.getString("menu_installFailed"),shortname,gLang.getErrorString(buildResult->code),gLang.parseString("format_hex",(u32)buildResult->code)},{gLang.getString("menu_ok")}).handle();
-                            }else{
-                                config->dsiwareCount++;
-                            }
-                            delete buildResult;
-                        }
-                        Dialog(target,0,0,320,240,gLang.getString("menu_installComplete"),{gLang.getString("menu_ok")}).handle();
-                    }
-                    break;
                 case OpenFolder:
                     while (this->queue.size() > 0) this->queue.pop();
-                    // Browse SD Card navigates within itself (folders + ".." up);
-                    // the legacy NDS-only browser keeps its own generateMenu path
-                    if (this->type == MENU_LOCAL) return generateLocalMenu(this, entry.path);
-                    return generateMenu(entry.path,this);
+                    // Browse SD Card navigates within itself (folders + ".." up)
+                    return generateLocalMenu(this, entry.path);
                 case OpenSDBrowser:
                     while (this->queue.size() > 0) this->queue.pop();
                     return generateLocalMenu(this, std::filesystem::path(BROWSE_ROOT));
@@ -3198,11 +3023,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     showLoading(target, {std::string("Scanning ")+(entry.platformSlug==ROMM_SLUG_3DS?"3DS":entry.platformSlug==ROMM_SLUG_GBA?"GBA":"NDS")+" titles..."});
                     return generateManageMenu(this,config->dsiwareCount,entry.platformSlug,target);
-                case EditRommConfig:
-                    gRomm.loadConfig();
-                    if (gRomm.promptConfig())
-                        Dialog(target,0,0,320,240,{"Saved.","Server: "+gRomm.host},{"OK"}).handle();
-                    break;
                 case OpenSettings:
                     while (this->queue.size() > 0) this->queue.pop();
                     return generateSettingsMenu(this, config);

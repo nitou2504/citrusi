@@ -10,9 +10,6 @@
 
 enum MenuAction {
     OpenFolder,
-    ReturnToMenu,
-    Install,
-    Install_All,
     OpenRommLibrary,
     OpenPlatform,
     OpenSearchAll,
@@ -23,7 +20,6 @@ enum MenuAction {
     OpenManage,
     ManageRom,
     OpenSDBrowser,
-    EditRommConfig,
     OpenSettings,
     SettingToggle,
     LocalInstall,          // "Install from SD": install one local file (.cia/.nds/.gba)
@@ -35,7 +31,6 @@ enum MenuAction {
 
 enum MenuType {
     MENU_MAIN,
-    MENU_SD,
     MENU_ROMM,
     MENU_SYSTEMS,
     MENU_MANAGE,
@@ -75,7 +70,6 @@ class MenuSelection {
         bool selected=false;         // Y-marked for a batch (library/manage/Install-from-SD)
         bool protectedTitle=false;   // 3ds: system title / this app — never uninstall
     MenuSelection(std::string s="",std::filesystem::path p=std::filesystem::path("/"));
-    MenuSelection(MenuSelection* old);
     MenuSelection* setPath(std::filesystem::path p);
     MenuSelection* setDisplay(std::string s);
 
@@ -88,7 +82,7 @@ class Menu {
         std::queue<MenuSelection> queue;
     public:
         std::filesystem::path currentDirectory;
-        MenuType type=MENU_SD;
+        MenuType type=MENU_MAIN;
         std::string heading;
         std::string filter; // active search query (RomM view)
         std::string platformSlug; // active platform (RomM view); "" = cross-system search
@@ -112,7 +106,6 @@ class Menu {
         void toggleMark();
         // SELECT: search prompt (RomM view); returns the (possibly new) menu
         Menu* searchPrompt();
-        void refreshStrings();
         void init();
         void down();
         void pageDown();
@@ -136,7 +129,6 @@ class Menu {
         bool hasQueue();
 
 };
-Menu* generateMenu(std::filesystem::path path, Menu* prev);
 Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir = std::filesystem::path());
 Menu* generateMainMenu(Menu* prev);
 Menu* generateSystemMenu(Menu* prev);
