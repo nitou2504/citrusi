@@ -4167,11 +4167,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 {{"Reinstall", "Stream the .cia into the title database again."}});
                             if (c < 0) break;
                         } else if (isGba && !isZip) {
+                            // same option set + order as RomM/Manage: safe first,
+                            // destructive (Uninstall) last
                             int c = actionMenu(target, name, "Installed", {
                                 {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
                                 {"Screen filter", "Re-bake with a different color preset; art and save kept."},
                                 {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."},
-                                {"Reinstall", "Reinstall with the art and filter it already uses."}});
+                                {"Reinstall", "Reinstall with the art and filter it already uses."},
+                                {"Uninstall", "Remove the inject from HOME and delete the ROM file."}});
                             if (c < 0) break;
                             if (c == 0) { changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true); break; }
                             if (c == 1 || c == 2) {
@@ -4180,6 +4183,24 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 if (c == 1) applyGbaScreenItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
                                 else        changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
                                 break;
+                            }
+                            if (c == 4) {   // uninstall inject + delete ROM (as in RomM/Manage)
+                                if (Dialog(target,0,0,320,240,{"Uninstall game?",name},
+                                           {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                                    break;
+                                showLoading(target, {"Uninstalling...", name});
+                                u64 gtid = entry.tid ? entry.tid : gbaTidForRom(romBase);
+                                Result drg = AM_DeleteTitle(MEDIATYPE_SD, gtid);
+                                AM_DeleteTicket(gtid);
+                                if (R_FAILED(drg)) {
+                                    Dialog(target,0,0,320,240,{"Uninstall failed",name},{"OK"}).handle();
+                                    break;
+                                }
+                                std::error_code ecu; std::filesystem::remove(entry.path, ecu);   // the .gba
+                                installedTitlesInvalidate(); installed3dsRefresh();
+                                Dialog(target,0,0,320,240,{"Uninstalled.",name},{"OK"}).handle();
+                                while (this->queue.size() > 0) this->queue.pop();
+                                return generateLocalMenu(this, this->currentDirectory);
                             }
                             // c == 3: reinstall, art + filter reused -> fall through
                         } else {   // installed NDS (or an installed zip row: reinstall)
