@@ -5,6 +5,15 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 ## [Unreleased]
 
 ### Added (2026-07-14)
+- **NDS icon/banner/both everywhere**: every NDS art flow (Manage "Change
+  art", "+ choose art" installs, zip installs) now asks which art — like
+  GBA — with *Banner only* leading: the SMDH icon defaults to the ROM's own
+  DS icon (every NDS game ships one), so a custom icon is pure cosmetics.
+  Forwarder builds accept a custom 48px icon; unpicked pages keep their
+  stored art and a chosen icon survives banner-only changes.
+- **Install menus are coherent on every path**: Manage NDS "not installed"
+  and the library's NDS install gained *Install + choose art*; zip rows
+  offer the full platform set (GBA: art / screen filter / both; NDS: art).
 - **Interrupted downloads surface in Manage**: a `.zip` in sd:/roms/nds|gba
   whose ROM never got extracted (B during extract, crash) was invisible
   everywhere — Manage DS/GBA now lists it as a "[zip]" row with *Extract +

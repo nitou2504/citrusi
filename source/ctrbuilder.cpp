@@ -235,7 +235,7 @@ static void utf16Write(std::string& smdh, u32 off, const std::string& utf8, u32 
 }
 
 std::string CtrBuilder::buildSmdh(const std::string& templateSmdh, const std::string& ndsPath,
-                                  const std::string& title) {
+                                  const std::string& title, const std::string& icon48) {
     std::string smdh = templateSmdh;
     // titles: 16 language slots @0x8, each 0x200: short 0x80, long 0x100, publisher 0x80
     std::string shortT = title.substr(0, 0x3F);
@@ -245,6 +245,17 @@ std::string CtrBuilder::buildSmdh(const std::string& templateSmdh, const std::st
         utf16Write(smdh, o,          shortT, 0x40);
         utf16Write(smdh, o + 0x80,   title.substr(0, 0x7F), 0x80);
         utf16Write(smdh, o + 0x180,  "romm3ds", 0x40);
+    }
+    if (icon48.size() == 48*48*2) {
+        // custom icon (art picker): 48x48 as-is + nearest 24x24
+        const u16* lin48c = (const u16*)icon48.data();
+        static u16 lin24c[24*24];
+        for (u32 y = 0; y < 24; y++)
+            for (u32 x = 0; x < 24; x++)
+                lin24c[y*24+x] = lin48c[(y*48/24)*48 + (x*48/24)];
+        tileIcon(lin24c, (u16*)&smdh[0x2040], 24);
+        tileIcon(lin48c, (u16*)&smdh[0x24C0], 48);
+        return smdh;
     }
     u16 lin32[32*32];
     if (dsIconRgb565(ndsPath, lin32)) {
@@ -347,7 +358,8 @@ bool ensureBannerPreview(u64 tid) {
 }
 
 ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string& title,
-                                   u64 tid, const std::string& etc1a4, const std::string& cwav) {
+                                   u64 tid, const std::string& etc1a4, const std::string& cwav,
+                                   const std::string& icon48) {
     if (!parsed) return new ReturnResult(ERROR_TEMPLATE|ERROR_TEMPLATE_PARSE, "template not loaded");
 
     // --- pull template pieces
@@ -368,7 +380,7 @@ ReturnResult* CtrBuilder::buildCIA(const std::string& romPath, const std::string
     std::string newSmdh, newBanner;
     for (auto& ef : files) {
         std::string data = content.substr(exefsOff + 0x200 + ef.off, ef.size);
-        if (strcmp(ef.name, "icon") == 0)   newSmdh   = buildSmdh(data, romPath, title);
+        if (strcmp(ef.name, "icon") == 0)   newSmdh   = buildSmdh(data, romPath, title, icon48);
         if (strcmp(ef.name, "banner") == 0) newBanner = buildBanner(data, etc1a4, cwav);
     }
     if (newSmdh.empty() || newBanner.empty())

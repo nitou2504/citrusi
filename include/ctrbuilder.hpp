@@ -39,7 +39,7 @@ class CtrBuilder {
 
     bool parseTemplate();
     std::string buildSmdh(const std::string& templateSmdh, const std::string& ndsPath,
-                          const std::string& title);
+                          const std::string& title, const std::string& icon48 = "");
     std::string buildBanner(const std::string& templateBanner,
                             const std::string& etc1a4, const std::string& cwav);
     u64 allocateTIDIn(u32 base, u32 count, const std::string& fsName);
@@ -51,8 +51,10 @@ class CtrBuilder {
     // builds + installs the CTR forwarder to SD media.
     // etc1a4: 0x8000-byte 256x128 ETC1A4 boxart ("" = keep template banner art)
     // cwav:   full CWAV blob ("" = keep template sound)
+    // icon48: 48*48*2 linear RGB565 SMDH icon ("" = the ROM's own DS icon)
     ReturnResult* buildCIA(const std::string& romPath, const std::string& title,
-                           u64 tid, const std::string& etc1a4, const std::string& cwav);
+                           u64 tid, const std::string& etc1a4, const std::string& cwav,
+                           const std::string& icon48 = "");
     // builds + installs a GBA VC inject (ROM baked into .code with the
     // AGB_FIRM .CAA footer; template pieces from romfs:/gba, vcoven layout).
     // Streams the ROM from SD — never holds the whole CIA in RAM (32 MB max).

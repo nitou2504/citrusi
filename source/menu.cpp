@@ -90,6 +90,16 @@ static int artCacheClear() {
 static CtrBuilder gCtr;
 static bool gCtrReady = false;
 
+// vertical action menu (defined below) — used by the early install helpers
+struct MenuOpt {
+    std::string label;
+    std::string desc;
+};
+static int actionMenu(C3D_RenderTarget* target, const std::string& title,
+                      const std::string& subtitle,
+                      const std::vector<MenuOpt>& opts, int def = 0,
+                      const char* xLabel = nullptr, bool* xOut = nullptr);
+
 SgdbClient gSgdb;
 static bool gSgdbKeyTried = false;
 // loads the SGDB key once per session; false = no key (icons fall back)
@@ -129,29 +139,47 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
 
     ArtEntry ae = artStoreGet(romBase);
     std::string boxart;
+    std::string customIcon;   // "" = the ROM's own DS icon (the default)
     bool persist = false;
-    if (pickArt) {                                // "Change art": banner picker first
+    if (pickArt) {                                // "+ choose art": picker first
+        // same which-art menu as GBA — but the icon default here is the
+        // ROM's own DS icon, so banner-only leads (cosmetics beyond that)
+        bool pIcon = false, pBanner = true;
+        if (interactive) {
+            int w = actionMenu(target, "Choose which art?", title, {
+                {"Banner only", "The big HOME banner. The icon stays the ROM's own DS icon - every NDS game ships one."},
+                {"Icon + banner", "Pick a custom HOME icon too. Cosmetic only - the DS icon is the classic default."},
+                {"Icon only", "Just the 48px HOME icon; the banner resolves automatically."}});
+            if (w >= 0) {
+                pIcon   = (w == 1 || w == 2);
+                pBanner = (w == 0 || w == 1);
+            }
+        }
         ArtEntry pe = ae;
         if (pe.query.empty()) {
             std::vector<std::string> qs = artQueriesFor(romBase, title);
             pe.query = qs.empty() ? artSanitizeQuery(romBase) : qs[0];
         }
         ArtPieces picked;
-        bool bCh = false;
+        bool iCh = false, bCh = false;
         artPickerRun(target, romBase, title, coverPath, ROMM_SLUG_NDS,
-                     pe, picked, false, true, nullptr, &bCh);
-        if (bCh) {
-            boxart = picked.bannerTex;
+                     pe, picked, pIcon, pBanner, &iCh, &bCh);
+        if (bCh) boxart = picked.bannerTex;
+        if (iCh) customIcon = picked.icon48;
+        if (iCh || bCh) {
             pe.weak = false;
             ae = pe;
             persist = true;
         }
     }
-    if (boxart.empty() && ae.valid && !ae.bannerSource.empty()) {   // F6: reuse silently
+    if (ae.valid && (boxart.empty() || (customIcon.empty() && !ae.iconSource.empty()))) {
+        // F6: reuse silently — banner AND any previously chosen icon
         showLoading(target, {"Preparing art...", title});
         ArtPieces p;
-        if (artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, p))
-            boxart = p.bannerTex;
+        if (artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, p)) {
+            if (boxart.empty() && !ae.bannerSource.empty()) boxart = p.bannerTex;
+            if (customIcon.empty()) customIcon = p.icon48;
+        }
     }
     if (boxart.empty()) {
         // Dialog word-wraps each message line — pass full titles, no shorten()
@@ -223,7 +251,7 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
         Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle();
         return false;
     }
-    ReturnResult* r = gCtr.buildCIA(romPath, title, ctid, boxart, gameCwav);
+    ReturnResult* r = gCtr.buildCIA(romPath, title, ctid, boxart, gameCwav, customIcon);
     bool ok = r->isSuccess();
     if (!ok) {
         if (interactive)
@@ -582,14 +610,10 @@ static float drawWrapped(float x, float y, float maxW, float lineH, float scale,
 // Browse alike: title + subtitle, options stacked vertically (the obvious
 // default action FIRST), and the highlighted option explained under the
 // list. A = pick (index), B = back (-1).
-struct MenuOpt {
-    std::string label;
-    std::string desc;
-};
 static int actionMenu(C3D_RenderTarget* target, const std::string& title,
                       const std::string& subtitle,
-                      const std::vector<MenuOpt>& opts, int def = 0,
-                      const char* xLabel = nullptr, bool* xOut = nullptr) {
+                      const std::vector<MenuOpt>& opts, int def,
+                      const char* xLabel, bool* xOut) {
     int n = (int)opts.size();
     if (n <= 0) return -1;
     if (xOut) *xOut = false;
@@ -787,21 +811,42 @@ static int changeArtNdsRommItem(C3D_RenderTarget* target, Config* config,
     (void)config;
     if (!ensureCtrBuilder(target)) return -1;
     ensureSgdb();
+    // which art? banner is the star; the SMDH icon DEFAULTS to the ROM's own
+    // DS icon (every NDS game ships one) — a custom icon is pure cosmetics
+    bool pIcon = false, pBanner = true;
+    if (interactive) {
+        int w = actionMenu(target, "Change which art?", title, {
+            {"Banner only", "The big HOME banner. The icon stays the ROM's own DS icon - every NDS game ships one."},
+            {"Icon + banner", "Pick a custom HOME icon too. Cosmetic only - the DS icon is the classic default."},
+            {"Icon only", "Just the 48px HOME icon; the banner stays."}});
+        if (w < 0) return 0;
+        pIcon   = (w == 1 || w == 2);
+        pBanner = (w == 0 || w == 1);
+    }
     ArtEntry ae = artStoreGet(name);
     if (ae.query.empty()) {
         std::vector<std::string> qs = artQueriesFor(name, title);
         ae.query = qs.empty() ? artSanitizeQuery(name) : qs[0];
     }
     ArtPieces pieces;
-    bool bCh = false;
+    bool iCh = false, bCh = false;
     artPickerRun(target, name, title, coverPath, ROMM_SLUG_NDS,
-                 ae, pieces, false, true, nullptr, &bCh);
-    if (!bCh) return 0;                                  // picker cancelled
+                 ae, pieces, pIcon, pBanner, &iCh, &bCh);
+    if (!iCh && !bCh) return 0;                          // picker cancelled
     ae.weak = false;
+    // pages not picked keep their stored art — never bake the template over
+    // an existing banner, and a previously chosen icon survives a banner-only
+    // change ("" icon = the DS icon, the default)
+    if (pieces.bannerTex.empty() || pieces.icon48.empty()) {
+        ArtPieces re;
+        artBuildFromEntry(gSgdb, gRomm, name, coverPath, ae, re);
+        if (pieces.bannerTex.empty()) pieces.bannerTex = re.bannerTex;
+        if (pieces.icon48.empty())    pieces.icon48    = re.icon48;
+    }
     Dialog(target,0,0,320,240,{"Fetching sound...",title},{},0).handle();
     std::string gameCwav = fetchGameSound(gRomm, romPath);
     Dialog(target,0,0,320,240,{"Updating art...",title},{},0).handle();
-    ReturnResult* r = gCtr.buildCIA(romPath, title, rtid, pieces.bannerTex, gameCwav);
+    ReturnResult* r = gCtr.buildCIA(romPath, title, rtid, pieces.bannerTex, gameCwav, pieces.icon48);
     int rc;
     if (r->isSuccess()) {
         artStorePut(name, ae);
@@ -3384,8 +3429,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     } else {
                         int c = actionMenu(target, "Install this game?",
                                            entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
-                            {"Install", "Download the ROM and install its forwarder."}});
+                            {"Install", "Download the ROM and install its forwarder with auto art."},
+                            {"Install + choose art", "Pick the HOME art first (the DS icon is the default)."}});
                         if (c < 0) break;
+                        pickArt = (c==1);
                     }
                     if (!is3ds && !ensureCtrBuilder(target)) break;  // CIA shell template (nds fwd + gba inject)
                     // GBA art resolves BEFORE the long download — correcting a
@@ -3643,15 +3690,29 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
                 }
                 case ManageZip: {
-                    // interrupted download: finish it (extract + install) or drop it
+                    // interrupted download: finish it (extract + install, same
+                    // customization depth as any other install) or drop it
                     bool zGba = (entry.platformSlug == ROMM_SLUG_GBA);
+                    std::vector<MenuOpt> zo = {
+                        {"Extract + install", zGba ? "Unpack the ROM, then bake the inject with auto art and the saved/default filter."
+                                                   : "Unpack the ROM, then build its forwarder with auto art."},
+                        {"Extract + choose art", zGba ? "Art picker first, then the install."
+                                                      : "Pick the HOME art first (the DS icon is the default)."}};
+                    if (zGba) {
+                        zo.push_back({"Extract + screen filter", "Pick the color preset baked into this install."});
+                        zo.push_back({"Extract + art + filter", "Customize both: art picker, then the preset."});
+                    }
+                    zo.push_back({"Delete archive", "Remove the .zip from the SD card."});
                     int c = actionMenu(target, entry.title,
-                                       "Archive - not extracted (" + humanSize(entry.sizeBytes) + ")", {
-                        {"Extract + install", zGba ? "Unpack the ROM, then bake and install the inject."
-                                                   : "Unpack the ROM, then build and install its forwarder."},
-                        {"Delete archive", "Remove the .zip from the SD card."}});
+                                       "Archive - not extracted (" + humanSize(entry.sizeBytes) + ")", zo);
                     if (c < 0) break;
-                    if (c == 1) {
+                    bool zPickArt = (c == 1 || (zGba && c == 3));
+                    int zScreen = -1;
+                    if (zGba && (c == 2 || c == 3)) {
+                        zScreen = pickGbaScreenPreset(target, config, entry.title);
+                        if (zScreen < 0) break;
+                    }
+                    if (c == (int)zo.size() - 1) {
                         if (Dialog(target,0,0,320,240,{"Delete archive?",entry.title,humanSize(entry.sizeBytes)},
                                    {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
                         std::error_code ec;
@@ -3687,11 +3748,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (zGba) {
                             ArtEntry ae; ArtPieces pieces;
                             resolveGbaArtInteractive(target, config, wantName, entry.title,
-                                                     entry.coverPath, ae, pieces, false);
+                                                     entry.coverPath, ae, pieces, zPickArt);
+                            if (zScreen >= 0) ae.screen = zScreen;   // picked filter for this bake
                             ok = installGbaInject(target, config, extracted, entry.title,
                                                   wantName, ae, pieces);
                         } else {
-                            ok = buildForwarderFor(target, config, extracted, entry.title, entry.coverPath);
+                            ok = buildForwarderFor(target, config, extracted, entry.title, entry.coverPath, zPickArt);
                         }
                     }
                     if (ok) Dialog(target,0,0,320,240,{"Installed!",entry.title},{"OK"}).handle();
@@ -3877,22 +3939,23 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         // no forwarder yet: offer to build one
                         int c = entry.fwdCia.empty()
                             ? actionMenu(target, name, "Not installed - ROM on SD", {
-                                  {"Install", "Build and install the forwarder for this ROM."},
+                                  {"Install", "Build and install the forwarder with auto art."},
+                                  {"Install + choose art", "Pick the HOME art first (the DS icon is the default)."},
                                   {"Delete ROM", "Remove the ROM file from the SD card."}})
                             : 0;
                         if (c < 0) break;
-                        if (c==0) {
+                        if (c==0 || c==1) {
                             if (config->dsiwareCount >= MAX_DSIWARE) {
                                 Dialog(target,0,0,320,240,{gLang.getString("menu_tooManyDSiWare"),std::to_string(config->dsiwareCount)},{gLang.getString("menu_ok")}).handle();
                                 break;
                             }
-                            if (buildForwarderFor(target, config, entry.path.generic_string(), entry.title, entry.coverPath))
+                            if (buildForwarderFor(target, config, entry.path.generic_string(), entry.title, entry.coverPath, c==1))
                                 Dialog(target,0,0,320,240,{"Installed!",entry.title},{"OK"}).handle();
                             while (this->queue.size() > 0) this->queue.pop();
                             gFwdReady = false; invalidateYanbfCache();
                             showLoading(target, {"Refreshing..."});
                             return generateManageMenu(this,config->dsiwareCount,this->platformSlug,target);
-                        } else if (c==1) {
+                        } else if (c==2) {
                             if (Dialog(target,0,0,320,240,{"Delete ROM file?",name},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()==0) {
                                 std::error_code ec;
                                 std::filesystem::remove(entry.path, ec);
