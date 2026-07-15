@@ -81,7 +81,9 @@ void Dialog::draw() {
         float ry = oy + (float)i*pitch;
         bool hot = (this->selected==(int)i);
         if (hot) C2D_DrawRectSolid(this->x+12, ry, 0.4f, this->width-24, rowH, HIGHLIGHT_BGCOLOR);
-        drawText(cx, ry+rowH/2 - 6, 0, 0.6f, 0,
+        // text z (0.5) MUST sit above the highlight rect (0.4) or the accent bar
+        // paints over the selected label (higher z = nearer, as in actionMenu)
+        drawText(cx, ry+rowH/2 - 6, 0.5f, 0.6f, 0,
                  hot?HIGHLIGHT_FOREGROUND:FOREGROUND_COLOR, this->options[i].c_str(), C2D_AlignCenter);
     }
     C3D_FrameEnd(0);
