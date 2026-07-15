@@ -18,13 +18,14 @@ Language: **install · art · filter · manage · "the game"**. No forwarder/inj
 
 ## Canonical single-item menus
 
-**Not installed**
+**Not installed** — lead with plain `[ Install ]`; art/filter hide behind `[ Customize › ]`.
 ```
 3DS : [ Install ]
-NDS : [ Install ] [ Install + choose art ]
-GBA : [ Install ] [ Install + choose art ] [ Install + filter ] [ Install + art + filter ]
+NDS : [ Install ] [ Choose art ]                    (one advanced choice: flat, no submenu)
+GBA : [ Install ] [ Customize › ]
+        Customize › : [ Choose art ] [ Filter ] [ Choose art + filter ]
 ```
-On-SD / Manage append `[ Delete the file ]` last. 3DS-on-SD also gets `[ Download again ]` (RomM).
+Built by the shared `buildInstallMenu(slug, title, subtitle, primaryLabel, extraLabel)` — all 8 not-installed sites call it. On-SD / Manage pass `extraLabel="Delete ROM"` (→ IC_EXTRA); ManageZip passes `primaryLabel="Extract + install"`, `extraLabel="Delete archive"`. 3DS-on-SD also gets `[ Download again ]` (RomM). "Customize" is the one word gating advanced options in **both** states (installed GBA submenu is also "Customize").
 
 **Installed** — order: **Uninstall first, Reinstall last; art/filter behind a submenu.**
 ```
