@@ -4035,9 +4035,49 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                               : "Install + reinstall all (" + std::to_string((int)items.size()) + ")",
                                           "Everything selected installs; the installed ones are reinstalled over."});
                             sa.push_back(1);
+                            so.push_back({"Uninstall installed (" + std::to_string((int)instItems.size()) + ")",
+                                          "Uninstall those games and delete their files."});
+                            sa.push_back(2);
                             int sc = actionMenu(target, "Selected", ssub, so);
                             if (sc < 0) break;
                             if (sa[sc] == 0) items = newItems;
+                            else if (sa[sc] == 2) {   // batch uninstall the installed ones
+                                int K = (int)instItems.size();
+                                if (Dialog(target,0,0,320,240,{"Uninstall " + std::to_string(K) + " games?",
+                                           "Their game files are deleted too."},
+                                           {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                                    break;
+                                int okU = 0;
+                                std::vector<ManagedRom> ndsScan; bool ndsScanned = false;
+                                for (int i = 0; i < K; i++) {
+                                    MenuSelection* it = instItems[i];
+                                    showLoading(target, {"Uninstalling " + std::to_string(i+1) + "/" + std::to_string(K), it->title});
+                                    if (it->platformSlug == ROMM_SLUG_3DS) {
+                                        u64 tid = it->titleId ? it->titleId : ciaFileTitleId(it->path.generic_string());
+                                        TitleExtras ex = findTitleExtras(tid, true);
+                                        if (execUninstall3ds(target, it->title, tid, it->sizeBytes, ex, 0)) okU++;
+                                    } else if (it->platformSlug == ROMM_SLUG_GBA) {
+                                        u64 gtid = it->tid ? it->tid : gbaTidForRom(it->fsName);
+                                        if (R_SUCCEEDED(AM_DeleteTitle(MEDIATYPE_SD, gtid))) {
+                                            AM_DeleteTicket(gtid);
+                                            std::error_code ec; std::filesystem::remove(it->path, ec); okU++;
+                                        }
+                                    } else {
+                                        if (!ndsScanned) { ndsScan = scanManagedRoms(ROMM_NDS_DIR); ndsScanned = true; }
+                                        u64 ntid=0,nytid=0,nrtid=0; std::string np = it->path.generic_string();
+                                        for (auto& m : ndsScan) if (normNds(m.display)==normNds(it->fsName)) {
+                                            ntid=m.tid; nytid=m.yanbfTid; nrtid=m.rommTid; np=m.path; break; }
+                                        MenuSelection um; um.platformSlug=ROMM_SLUG_NDS; um.installed=(ntid!=0);
+                                        um.tid=ntid; um.ytid=nytid; um.rtid=nrtid; um.path=std::filesystem::path(np);
+                                        if (uninstallManageItem(config, um)) okU++;
+                                    }
+                                }
+                                installedTitlesInvalidate(); installed3dsRefresh();
+                                gFwdReady=false; invalidateManagedRoms(); invalidateYanbfCache();
+                                Dialog(target,0,0,320,240,{"Uninstalled " + std::to_string(okU) + " of " + std::to_string(K)},{"OK"}).handle();
+                                while (this->queue.size() > 0) this->queue.pop();
+                                return generateLocalMenu(this, this->currentDirectory);
+                            }
                         }
                     }
                     // GBA batch art/screen — same choice as the single-item and
@@ -4416,48 +4456,53 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             extrasSelBytes = mx[c].second;
                         }
                     } else if (notInstalled == M) {
+                        std::string cnt = " (" + std::to_string(M) + ")";
                         int c = actionMenu(target, "Selected", bsub, {
-                            {"Install selected", "Art first, then every game installs unattended."},
-                            {"Delete ROMs", "Remove the selected ROM files from the SD card."}});
+                            {"Install" + cnt, "Art first, then every game installs unattended."},
+                            {"Delete files" + cnt, "Remove the selected game files from the SD card."}});
                         act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
                     } else if (notInstalled > 0) {
-                        // mixed selection (typical after R = select all): the
-                        // rebuild actions still apply to the installed rows
+                        // mixed selection (typical after R = select all): counts on
+                        // every row, "M selected - K installed" subtitle (like RomM)
+                        int nInst = M - notInstalled;
                         std::vector<MenuOpt> mo = {
-                            {"Install", "Install the ones that aren't installed yet."},
-                            {"Uninstall", "Uninstall the ones that are installed."}};
+                            {"Install (" + std::to_string(notInstalled) + ")", "Install the ones not installed yet."},
+                            {"Uninstall (" + std::to_string(nInst) + ")", "Uninstall the installed ones and delete their files."}};
                         std::vector<int> ma = {A_INSTALL, A_UNINSTALL};
                         if (rebuildable > 0) {
-                            mo.push_back({"Change art", slug == ROMM_SLUG_GBA
+                            std::string rc = " (" + std::to_string(rebuildable) + ")";
+                            mo.push_back({"Change art" + rc, slug == ROMM_SLUG_GBA
                                 ? "Art picker for each installed game, applied in place."
                                 : "Banner picker for each installed game, applied in place."});
                             ma.push_back(A_CHANGEART);
                             if (slug == ROMM_SLUG_GBA) {
-                                mo.push_back({"Filter", "Pick one preset and apply it to the installed games."});
+                                mo.push_back({"Filter" + rc, "Pick one filter and apply it to the installed games."});
                                 ma.push_back(A_SCREEN);
-                                mo.push_back({"Art + filter", "One filter for all, then art per game."});
+                                mo.push_back({"Art + filter" + rc, "One filter for all, then art per game."});
                                 ma.push_back(A_ARTSCREEN);
                             }
                         }
                         int c = actionMenu(target, "Selected",
-                                           bsub + " - " + std::to_string(notInstalled) + " not installed", mo);
+                                           std::to_string(M) + " selected - " + std::to_string(nInst) + " installed", mo);
                         if (c >= 0) act = (decltype(act))ma[c];
                     } else if (rebuildable == 0) {
                         int c = actionMenu(target, "Selected", bsub, {
-                            {"Uninstall selected", "Remove every selected game."}});
+                            {"Uninstall" + std::string(" (") + std::to_string(M) + ")", "Uninstall and delete every selected game."}});
                         act = (c==0) ? A_UNINSTALL : A_BACK;
                     } else if (slug == ROMM_SLUG_GBA) {
+                        std::string cnt = " (" + std::to_string(M) + ")";
                         int c = actionMenu(target, "Selected", bsub, {
-                            {"Uninstall", "Uninstall and delete the selected games."},
-                            {"Change art", "Art picker per game, applied in place."},
-                            {"Filter", "Pick one preset and apply it to all selected."},
-                            {"Art + filter", "One filter for all, then art per game."}});
+                            {"Uninstall" + cnt, "Uninstall and delete the selected games."},
+                            {"Change art" + cnt, "Art picker per game, applied in place."},
+                            {"Filter" + cnt, "Pick one filter and apply it to all selected."},
+                            {"Art + filter" + cnt, "One filter for all, then art per game."}});
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : (c==2) ? A_SCREEN
                             : (c==3) ? A_ARTSCREEN : A_BACK;
                     } else {
+                        std::string cnt = " (" + std::to_string(M) + ")";
                         int c = actionMenu(target, "Selected", bsub, {
-                            {"Uninstall selected", "Uninstall and delete the selected games."},
-                            {"Change art selected", "Banner picker per game, applied in place."}});
+                            {"Uninstall" + cnt, "Uninstall and delete the selected games."},
+                            {"Change art" + cnt, "Banner picker per game, applied in place."}});
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
                     }
                     if (act == A_BACK) break;
