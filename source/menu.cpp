@@ -716,7 +716,7 @@ static int pickGbaScreenPreset(C3D_RenderTarget* target, Config* config,
             opts.push_back({label, descs[i]});
         }
         bool setDef = false;
-        sel = actionMenu(target, "Screen filter", title, opts,
+        sel = actionMenu(target, "Filter", title, opts,
                          (sel >= 0) ? sel : (current >= 0) ? current : def,
                          "set default", &setDef);
         if (sel >= 0 && setDef) {
@@ -749,7 +749,7 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
                          pieces.icon48.empty(), pieces.bannerTex.empty(), pieces);
     u64 gtid = gCtr.allocateGbaTID(romBase);
     if (gtid == 0) { if (interactive) Dialog(target,0,0,320,240,{"No free install slots"},{"OK"}).handle(); return -1; }
-    Dialog(target,0,0,320,240,{"Applying screen filter...",title},{},0).handle();
+    Dialog(target,0,0,320,240,{"Applying filter...",title},{},0).handle();
     u64 lastG = 0;
     ReturnResult* gr = gCtr.buildGbaCIA(romPath, title, gtid,
                                         pieces.icon48, pieces.bannerTex,
@@ -771,7 +771,7 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
     rlog.info("screen apply '" + romBase + "' mode=" + std::to_string(screenMode) +
               " rc=" + std::to_string(rc) + (rc == 1 ? "" : " (" + gr->message + ")"));
     if (interactive) {
-        if (rc == 1) Dialog(target,0,0,320,240,{"Screen filter applied!",title},{"OK"}).handle();
+        if (rc == 1) Dialog(target,0,0,320,240,{"Filter applied!",title},{"OK"}).handle();
         else Dialog(target,0,0,320,240,{(gr->message=="cancelled")?"Cancelled":"Update failed",gr->message},{"OK"}).handle();
     }
     delete gr;
@@ -1782,7 +1782,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             int nsel = this->selectedCount();
             std::string mhint = this->entries.empty()
                 ? std::string("B Back")
-                : (nsel > 0 ? "A Batch " + std::to_string(nsel) + "   Y Mark   R All/None   B Back"
+                : (nsel > 0 ? "A Selected " + std::to_string(nsel) + "   Y Mark   R All/None   B Back"
                             : std::string("A Manage   Y Mark   SEL Find   B Back"));
             drawBottomFrame(mhint.c_str());
             if (this->entries.empty()) {
@@ -1856,11 +1856,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     drawChip(cxp, y, "not installed", COL_TEXT_DIM);
                 }
             } else {
-                if (sel->rtid) cxp = drawChip(cxp, y, "romm3ds", COL_ACCENT);
-                if (sel->installed) cxp = drawChip(cxp, y, "TWL", COL_ACCENT);
-                if (sel->ytid) cxp = drawChip(cxp, y, "YANBF", COL_ACCENT);
-                if (!sel->rtid && !sel->installed && !sel->ytid)
-                    drawChip(cxp, y, sel->fwdCia.empty() ? "not installed" : ".cia on SD", COL_TEXT_DIM);
+                // one "installed" chip - the user doesn't need the engine type
+                // (romm3ds / TWiLight / YANBF) behind an installed DS game
+                bool anyFwd = sel->rtid || sel->installed || sel->ytid;
+                if (anyFwd) drawChip(cxp, y, "installed", COL_ACCENT);
+                else drawChip(cxp, y, sel->fwdCia.empty() ? "not installed" : ".cia on SD", COL_TEXT_DIM);
             }
             y += 21;
             y = cardDivider(y) + 5;
@@ -1901,7 +1901,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 "Ask for a custom HOME menu name on every install.",
                 "Overwrite existing installs without asking first.",
                 "", // language (removed)
-                "DSiWare template used by SD card installs.",
+                "Template used by SD card installs.",
                 "RomM server address and account used by the library."
             };
             static const char* srvDescs[] = {
@@ -1919,10 +1919,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 int id = sel->rommId;
                 const char* d = nullptr;
                 if (id >= 0 && id <= 5) d = descs[id];
-                else if (id == SETTING_DELETE_SRC) d = "After a Browse-SD install: delete the .cia (it's a title-DB duplicate) or keep all files. NDS/GBA roms are always kept - their forwarder/inject needs them to launch and to change art.";
+                else if (id == SETTING_DELETE_SRC) d = "After installing from the SD card: delete the .cia (a duplicate of the installed game) or keep all files. DS/GBA game files are always kept - the game needs them to run and to change art.";
                 else if (id == SETTING_ART_NOTIFY) d = "What happens when icon/banner art isn't found at install. Press A to choose - each choice is explained there.";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/romm3ds/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
-                else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. Press A to pick from the presets, each explained there. Per game: Manage -> game -> Screen filter.";
+                else if (id == SETTING_GBA_SCREEN) d = "Default color filter for new GBA installs. Press A to pick from the presets. Per game: Manage -> game -> Filter.";
                 else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage: each game's own HOME icon, or its RomM cover. Press A to choose.";
                 else if (id == SETTING_ART_CACHE) d = "Downloaded covers, banner previews and title icons. Safe to clear - everything re-downloads or rebuilds on demand. The art you picked per game (art.json) is kept.";
                 else if (id >= SETTING_SRV_HOST && id <= SETTING_SRV_TEST) d = srvDescs[id - SETTING_SRV_HOST];
@@ -1970,10 +1970,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 bool is3 = (sel->platformSlug == ROMM_SLUG_3DS);
                 const char* desc =
                     sel->installed
-                      ? (is3 ? "Installed. A reinstalls. Y marks it for a batch."
-                             : "Installed. A: reinstall, change art or screen filter. Y marks it for a batch.")
-                      : (is3 ? "A installs it into the title database. Y marks it for a batch."
-                             : "A: install, with art / screen-filter options. Y marks it for a batch.");
+                      ? (is3 ? "Installed. A reinstalls. Y marks several to install."
+                             : "Installed. A: reinstall, change art or filter. Y marks several.")
+                      : (is3 ? "A installs it to the HOME menu. Y marks several to install."
+                             : "A: install, with art / filter options. Y marks several to install.");
                 drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, desc, 3);
             } else {   // folder or ".." row
                 bool up = (sel->display.find("..") != std::string::npos);
@@ -2961,7 +2961,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (r != nullptr && r->code == ERROR_INSTALL_ALREADY_EXISTS) {
             int c = actionMenu(target, "Already installed", showName, {
                 {"Install as new", "Give this copy a random title ID so both stay installed. For rom hacks that share the original's game code."},
-                {"Overwrite", "Replace the installed forwarder with this one."}});
+                {"Overwrite", "Replace the installed game with this one."}});
             if (c >= 0) {
                 delete r;
                 r = builder->buildCIA(romPath, c == 0, customTitle, true);
@@ -3070,7 +3070,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
                         case SETTING_DELETE_SRC: {
                             int c = actionMenu(target, "After a Browse-SD install", "", {
-                                {"Delete .cia source", "Reclaim the space: a .cia becomes a duplicate once it's in the title database. NDS/GBA roms are always kept - their forwarder/inject re-reads them to launch and to change art."},
+                                {"Delete .cia source", "Reclaim the space: a .cia is a duplicate once the game is installed. DS/GBA game files are always kept - the game needs them to run and to change art."},
                                 {"Keep source files", "Leave every file on the SD card after installing."}},
                                 config->deleteAfterInstall ? 0 : 1);
                             if (c >= 0) config->deleteAfterInstall = (c == 0);
@@ -3159,7 +3159,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         case SETTING_TEMPLATE: {
                             std::vector<MenuOpt> topts;
                             for (auto& t : config->templates) topts.push_back({t, ""});
-                            int c = actionMenu(target, "DSiWare template", "Used by SD card installs",
+                            int c = actionMenu(target, "Template", "Used by SD card installs",
                                                topts, (int)config->currentTemplate);
                             if (c >= 0) config->currentTemplate = c;
                             break;
@@ -3225,11 +3225,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         // installed: the Manage actions live right here too
                         TitleExtras ex = findTitleExtras(entry.titleId, true);
                         std::vector<MenuOpt> mo = {
-                            {"Reinstall", onSD ? "Install the .cia already on the SD card again."
+                            {"Reinstall", onSD ? "Install again from the .cia on the SD card."
                                                : "Download from RomM and install over the current copy."}};
                         std::vector<int> ma = {-1};
                         if (onSD) {
-                            mo.push_back({"Redownload", "Fetch a fresh copy from RomM first, then install it."});
+                            mo.push_back({"Download again", "Fetch a fresh copy from RomM first, then install it."});
                             ma.push_back(-2);
                         }
                         addUninstall3dsOpts(mo, ma, entry.sizeBytes, ex);
@@ -3249,18 +3249,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         needDownload = (ma[c] == -2) || !onSD;
                     } else if (onSD && is3ds) {
                         int c = actionMenu(target, "Already downloaded", entry.fsName, {
-                            {"Install", "Install the .cia that is already on the SD card."},
-                            {"Redownload", "Fetch a fresh copy from RomM first, then install it."}});
+                            {"Install", "Install the .cia already on the SD card."},
+                            {"Download again", "Fetch a fresh copy from RomM first, then install it."}});
                         if (c < 0) break;
                         needDownload = (c==1);
                     } else if (isGba && inst && onSD) {
                         // installed inject: the Manage actions, plus reinstall
                         int c = actionMenu(target, entry.title, "Installed", {
                             {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                            {"Screen filter", "Re-bake with a different color preset; art and save kept."},
-                            {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."},
+                            {"Filter", "Change the color filter; art and save kept."},
+                            {"Art + filter", "Pick the filter, then the art."},
                             {"Reinstall", "Reinstall with the art and filter it already uses."},
-                            {"Uninstall", "Remove the inject from HOME and delete the ROM file."}});
+                            {"Uninstall", "Uninstall and delete the game file."}});
                         if (c < 0) break;
                         if (c == 0 || c == 2) {
                             int fc = -1;
@@ -3317,14 +3317,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             break;
                         }
                         std::vector<MenuOpt> mo = {
-                            {"Reinstall", onSD ? "Rebuild the forwarder with the art it already uses."
-                                               : "Download the ROM again and rebuild the forwarder."}};
+                            {"Reinstall", onSD ? "Install again with the art it already uses."
+                                               : "Download again and reinstall the game."}};
                         std::vector<int> ma = {0};
                         if (nrtid && onSD) {
                             mo.push_back({"Change art", "Pick a new HOME banner; same slot, save kept."});
                             ma.push_back(1);
                         }
-                        mo.push_back({"Uninstall", "Remove the forwarder from HOME and delete the ROM file."});
+                        mo.push_back({"Uninstall", "Uninstall and delete the game file."});
                         ma.push_back(2);
                         int c = actionMenu(target, entry.title, "Installed", mo);
                         if (c < 0) break;
@@ -3370,9 +3370,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     } else if (isGba) {
                         int c = actionMenu(target, "Install this game?",
                                            entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
-                            {"Install", "Auto art and the default screen filter."},
+                            {"Install", "Automatic art and the default filter."},
                             {"Install + choose art", "Pick the HOME icon and banner before installing."},
-                            {"Install + screen filter", "Pick the color preset baked into this install."},
+                            {"Install + filter", "Pick the color filter for this install."},
                             {"Install + art + filter", "Customize both: art picker, then the preset."}});
                         if (c < 0) break;
                         pickArt = (c==1 || c==3);
@@ -3384,7 +3384,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     } else {
                         int c = actionMenu(target, "Install this game?",
                                            entry.fsName + "  (" + humanSize(entry.sizeBytes) + ")", {
-                            {"Install", "Download the ROM and install its forwarder with auto art."},
+                            {"Install", "Download and install the game with automatic art."},
                             {"Install + choose art", "Pick the HOME art first (the DS icon is the default)."}});
                         if (c < 0) break;
                         pickArt = (c==1);
@@ -3451,9 +3451,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                       "Everything selected installs; the installed ones are reinstalled over."});
                         sa.push_back(1);
                         so.push_back({"Uninstall installed (" + std::to_string((int)instItems.size()) + ")",
-                                      "Remove the installed ones - 3DS updates/DLC, GBA injects and DS forwarders go with their ROMs."});
+                                      "Uninstall the installed ones - updates, DLC and game files go too."});
                         sa.push_back(2);
-                        int sc = actionMenu(target, "Batch", ssub, so);
+                        int sc = actionMenu(target, "Selected", ssub, so);
                         if (sc < 0) break;
                         if (sa[sc] == 0) items = newItems;
                         else if (sa[sc] == 2) {
@@ -3461,7 +3461,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             int K = (int)instItems.size();
                             if (Dialog(target,0,0,320,240,
                                        {"Uninstall " + std::to_string(K) + " games?",
-                                        "Updates/DLC, injects and forwarders","go with their ROM files."},
+                                        "Updates, DLC and game files","go with their ROM files."},
                                        {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
                                 break;
                             // NDS forwarder tids come from the manage scan
@@ -3525,13 +3525,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     bool pickArtAll = false;
                     int batchScreen = -1;
                     std::vector<MenuOpt> bopts = {
-                        {"Install " + std::to_string(M), "Auto art, saved/default filters."}};
+                        {"Install " + std::to_string(M), "Automatic art, saved/default filters."}};
                     if (anyGba) {
                         bopts.push_back({"Install + choose art", "Art picker for each GBA game first, then everything installs unattended."});
-                        bopts.push_back({"Install + screen filter", "Pick ONE preset, baked into every GBA install in this batch."});
+                        bopts.push_back({"Install + filter", "One color filter for every game installed here."});
                         bopts.push_back({"Install + art + filter", "Art picker per game, one preset for all."});
                     }
-                    int bc = actionMenu(target, "Batch install",
+                    int bc = actionMenu(target, "Install selected",
                                         std::to_string(M) + " games - " + humanSize(total) + " to download",
                                         bopts);
                     if (bc < 0) break;
@@ -3650,12 +3650,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     // customization depth as any other install) or drop it
                     bool zGba = (entry.platformSlug == ROMM_SLUG_GBA);
                     std::vector<MenuOpt> zo = {
-                        {"Extract + install", zGba ? "Unpack the ROM, then bake the inject with auto art and the saved/default filter."
-                                                   : "Unpack the ROM, then build its forwarder with auto art."},
+                        {"Extract + install", zGba ? "Unzip, then install the game with automatic art and the saved filter."
+                                                   : "Unzip, then install the game with automatic art."},
                         {"Extract + choose art", zGba ? "Art picker first, then the install."
                                                       : "Pick the HOME art first (the DS icon is the default)."}};
                     if (zGba) {
-                        zo.push_back({"Extract + screen filter", "Pick the color preset baked into this install."});
+                        zo.push_back({"Extract + filter", "Pick the color filter for this install."});
                         zo.push_back({"Extract + art + filter", "Customize both: art picker, then the preset."});
                     }
                     zo.push_back({"Delete archive", "Remove the .zip from the SD card."});
@@ -3751,10 +3751,10 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             bool weakArt = artStoreGet(romBase).weak;
                             int m = actionMenu(target, ng,
                                                weakArt ? "Installed - using fallback art" : "Installed", {
-                                {"Uninstall", "Remove the inject from HOME and delete the ROM file."},
+                                {"Uninstall", "Uninstall and delete the game file."},
                                 {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                                {"Screen filter", "Re-bake with a different color preset; art and save kept."},
-                                {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."}});
+                                {"Filter", "Change the color filter; art and save kept."},
+                                {"Art + filter", "Pick the filter, then the art."}});
                             if (m < 0) break;
                             // old order: art / screen / uninstall; 3 = art + screen
                             int c = (m == 1) ? 0 : (m == 2) ? 1 : (m == 3) ? 3 : 2;
@@ -3809,7 +3809,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             }
                         } else {
                             int c = actionMenu(target, ng, "Not installed - ROM on SD", {
-                                {"Install", "Bake the inject with auto art and its saved filter."},
+                                {"Install", "Install the game with automatic art and its saved filter."},
                                 {"Install + choose art", "Open the art picker first, then install."},
                                 {"Delete ROM", "Remove the ROM file from the SD card."}});
                             if (c < 0) break;
@@ -3861,8 +3861,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         if (!entry.fwdCia.empty()) {
                             // an uninstalled forwarder .cia exists on SD: offer to install it directly
                             int c = actionMenu(target, name, "Not installed - a ready .cia is on your SD", {
-                                {"Install", "Install the forwarder .cia that is already on the card."},
-                                {"Rebuild", "Build a fresh forwarder (new art) instead of using the .cia."},
+                                {"Install", "Install the .cia already on the card."},
+                                {"Rebuild", "Install fresh (new art) instead of using the .cia."},
                                 {"Delete ROM", "Remove the ROM file from the SD card."}});
                             if (c==0) {
                                 showLoading(target, {"Installing..."});
@@ -3895,7 +3895,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         // no forwarder yet: offer to build one
                         int c = entry.fwdCia.empty()
                             ? actionMenu(target, name, "Not installed - ROM on SD", {
-                                  {"Install", "Build and install the forwarder with auto art."},
+                                  {"Install", "Install the game with automatic art."},
                                   {"Install + choose art", "Pick the HOME art first (the DS icon is the default)."},
                                   {"Delete ROM", "Remove the ROM file from the SD card."}})
                             : 0;
@@ -3928,7 +3928,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     // Change art only for our own forwarders (romm3ds TID range)
                     if (entry.rtid) {
                         int m = actionMenu(target, name, fwdState, {
-                            {"Uninstall", "Remove the forwarder from HOME and delete the ROM file."},
+                            {"Uninstall", "Uninstall and delete the game file."},
                             {"Change art", "Pick a new HOME banner; same slot, save kept."}});
                         if (m < 0) break;
                         int c = (m == 1) ? 0 : 1;   // old order: art / uninstall
@@ -3948,7 +3948,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     } else {
                         // single-pass: uninstall removes the forwarder AND the ROM file
                         if (actionMenu(target, name, fwdState, {
-                                {"Uninstall", "Remove the forwarder from HOME and delete the ROM file."}}) < 0)
+                                {"Uninstall", "Uninstall and delete the game file."}}) < 0)
                             break;
                     }
                     bool delFwd = true;
@@ -4028,7 +4028,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                               : "Install + reinstall all (" + std::to_string((int)items.size()) + ")",
                                           "Everything selected installs; the installed ones are reinstalled over."});
                             sa.push_back(1);
-                            int sc = actionMenu(target, "Batch", ssub, so);
+                            int sc = actionMenu(target, "Selected", ssub, so);
                             if (sc < 0) break;
                             if (sa[sc] == 0) items = newItems;
                         }
@@ -4041,16 +4041,16 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         int anyGba = 0;
                         for (auto it : items) if (it->platformSlug == ROMM_SLUG_GBA) anyGba++;
                         if (anyGba) {
-                            int bc = actionMenu(target, "Batch install",
+                            int bc = actionMenu(target, "Install selected",
                                 std::to_string(anyGba) + " GBA game(s)", {
-                                {"Install", "Auto art and the default screen filter for each."},
+                                {"Install", "Automatic art and the default filter for each."},
                                 {"Install + choose art", "Pick the HOME icon and banner for each game."},
-                                {"Install + screen filter", "One color preset baked into every game."},
+                                {"Install + filter", "One color filter for every game."},
                                 {"Install + art + filter", "Pick the preset, then art for each game."}});
                             if (bc < 0) break;
                             pickArtAll = (bc == 1 || bc == 3);
                             if (bc == 2 || bc == 3) {
-                                batchScreen = pickGbaScreenPreset(target, config, "Batch screen filter", -1);
+                                batchScreen = pickGbaScreenPreset(target, config, "Filter for selected", -1);
                                 if (batchScreen < 0) break;
                             }
                         }
@@ -4169,17 +4169,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (entry.installed) {
                         if (is3ds) {
                             int c = actionMenu(target, name, "Installed",
-                                {{"Reinstall", "Stream the .cia into the title database again."}});
+                                {{"Reinstall", "Install to the HOME menu again."}});
                             if (c < 0) break;
                         } else if (isGba && !isZip) {
                             // same option set + order as RomM/Manage: safe first,
                             // destructive (Uninstall) last
                             int c = actionMenu(target, name, "Installed", {
                                 {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
-                                {"Screen filter", "Re-bake with a different color preset; art and save kept."},
-                                {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."},
+                                {"Filter", "Change the color filter; art and save kept."},
+                                {"Art + filter", "Pick the filter, then the art."},
                                 {"Reinstall", "Reinstall with the art and filter it already uses."},
-                                {"Uninstall", "Remove the inject from HOME and delete the ROM file."}});
+                                {"Uninstall", "Uninstall and delete the game file."}});
                             if (c < 0) break;
                             if (c == 0) { changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true); break; }
                             if (c == 1 || c == 2) {
@@ -4210,20 +4210,43 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             // c == 3: reinstall, art + filter reused -> fall through
                         } else {   // installed NDS (or an installed zip row: reinstall)
                             int c = actionMenu(target, name, "Installed", {
-                                {"Reinstall", "Rebuild and install the forwarder again."},
-                                {"Change art", "Pick a new HOME banner/icon, then reinstall."}});
+                                {"Reinstall", "Install the game again."},
+                                {"Change art", "Pick a new HOME banner/icon, then reinstall."},
+                                {"Uninstall", "Uninstall and delete the game file."}});
                             if (c < 0) break;
+                            if (c == 2) {   // reuse the Manage uninstall (resolve tids by name)
+                                if (Dialog(target,0,0,320,240,{"Uninstall game?",name},
+                                           {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
+                                    break;
+                                showLoading(target, {"Uninstalling...", name});
+                                u64 ntid=0,nytid=0,nrtid=0; std::string nrompath = romPath;
+                                for (auto& m : scanManagedRoms(ROMM_NDS_DIR)) {
+                                    if (normNds(m.display) != normNds(entry.fsName)) continue;
+                                    ntid=m.tid; nytid=m.yanbfTid; nrtid=m.rommTid; nrompath=m.path; break;
+                                }
+                                MenuSelection um;
+                                um.platformSlug = ROMM_SLUG_NDS;
+                                um.installed = (ntid != 0);
+                                um.tid=ntid; um.ytid=nytid; um.rtid=nrtid;
+                                um.path = std::filesystem::path(nrompath);
+                                bool uok = uninstallManageItem(config, um);
+                                gFwdReady = false; invalidateManagedRoms(); invalidateYanbfCache();
+                                installedTitlesInvalidate();
+                                Dialog(target,0,0,320,240,{uok?"Uninstalled.":"Uninstall failed",name},{"OK"}).handle();
+                                while (this->queue.size() > 0) this->queue.pop();
+                                return generateLocalMenu(this, this->currentDirectory);
+                            }
                             pickArt = (c == 1);
                         }
                     } else if (is3ds) {
                         int c = actionMenu(target, name, humanSize(entry.sizeBytes),
-                            {{"Install", "Stream the .cia into the title database."}});
+                            {{"Install", "Install to the HOME menu."}});
                         if (c < 0) break;
                     } else if (isGba) {
                         int c = actionMenu(target, name, humanSize(entry.sizeBytes), {
-                            {"Install", "Auto art and the default screen filter."},
+                            {"Install", "Automatic art and the default filter."},
                             {"Install + choose art", "Pick the HOME icon and banner before installing."},
-                            {"Install + screen filter", "Pick the color preset baked into this install."},
+                            {"Install + filter", "Pick the color filter for this install."},
                             {"Install + art + filter", "Customize both: art picker, then the preset."}});
                         if (c < 0) break;
                         pickArt = (c == 1 || c == 3);
@@ -4233,7 +4256,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                     } else {   // NDS not installed
                         int c = actionMenu(target, name, humanSize(entry.sizeBytes), {
-                            {"Install", "Build the forwarder with auto art (the DS icon is the default)."},
+                            {"Install", "Install the game (the DS icon is the default art)."},
                             {"Install + choose art", "Pick the HOME art first."}});
                         if (c < 0) break;
                         pickArt = (c == 1);
@@ -4370,14 +4393,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                           " DLC title(s). Frees " + humanSize(dlcB) + "."});
                             ma.push_back(A_EXTRAS); mx.push_back({dlcT, dlcB});
                         }
-                        int c = actionMenu(target, "Batch", bsub, mo);
+                        int c = actionMenu(target, "Selected", bsub, mo);
                         if (c >= 0) {
                             act = (decltype(act))ma[c];
                             extrasSel = mx[c].first;
                             extrasSelBytes = mx[c].second;
                         }
                     } else if (notInstalled == M) {
-                        int c = actionMenu(target, "Batch", bsub, {
+                        int c = actionMenu(target, "Selected", bsub, {
                             {"Install selected", "Art first, then every game installs unattended."},
                             {"Delete ROMs", "Remove the selected ROM files from the SD card."}});
                         act = (c==0) ? A_INSTALL : (c==1) ? A_UNINSTALL : A_BACK;
@@ -4390,35 +4413,35 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::vector<int> ma = {A_INSTALL, A_UNINSTALL};
                         if (rebuildable > 0) {
                             mo.push_back({"Change art", slug == ROMM_SLUG_GBA
-                                ? "Art picker for each installed game, then each re-bakes in place."
-                                : "Banner picker for each installed forwarder, then each re-bakes."});
+                                ? "Art picker for each installed game, applied in place."
+                                : "Banner picker for each installed game, applied in place."});
                             ma.push_back(A_CHANGEART);
                             if (slug == ROMM_SLUG_GBA) {
-                                mo.push_back({"Screen filter", "Pick one preset and apply it to the installed games."});
+                                mo.push_back({"Filter", "Pick one preset and apply it to the installed games."});
                                 ma.push_back(A_SCREEN);
-                                mo.push_back({"Art + screen filter", "One preset for all, then the art picker per game - a single re-bake each."});
+                                mo.push_back({"Art + filter", "One filter for all, then art per game."});
                                 ma.push_back(A_ARTSCREEN);
                             }
                         }
-                        int c = actionMenu(target, "Batch",
+                        int c = actionMenu(target, "Selected",
                                            bsub + " - " + std::to_string(notInstalled) + " not installed", mo);
                         if (c >= 0) act = (decltype(act))ma[c];
                     } else if (rebuildable == 0) {
-                        int c = actionMenu(target, "Batch", bsub, {
+                        int c = actionMenu(target, "Selected", bsub, {
                             {"Uninstall selected", "Remove every selected game."}});
                         act = (c==0) ? A_UNINSTALL : A_BACK;
                     } else if (slug == ROMM_SLUG_GBA) {
-                        int c = actionMenu(target, "Batch", bsub, {
-                            {"Uninstall", "Remove every selected inject and its ROM file."},
-                            {"Change art", "Art picker per game, then each re-bakes in place."},
-                            {"Screen filter", "Pick one preset and apply it to all selected."},
-                            {"Art + screen filter", "One preset for all, then the art picker per game - a single re-bake each."}});
+                        int c = actionMenu(target, "Selected", bsub, {
+                            {"Uninstall", "Uninstall and delete the selected games."},
+                            {"Change art", "Art picker per game, applied in place."},
+                            {"Filter", "Pick one preset and apply it to all selected."},
+                            {"Art + filter", "One filter for all, then art per game."}});
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : (c==2) ? A_SCREEN
                             : (c==3) ? A_ARTSCREEN : A_BACK;
                     } else {
-                        int c = actionMenu(target, "Batch", bsub, {
-                            {"Uninstall selected", "Remove every selected forwarder and ROM."},
-                            {"Change art selected", "Banner picker per game, then each re-bakes."}});
+                        int c = actionMenu(target, "Selected", bsub, {
+                            {"Uninstall selected", "Uninstall and delete the selected games."},
+                            {"Change art selected", "Banner picker per game, applied in place."}});
                         act = (c==0) ? A_UNINSTALL : (c==1) ? A_CHANGEART : A_BACK;
                     }
                     if (act == A_BACK) break;
@@ -4455,14 +4478,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         for (int i = 0; i < M; i++) {
                             MenuSelection* it = items[i];
                             if (!it->installed) continue;
-                            showLoading(target, {"Screen filter "+std::to_string(i+1)+"/"+std::to_string(M), it->title});
+                            showLoading(target, {"Filter "+std::to_string(i+1)+"/"+std::to_string(M), it->title});
                             std::string base = it->path.filename().generic_string();
                             if (applyGbaScreenItem(target, config, base, it->title, it->coverPath,
                                                    it->path.generic_string(), false, fc) == 1) okCount++;
                             else failed.push_back(it->title);
                         }
                         std::vector<std::string> msg;
-                        msg.push_back("Screen filter applied to "+std::to_string(okCount)+" of "+std::to_string(M));
+                        msg.push_back("Filter applied to "+std::to_string(okCount)+" of "+std::to_string(M));
                         if (!failed.empty()) {
                             msg.push_back("Failed:");
                             int shown = 0;
