@@ -12,6 +12,7 @@ class Config {
     bool forceInstall;
     bool artNotify=true;     // notify at install when art is missing (off = silent RomM-cover fallback)
     bool manageIcons=true;   // Manage lists: true = titles' own HOME icons, false = RomM covers
+    bool deleteAfterInstall=true;  // Browse SD: delete the .cia source after a 3DS install (it's a title-DB duplicate). .nds/.gba are kept — forwarders/injects re-read them.
     int gbaScreen=3;         // GBA_SCREEN_*: default GBA_SCREEN_BRIGHT (pops like 3DS games)
     std::vector<std::string> templates;
     unsigned int currentTemplate;

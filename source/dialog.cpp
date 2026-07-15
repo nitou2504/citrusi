@@ -56,14 +56,33 @@ void Dialog::draw() {
     C2D_TargetClear(this->target, BGColor); // avoid stale double-buffer bleed
     C2D_SceneBegin(this->target);
     drawPanel(this->x,this->y,0,this->width, this->height,MENU_BORDER_HEIGHT,BGColor,BORDER_COLOR);
-    float drawx = this->x+MENU_BORDER_HEIGHT;
-    float drawxOffset = (this->width/this->options.size());
-    float drawyOffset = (this->height*2/3);
-    float drawy = this->y+MENU_BORDER_HEIGHT+drawyOffset+(this->height/6);
-    for (size_t i=0;i<this->message.size();i++)
-        drawText(drawx+(this->width/2),this->y+(this->height*2/12)+((1+textheight)*i),0,0.67,0,FOREGROUND_COLOR,this->message[i].c_str(),C2D_AlignCenter);
-    for (size_t i=0;i<this->options.size();i++) {
-        drawText(drawx+(drawxOffset*(i+0.5)),drawy,0,0.67,(this->selected==i)?HIGHLIGHT_BGCOLOR:BGColor,(this->selected==i)?HIGHLIGHT_FOREGROUND:FOREGROUND_COLOR, this->options[i].c_str(),C2D_AlignCenter);
+    float cx = this->x + this->width/2;
+    // options stack VERTICALLY, bottom-anchored, accent highlight — same look
+    // as the actionMenu vertical picker (horizontal button rows read as cramped)
+    size_t n = this->options.size();
+    float pitch = 26.0f, rowH = 22.0f;
+    float oy = this->y + this->height - MENU_BORDER_HEIGHT - 8 - (float)n*pitch;
+    // message band: top padding down to just above the options. Clamp the
+    // number of lines so a tall wrapped message can never paint under the
+    // accent bar ("text behind a color bar"). Shrink line pitch when crowded.
+    float lineH  = 1.0f + textheight;
+    float msgTop = this->y + this->height*2.0f/12.0f;
+    float msgBot = oy - 6.0f;                       // 6px gap above the first option
+    float band   = msgBot - msgTop;
+    size_t M = this->message.size();
+    if (M > 0 && lineH * (float)M > band)           // squeeze to fit the band
+        lineH = band / (float)M;
+    size_t maxMsg = (band > 0) ? (size_t)(band / lineH) : 1;
+    if (maxMsg < 1) maxMsg = 1;
+    for (size_t i=0;i<M && i<maxMsg;i++)
+        drawText(cx, msgTop + lineH*(float)i, 0, 0.67, 0, FOREGROUND_COLOR,
+                 this->message[i].c_str(), C2D_AlignCenter);
+    for (size_t i=0;i<n;i++) {
+        float ry = oy + (float)i*pitch;
+        bool hot = (this->selected==(int)i);
+        if (hot) C2D_DrawRectSolid(this->x+12, ry, 0.4f, this->width-24, rowH, HIGHLIGHT_BGCOLOR);
+        drawText(cx, ry+rowH/2 - 6, 0, 0.6f, 0,
+                 hot?HIGHLIGHT_FOREGROUND:FOREGROUND_COLOR, this->options[i].c_str(), C2D_AlignCenter);
     }
     C3D_FrameEnd(0);
 }
@@ -85,14 +104,15 @@ int Dialog::handle() {
             // check tap position
         }
         
-        if (kDown & KEY_LEFT) {
+        // vertical list: UP/DOWN primary, LEFT/RIGHT kept as aliases
+        if (kDown & (KEY_UP|KEY_LEFT)) {
             if (this->selected > 0) {
                 this->selected--;
             }
-            else if(this->options.size() > 0) { 
+            else if(this->options.size() > 0) {
                 this->selected=this->options.size()-1;
             }
-        }else if(kDown & KEY_RIGHT) {
+        }else if(kDown & (KEY_DOWN|KEY_RIGHT)) {
             this->selected++;
             if (this->selected >= this->options.size()) this->selected=0;
         }else if((kDown & KEY_A) || (kDown & KEY_START)) {

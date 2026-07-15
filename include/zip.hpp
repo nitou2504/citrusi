@@ -14,5 +14,10 @@ bool extractFirstRom(const std::string& zipPath, const std::string& destDir,
                      std::function<bool(unsigned long long, unsigned long long)> progress = nullptr,
                      const std::string& forceName = "");
 
-// rom extensions inside zips per platform slug ("nds"/"gba")
+// rom extensions inside zips per platform slug ("3ds"/"nds"/"gba")
 const std::vector<std::string>& zipRomExtsFor(const std::string& slug);
+
+// peek: platform slug of the first installable rom inside a zip, from its inner
+// file extension ("3ds" for .cia, "nds" for .nds/.srl/.ids, "gba" for .gba/.agb).
+// Reads only the zip's central directory (no decompression). "" = nothing usable.
+std::string zipInnerSlug(const std::string& zipPath);

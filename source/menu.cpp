@@ -59,6 +59,7 @@ static Logger rlog("romm");
 #define SETTING_GBA_SCREEN 20   // outside the server-row range (10-13)
 #define SETTING_MANAGE_ART 21
 #define SETTING_ART_CACHE 22
+#define SETTING_DELETE_SRC 23
 
 // downloaded covers + generated previews/icons — safe to wipe, all of it
 // re-downloads or rebuilds on demand. art.json (the user's picks) is NOT here.
@@ -439,6 +440,38 @@ static std::set<std::string> gFwdNames;
 static bool gFwdReady = false;
 static void refreshNdsForwarders();
 static bool ndsForwarderInstalled(const std::string& fsName);
+
+// Browse SD: turn a local row's file into a playable rom path. A .zip is
+// extracted next to itself (deterministic name = zip stem + platform ext) and
+// zipConsumed is set so the caller deletes the archive after a good install.
+// A plain rom is returned as-is. Returns "" on failure (err set; "cancelled"
+// when the user pressed B during extraction).
+static std::string resolveLocalRom(C3D_RenderTarget* target, const std::string& path,
+                                   const std::string& slug, bool& zipConsumed,
+                                   std::string& err) {
+    zipConsumed = false;
+    std::filesystem::path pp(path);
+    std::string fname = pp.filename().generic_string();
+    if (!isZipName(fname)) return path;
+    std::string dir = pp.parent_path().generic_string() + "/";
+    std::string forceName = pp.stem().generic_string() +
+                            (slug == ROMM_SLUG_3DS ? ".cia" : slug == ROMM_SLUG_GBA ? ".gba" : ".nds");
+    std::string extracted; u64 lastZ = 0;
+    Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",fname},{},0).handle();
+    bool zok = extractFirstRom(path, dir, zipRomExtsFor(slug), extracted, err,
+        [&](unsigned long long done, unsigned long long total) -> bool {
+            hidScanInput();
+            if (hidKeysDown() & KEY_B) return false;
+            if (done - lastZ < (2<<20) && done != total) return true;
+            lastZ = done;
+            int pct = (total>0)?(int)(done*100/total):0;
+            Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",fname,std::to_string(pct)+"%"},{},0).handle();
+            return true;
+        }, forceName);
+    if (!zok) return "";
+    zipConsumed = true;
+    return extracted;
+}
 
 // one RomM item: download (if needed) -> extract -> install/inject/build.
 // Shared by the single RommInstall action and the batch installer. Art is
@@ -1327,11 +1360,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
         }
     }
-    // Install-from-SD lists the three rom dirs, which also hold everything
+    // Browse SD Card walks the SD folders, which also hold everything
     // downloaded from RomM — so installed files are hidden by default and X
     // reveals them (needed for Reinstall / Change art).
     static bool gLocalShowInstalled = false;
     static int  gLocalHidden = 0;        // installed files the filter left out
+    // Browse SD Card: a real folder browser. Starts at the roms folder and
+    // walks up to the SD root (and into any sibling like sdmc:/cias). The
+    // current folder persists across list rebuilds (X toggle / post-install).
+    static const std::string BROWSE_ROOT = "sdmc:/roms";
+    static std::string gBrowseDir;       // "" until the browser is first opened
+    static std::string browseParent(std::string p);   // defined with generateLocalMenu
 
     void Menu::drawMenu() {
             gTick++;
@@ -1344,11 +1383,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             std::string title = this->heading.empty() ? shorten(this->currentDirectory.generic_string(),30) : shorten(this->heading,34);
             if (this->type == MENU_ROMM && libRefreshRunning(this->crossSystem ? "" : this->platformSlug))
                 title += "  ~ updating...";
-            if (this->type == MENU_LOCAL) {
-                int nSel = 0;
-                for (auto e : this->entries) if (e->selected) nSel++;
-                if (nSel > 0) title += "  " + std::to_string(nSel) + " selected";
-            }
+            // the marked-count lives in the right-aligned header counter only
+            // (same as RomM / Manage) — never appended to the title, which then
+            // collided with that counter on the Browse screen
             // flat background + header. Everything in the bar sits on its
             // vertical midline: title left, position counter, then the
             // clock + battery cluster at the right edge (with real gaps).
@@ -1386,8 +1423,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 }
                 float scale = getFontScale(0.55);
                 std::string body = (*entry)->display;
-                // Install-from-SD: [x] prefix on batch-marked rows
-                if (this->type == MENU_LOCAL && (*entry)->selected) body = "[x] " + body;
+                // marked rows show ONLY the accent checkbox glyph (drawn below),
+                // like RomM/Manage — no redundant "[x] " text prefix
                 // RomM rows: fixed on-SD dot outside the scrolling text
                 if (railed && body.size() >= 2) {
                     if (body[0] == '*')
@@ -1912,6 +1949,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 int id = sel->rommId;
                 const char* d = nullptr;
                 if (id >= 0 && id <= 5) d = descs[id];
+                else if (id == SETTING_DELETE_SRC) d = "After a Browse-SD install: delete the .cia (it's a title-DB duplicate) or keep all files. NDS/GBA roms are always kept - their forwarder/inject needs them to launch and to change art.";
                 else if (id == SETTING_ART_NOTIFY) d = "What happens when icon/banner art isn't found at install. Press A to choose - each choice is explained there.";
                 else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/romm3ds/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
                 else if (id == SETTING_GBA_SCREEN) d = "Default color filter baked into new GBA installs. Press A to pick from the presets, each explained there. Per game: Manage -> game -> Screen filter.";
@@ -1924,17 +1962,19 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             return;
         }
         if (this->type == MENU_LOCAL) {
+            bool atRoot = browseParent(this->currentDirectory.generic_string()).empty();
+            const char* bTxt = atRoot ? "B Exit" : "B Up";
             if (this->entries.empty()) {
-                drawBottomFrame(gLocalHidden ? "X Show installed    B Back" : "B Back");
+                drawBottomFrame(gLocalHidden ? (std::string("X Show installed    ") + bTxt).c_str() : bTxt);
                 if (gLocalHidden && !gLocalShowInstalled) {
-                    drawText(160, 88, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Nothing new to install.", C2D_AlignCenter);
+                    drawText(160, 88, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Nothing new here.", C2D_AlignCenter);
                     drawWrapped(48, 112, 224, 14, 0.42f, COL_TEXT_DIM,
-                                "All " + std::to_string(gLocalHidden) + " files on the SD card are already "
+                                "All " + std::to_string(gLocalHidden) + " games in this folder are already "
                                 "installed. Press X to show them and reinstall or change art.", 4);
                 } else {
-                    drawText(160, 92, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "No games found.", C2D_AlignCenter);
+                    drawText(160, 92, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Empty folder.", C2D_AlignCenter);
                     drawWrapped(48, 116, 224, 14, 0.42f, COL_TEXT_DIM,
-                                "Drop .cia in sd:/cia, .nds in sd:/roms/nds, .gba in sd:/roms/gba.", 3);
+                                "Drop .cia / .nds / .gba (or a .zip) files here or in any folder, then browse to them.", 4);
                 }
                 return;
             }
@@ -1947,30 +1987,42 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             if (sel->action == LocalInstall) {
                 y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
                 y += 5;
-                const char* tag = (sel->platformSlug==ROMM_SLUG_3DS)?"3DS":
-                                  (sel->platformSlug==ROMM_SLUG_GBA)?"GBA":"NDS";
-                float cxp = drawChip(CTX, y, tag, COL_TEXT_DIM);
+                bool isZip = isZipName(sel->path.filename().generic_string());
+                std::string tag = std::string((sel->platformSlug==ROMM_SLUG_3DS)?"3DS":
+                                  (sel->platformSlug==ROMM_SLUG_GBA)?"GBA":"NDS") + (isZip?" zip":"");
+                float cxp = drawChip(CTX, y, tag.c_str(), COL_TEXT_DIM);
                 cxp = drawChip(cxp, y, humanSize(sel->sizeBytes), COL_TEXT_DIM);
                 if (sel->installed) cxp = drawChip(cxp, y, "INSTALLED", COL_ACCENT);
                 if (sel->selected)  drawChip(cxp, y, "SELECTED", COL_ACCENT);
                 y += 21;
                 y = cardDivider(y) + 5;
-                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
-                            sel->installed ? "Installed. A reinstalls. Y marks it for a batch."
-                                           : "Press A to install. Y marks it for a batch.", 3);
-            } else {
-                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->display, 2);
+                // 3DS = a plain title-DB install; no art/screen options there
+                bool is3 = (sel->platformSlug == ROMM_SLUG_3DS);
+                const char* desc =
+                    sel->installed
+                      ? (is3 ? "Installed. A reinstalls. Y marks it for a batch."
+                             : "Installed. A: reinstall, change art or screen filter. Y marks it for a batch.")
+                      : (is3 ? "A installs it into the title database. Y marks it for a batch."
+                             : "A: install, with art / screen-filter options. Y marks it for a batch.");
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, desc, 3);
+            } else {   // folder or ".." row
+                bool up = (sel->display.find("..") != std::string::npos);
+                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT,
+                                up ? "Parent folder" : sel->path.filename().generic_string(), 2);
                 y += 5;
                 y = cardDivider(y) + 5;
                 drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
-                            (sel->action==LocalInstallSelected)
-                                ? "Install every game you marked with Y. Art is resolved first, then each one installs unattended."
-                                : "Install every game listed that isn't installed yet.", 4);
+                            up ? "Press A (or B) to go up one folder."
+                               : "Folder. Press A to open it.", 2);
             }
-            std::string hint = (nSel > 0)
-                ? "A Install " + std::to_string(nSel) + "   Y Mark   R All/None   B Back"
-                : std::string("A Install   Y Mark   X ") +
-                  (gLocalShowInstalled ? "Hide done" : "Show all") + "   B Back";
+            std::string hint;
+            if (nSel > 0)
+                hint = "START Install " + std::to_string(nSel) + "   R All/None   " + bTxt;
+            else if (sel->action == OpenFolder)
+                hint = std::string("A Open   Y Mark   ") + bTxt;
+            else
+                hint = std::string("A Install   Y Mark   X ") +
+                       (gLocalShowInstalled ? "Hide done   " : "Show all   ") + bTxt;
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
                      hint.c_str(), C2D_AlignCenter);
             return;
@@ -2101,26 +2153,57 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         menu->init();
         return menu;
     }
-    // "Install from SD": one flat screen listing the local files the user
-    // dropped onto the SD card — decrypted .cia (sd:/cia), .nds (sd:/roms/nds)
-    // and .gba (sd:/roms/gba) — each row tagged with its system and marked
-    // "* " when already installed. No RomM needed; if a platform library is
-    // already cached, its title/cover is reused to drive the art pipeline.
+    // "Browse SD Card": a real folder browser, offline-first. Starts at the
+    // roms folder (sdmc:/roms) and walks up to the SD root and into any
+    // sibling folder — so a .cia the user keeps in sdmc:/cias, or roms parked
+    // anywhere, just work. Rows are subfolders (A enters, B goes up) plus the
+    // rom files in THIS folder, auto-typed by extension and marked "* " when
+    // installed. Per-folder: install one (A), art/screen pickers, Y multiselect,
+    // R all, "Install all here". No RomM needed; a cached library, if present,
+    // lends its title/cover to the art pipeline.
 
-    Menu* generateLocalMenu(Menu* prev);   // fwd: the toggle rebuilds the list
+    Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir);   // fwd: rebuilds keep the folder
+
+    // parent of a browse dir as a plain string. Floors at the SD root:
+    // "sdmc:/roms/nds" -> "sdmc:/roms", "sdmc:/roms" -> "sdmc:/", root -> "".
+    static std::string browseParent(std::string p) {
+        while (p.size() > 1 && p.back() == '/') p.pop_back();   // strip trailing slash
+        size_t slash = p.find_last_of('/');
+        if (slash == std::string::npos) return "";              // at/above "sdmc:" -> main menu
+        if (slash <= 5) return "sdmc:/";                        // "sdmc:/xxx" -> SD root
+        return p.substr(0, slash);
+    }
 
     Menu* Menu::toggleShowInstalled() {
         if (this->type != MENU_LOCAL) return this;
         gLocalShowInstalled = !gLocalShowInstalled;
-        return generateLocalMenu(this);
+        return generateLocalMenu(this, this->currentDirectory);
     }
 
-    Menu* generateLocalMenu(Menu* prev) {
+    Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir) {
         delete prev;
         CoverCachePause coverPause;   // the scan owns the SD while it runs
+        // resolve the folder to scan; empty -> the persisted dir, else the root
+        std::string dirStr = dir.generic_string();
+        if (dirStr.empty()) dirStr = gBrowseDir.empty() ? BROWSE_ROOT : gBrowseDir;
+        std::error_code ec;
+        if (!std::filesystem::is_directory(dirStr, ec)) {
+            // first run: make the roms folder so it's always there to land on
+            if (dirStr == BROWSE_ROOT) std::filesystem::create_directories(dirStr, ec);
+            if (!std::filesystem::is_directory(dirStr, ec)) dirStr = "sdmc:/";
+        }
+        gBrowseDir = dirStr;
         gLocalHidden = 0;
         installed3dsRefresh();    // AM installed set: GBA inject + .cia detection
         refreshNdsForwarders();   // NDS forwarder detection
+        // extension -> platform slug + tag. This is what makes the browser
+        // layout-agnostic: a file's system comes from its name, not its folder.
+        auto slugForExt = [](const std::string& ext, std::string& tag) -> std::string {
+            if (ext == ".cia") { tag = "CIA"; return ROMM_SLUG_3DS; }
+            if (ext == ".nds" || ext == ".srl" || ext == ".ids") { tag = "NDS"; return ROMM_SLUG_NDS; }
+            if (ext == ".gba" || ext == ".agb") { tag = "GBA"; return ROMM_SLUG_GBA; }
+            return "";
+        };
         // optional metadata reuse: filename -> cached library entry, per slug,
         // only when that library is already loaded (never forces a load)
         auto libLookup = [](const std::string& slug, const std::string& fname) -> const RommRom* {
@@ -2133,92 +2216,123 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             return nullptr;
         };
-        std::vector<MenuSelection*> entries;
-        std::error_code ec;
-        struct Src { std::string dir, slug, tag; std::vector<std::string> exts; };
-        std::vector<Src> srcs = {
-            {ROMM_CIA_DIR, ROMM_SLUG_3DS, "CIA", {".cia"}},
-            {ROMM_NDS_DIR, ROMM_SLUG_NDS, "NDS", {".nds",".srl",".ids"}},
-            {ROMM_GBA_DIR, ROMM_SLUG_GBA, "GBA", {".gba",".agb"}},
+        std::vector<MenuSelection*> folders;   // subfolders (A enters)
+        std::vector<MenuSelection*> files;     // installable roms in this folder
+        std::vector<std::filesystem::path> subdirs, romPaths;
+        for (auto& de : std::filesystem::directory_iterator(dirStr, ec)) {
+            std::string fn = de.path().filename().generic_string();
+            if (fn.empty() || fn[0] == '.') continue;
+            std::error_code de_ec;
+            if (de.is_directory(de_ec)) { subdirs.push_back(de.path()); continue; }
+            std::string tag;
+            std::string ext = toLowerCase(de.path().extension().generic_string());
+            if (slugForExt(ext, tag).empty() && ext != ".zip") continue;   // not a rom/zip we handle
+            romPaths.push_back(de.path());
+        }
+        std::sort(subdirs.begin(), subdirs.end());
+        std::sort(romPaths.begin(), romPaths.end());
+        for (auto& p : subdirs) {
+            MenuSelection* e = new MenuSelection();
+            e->action = OpenFolder;
+            e->path = p;
+            e->display = "  " + utf8FoldLatin(p.filename().generic_string()) + "/";
+            folders.push_back(e);
+        }
+        // predicted extracted rom name for a zip (deterministic: stem + the
+        // platform's rom extension) — used for the marker and, at install, as
+        // the forced extract name so markers/tids/covers all agree.
+        auto platformExt = [](const std::string& slug) -> std::string {
+            if (slug == ROMM_SLUG_3DS) return ".cia";
+            if (slug == ROMM_SLUG_GBA) return ".gba";
+            return ".nds";
         };
-        for (auto& s : srcs) {
-            std::vector<std::filesystem::path> paths;
-            for (auto& de : std::filesystem::directory_iterator(s.dir, ec)) {
-                if (!de.is_regular_file()) continue;
-                std::string fn = de.path().filename().generic_string();
-                if (fn.empty() || fn[0]=='.') continue;
-                std::string ext = toLowerCase(de.path().extension().generic_string());
-                if (std::find(s.exts.begin(), s.exts.end(), ext) == s.exts.end()) continue;
-                paths.push_back(de.path());
+        for (auto& p : romPaths) {
+            std::string fname = p.filename().generic_string();
+            std::string stem  = p.stem().generic_string();
+            std::string tag, ext = toLowerCase(p.extension().generic_string());
+            bool isZip = (ext == ".zip");
+            // zip: type comes from the rom inside, not the archive extension
+            std::string slug = isZip ? zipInnerSlug(p.generic_string()) : slugForExt(ext, tag);
+            if (slug.empty()) continue;   // empty/foreign zip
+            if (isZip) tag = (slug==ROMM_SLUG_3DS?"3DS":slug==ROMM_SLUG_GBA?"GBA":"NDS") + std::string(" zip");
+            // the file the install will actually work on (zip -> predicted rom)
+            std::string romName = isZip ? (stem + platformExt(slug)) : fname;
+            MenuSelection* e = new MenuSelection();
+            e->action = LocalInstall;
+            e->platformSlug = slug;
+            e->path = p;
+            e->fsName = romName;   // zip: the name it extracts to (not the .zip)
+            e->sizeBytes = std::filesystem::file_size(p, ec);
+            const RommRom* lib = libLookup(slug, romName);
+            e->title = lib ? lib->name : stem;
+            if (lib) { e->rommId = lib->id; e->coverPath = lib->coverPath;
+                       e->coverSmallPath = lib->coverSmallPath; e->year = lib->year; }
+            bool inst;
+            if (slug == ROMM_SLUG_3DS) {
+                // a zip's inner cia id is unknown without extracting -> unmarked
+                e->titleId = isZip ? 0 : ciaFileTitleId(p.generic_string());
+                inst = e->titleId && installed3dsHasTitle(e->titleId);
+            } else if (slug == ROMM_SLUG_GBA) {
+                e->tid = gbaTidForRom(romName);
+                inst = installed3dsHasTitle(e->tid);
+            } else {
+                inst = ndsForwarderInstalled(romName);
             }
-            std::sort(paths.begin(), paths.end());
-            for (auto& p : paths) {
-                std::string fname = p.filename().generic_string();
-                std::string stem  = p.stem().generic_string();
-                MenuSelection* e = new MenuSelection();
-                e->action = LocalInstall;
-                e->platformSlug = s.slug;
-                e->path = p;
-                e->fsName = fname;
-                e->sizeBytes = std::filesystem::file_size(p, ec);
-                const RommRom* lib = libLookup(s.slug, fname);
-                e->title = lib ? lib->name : stem;
-                if (lib) { e->rommId = lib->id; e->coverPath = lib->coverPath;
-                           e->coverSmallPath = lib->coverSmallPath; e->year = lib->year; }
-                bool inst;
-                if (s.slug == ROMM_SLUG_3DS) {
-                    e->titleId = ciaFileTitleId(p.generic_string());
-                    inst = installed3dsHasTitle(e->titleId);
-                } else if (s.slug == ROMM_SLUG_GBA) {
-                    e->tid = gbaTidForRom(fname);
-                    inst = installed3dsHasTitle(e->tid);
-                } else {
-                    inst = ndsForwarderInstalled(fname);
-                }
-                e->installed = inst;
-                if (inst && !gLocalShowInstalled) { gLocalHidden++; delete e; continue; }
-                e->display = (inst ? "* " : "  ") + std::string("[") + s.tag + "] " + utf8FoldLatin(stem);
-                entries.push_back(e);
-            }
+            e->installed = inst;
+            if (inst && !gLocalShowInstalled) { gLocalHidden++; delete e; continue; }
+            e->display = (inst ? "* " : "  ") + std::string("[") + tag + "] " + utf8FoldLatin(stem);
+            files.push_back(e);
         }
-        if (!entries.empty()) {
-            // batch action rows pinned to the top (kept out of the alnum sort)
-            MenuSelection* all = new MenuSelection();
-            all->display = "Install all"; all->action = LocalInstallAll;
-            entries.insert(entries.begin(), all);
-            MenuSelection* sel = new MenuSelection();
-            sel->display = "Install selected"; sel->action = LocalInstallSelected;
-            entries.insert(entries.begin(), sel);
+        // assemble: [.. up] -> folders -> files. Batch install is by Y-mark +
+        // START (or A on a marked row) — same as the RomM / Manage screens — so
+        // no pinned action rows here; R marks all, then START installs them all.
+        std::vector<MenuSelection*> entries;
+        std::string parent = browseParent(dirStr);
+        if (!parent.empty()) {   // not the SD root: offer a ".." row (B also goes up)
+            MenuSelection* up = new MenuSelection();
+            up->action = OpenFolder;
+            up->path = std::filesystem::path(parent);
+            up->display = "  .. (up)";
+            entries.push_back(up);
         }
+        entries.insert(entries.end(), folders.begin(), folders.end());
+        entries.insert(entries.end(), files.begin(), files.end());
         Menu* menu = new Menu(entries);
-        menu->currentDirectory = std::filesystem::path("/");
+        menu->currentDirectory = std::filesystem::path(dirStr);
         menu->type = MENU_LOCAL;
         FS_ArchiveResource sd = {};
         std::string free = "";
         if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
             free = " - " + humanSize((u64)sd.freeClusters * sd.clusterSize) + " free";
-        menu->heading = std::string(gLocalShowInstalled ? "Install from SD (all)" : "Install from SD")
+        // friendly heading: path relative to the SD root ("roms/nds"), or "SD root"
+        std::string rel = dirStr;
+        if (rel.rfind("sdmc:/", 0) == 0) rel = rel.substr(6);
+        while (!rel.empty() && rel.back() == '/') rel.pop_back();
+        if (rel.empty()) rel = "SD root";
+        // keep it short (like "Manage NDS - X free"): path + free, plus a terse
+        // hidden-count. The bottom panel / X hint explain the rest.
+        menu->heading = rel + free
                       + (gLocalHidden && !gLocalShowInstalled
-                         ? "  " + std::to_string(gLocalHidden) + " installed hidden" : "")
-                      + free;
+                         ? "  (" + std::to_string(gLocalHidden) + " hidden)" : "");
         menu->init();
         return menu;
     }
     Menu* generateMainMenu(Menu* prev) {
         delete prev;
         std::vector<MenuSelection*> entries;
-        MenuSelection* romm = new MenuSelection();
-        romm->display="RomM Library";
-        romm->action=OpenRommLibrary;
-        entries.push_back(romm);
+        // offline-first: the SD browser leads, RomM is one optional source
+        MenuSelection* sd = new MenuSelection();
+        sd->display="Browse SD Card";
+        sd->action=OpenSDBrowser;
+        entries.push_back(sd);
         MenuSelection* manage = new MenuSelection();
         manage->display="Manage Installed";
         manage->action=OpenManage;
         entries.push_back(manage);
-        MenuSelection* sd = new MenuSelection();
-        sd->display="Install from SD";
-        sd->action=OpenSDBrowser;
-        entries.push_back(sd);
+        MenuSelection* romm = new MenuSelection();
+        romm->display="RomM Library";
+        romm->action=OpenRommLibrary;
+        entries.push_back(romm);
         MenuSelection* cfg = new MenuSelection();
         cfg->display="Settings";
         cfg->action=OpenSettings;
@@ -2269,6 +2383,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         };
         add(SETTING_CUSTOM_TITLE, std::string("Ask for custom title: ") + (config->customTitle ? "on" : "off"));
         add(SETTING_FORCE,        std::string("Force install: ") + (config->forceInstall ? "on" : "off"));
+        add(SETTING_DELETE_SRC,   std::string("After install: ") + (config->deleteAfterInstall ? "delete .cia source" : "keep source files"));
         add(SETTING_ART_NOTIFY,   std::string("Art: ") + (config->artNotify ? "notify when missing" : "silent fallback"));
         add(SETTING_SGDB_KEY,     std::string("SteamGridDB key: ") + (ensureSgdb() ? "found" : "missing"));
         static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
@@ -2792,7 +2907,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
         if (sel->action != RommInstall && sel->action != ManageRom &&
-            sel->action != ManageZip) return;
+            sel->action != ManageZip && sel->action != LocalInstall) return;
         if (sel->action == RommInstall && sel->platformSlug == ROMM_SLUG_3DS && !sel->installable) return;
         sel->selected = !sel->selected;
     }
@@ -2894,8 +3009,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             case MENU_SERVER:
                 if (gConfigPtr) return generateSettingsMenu(this, gConfigPtr);
                 return generateMainMenu(this);
-            case MENU_LOCAL:
-                return generateMainMenu(this);
+            case MENU_LOCAL: {
+                // Browse SD Card: B walks up one folder; at the SD root it
+                // leaves to the main menu.
+                std::string parent = browseParent(this->currentDirectory.generic_string());
+                if (parent.empty()) return generateMainMenu(this);
+                return generateLocalMenu(this, std::filesystem::path(parent));
+            }
             case MENU_SD:
             default:
                 if (this->currentDirectory.generic_string()=="/" || !this->currentDirectory.has_parent_path())
@@ -3047,10 +3167,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     break;
                 case OpenFolder:
                     while (this->queue.size() > 0) this->queue.pop();
+                    // Browse SD Card navigates within itself (folders + ".." up);
+                    // the legacy NDS-only browser keeps its own generateMenu path
+                    if (this->type == MENU_LOCAL) return generateLocalMenu(this, entry.path);
                     return generateMenu(entry.path,this);
                 case OpenSDBrowser:
                     while (this->queue.size() > 0) this->queue.pop();
-                    return generateLocalMenu(this);
+                    return generateLocalMenu(this, std::filesystem::path(BROWSE_ROOT));
                 case OpenRommLibrary:
                     while (this->queue.size() > 0) this->queue.pop();
                     return generateSystemMenu(this);
@@ -3121,6 +3244,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     switch (entry.rommId) {
                         case SETTING_CUSTOM_TITLE: config->customTitle = !config->customTitle; break;
                         case SETTING_FORCE:        config->forceInstall = !config->forceInstall; break;
+                        case SETTING_DELETE_SRC: {
+                            int c = actionMenu(target, "After a Browse-SD install", "", {
+                                {"Delete .cia source", "Reclaim the space: a .cia becomes a duplicate once it's in the title database. NDS/GBA roms are always kept - their forwarder/inject re-reads them to launch and to change art."},
+                                {"Keep source files", "Leave every file on the SD card after installing."}},
+                                config->deleteAfterInstall ? 0 : 1);
+                            if (c >= 0) config->deleteAfterInstall = (c == 0);
+                            break;
+                        }
                         case SETTING_ART_NOTIFY: {
                             int c = actionMenu(target, "Missing art at install", "", {
                                 {"Notify", "Ask before falling back to the RomM cover, with the option to search by name."},
@@ -4051,8 +4182,54 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         else     Dialog(target,0,0,320,240,{"Nothing selected.","Press Y to mark games first."},{"OK"}).handle();
                         break;
                     }
-                    if (Dialog(target,0,0,320,240,{all?"Install all games?":"Install selected games?",std::to_string(items.size())+" game(s)"},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0)
-                        break;
+                    // coherent with the RomM / Manage batch: a vertical scope
+                    // menu when the selection includes already-installed games;
+                    // an all-new selection installs straight away (like RomM).
+                    {
+                        std::vector<MenuSelection*> newItems, instItems;
+                        for (auto it : items) (it->installed ? instItems : newItems).push_back(it);
+                        if (!instItems.empty()) {
+                            std::string ssub = std::to_string((int)items.size()) + " selected - " +
+                                               std::to_string((int)instItems.size()) + " installed";
+                            std::vector<MenuOpt> so; std::vector<int> sa;
+                            if (!newItems.empty()) {
+                                so.push_back({"Install new (" + std::to_string((int)newItems.size()) + ")",
+                                              "Only the games not installed yet; the " +
+                                              std::to_string((int)instItems.size()) + " installed are skipped."});
+                                sa.push_back(0);
+                            }
+                            so.push_back({newItems.empty()
+                                              ? "Reinstall (" + std::to_string((int)instItems.size()) + ")"
+                                              : "Install + reinstall all (" + std::to_string((int)items.size()) + ")",
+                                          "Everything selected installs; the installed ones are reinstalled over."});
+                            sa.push_back(1);
+                            int sc = actionMenu(target, "Batch", ssub, so);
+                            if (sc < 0) break;
+                            if (sa[sc] == 0) items = newItems;
+                        }
+                    }
+                    // GBA batch art/screen — same choice as the single-item and
+                    // RomM-batch flows (was missing here: GBA always got auto art).
+                    bool pickArtAll = false;
+                    int  batchScreen = -1;
+                    {
+                        int anyGba = 0;
+                        for (auto it : items) if (it->platformSlug == ROMM_SLUG_GBA) anyGba++;
+                        if (anyGba) {
+                            int bc = actionMenu(target, "Batch install",
+                                std::to_string(anyGba) + " GBA game(s)", {
+                                {"Install", "Auto art and the default screen filter for each."},
+                                {"Install + choose art", "Pick the HOME icon and banner for each game."},
+                                {"Install + screen filter", "One color preset baked into every game."},
+                                {"Install + art + filter", "Pick the preset, then art for each game."}});
+                            if (bc < 0) break;
+                            pickArtAll = (bc == 1 || bc == 3);
+                            if (bc == 2 || bc == 3) {
+                                batchScreen = pickGbaScreenPreset(target, config, "Batch screen filter", -1);
+                                if (batchScreen < 0) break;
+                            }
+                        }
+                    }
                     bool needCtr = false;
                     for (auto it : items) if (it->platformSlug != ROMM_SLUG_3DS) needCtr = true;
                     if (needCtr && !ensureCtrBuilder(target)) break;
@@ -4071,7 +4248,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         gbaN++;
                         showLoading(target, {"Art "+std::to_string(gbaN)+"/"+std::to_string(gbaTotal), it->title});
                         resolveGbaArtInteractive(target, config, it->fsName, it->title,
-                                                 it->coverPath, aes[i], pcs[i], false);
+                                                 it->coverPath, aes[i], pcs[i], pickArtAll);
+                        if (batchScreen >= 0) aes[i].screen = batchScreen;   // bake the chosen preset
                     }
 
                     // PHASE 2: unattended install; continue past failures, B cancels the rest
@@ -4085,6 +4263,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string prog = "Installing "+std::to_string(i+1)+"/"+std::to_string(items.size());
                         showLoading(target, {prog, it->title});
                         std::string romPath = it->path.generic_string();
+                        // .zip: extract the rom inside (next to the archive) first
+                        bool zipItem = isZipName(it->path.filename().generic_string());
+                        if (zipItem) {
+                            bool consumed; std::string zerr;
+                            std::string extracted = resolveLocalRom(target, romPath, it->platformSlug, consumed, zerr);
+                            if (extracted.empty()) {
+                                if (zerr == "cancelled") { cancelled = true; break; }
+                                fails.push_back(it->title);
+                                continue;
+                            }
+                            romPath = extracted;
+                        }
                         bool ok = false;
                         if (it->platformSlug == ROMM_SLUG_3DS) {
                             std::string ierr; u64 lastI = 0;
@@ -4099,7 +4289,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     return true;
                                 });
                             if (ok) { u64 tid = it->titleId ? it->titleId : ciaFileTitleId(romPath);
-                                      if (tid && it->rommId > 0) installed3dsRecord(it->rommId, tid); }
+                                      if (tid && it->rommId > 0) installed3dsRecord(it->rommId, tid);
+                                      // delete-after-install: reclaim the duplicate .cia
+                                      // (romPath = the extracted/plain cia, not the zip)
+                                      if (config->deleteAfterInstall) {
+                                          std::error_code ec; std::filesystem::remove(std::filesystem::path(romPath), ec); } }
                             else if (ierr == "cancelled") cancelled = true;
                         } else if (it->platformSlug == ROMM_SLUG_GBA) {
                             bool wasCancel = false;
@@ -4110,6 +4304,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             ok = buildForwarderFor(target, config, romPath, it->title, it->coverPath, false);
                             if (ok) { gFwdReady = false; invalidateManagedRoms(); }
                         }
+                        // a zip's job was to carry the rom; drop the archive once installed
+                        if (ok && zipItem) { std::error_code ec; std::filesystem::remove(it->path, ec); }
                         if (ok) okCount++;
                         else if (!cancelled) fails.push_back(it->title);
                         if (cancelled) break;
@@ -4138,23 +4334,77 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     std::string romPath = entry.path.generic_string();
                     std::string fname = entry.path.filename().generic_string();
                     std::string name = entry.title;
+                    bool isZip = isZipName(fname);
+                    std::string romBase = isZip ? entry.fsName : fname;   // predicted rom name for a zip
                     bool pickArt = false;
+                    int  screenPreset = -1;   // GBA: preset baked at install
+                    // Per-item choices use the same vertical actionMenu as the
+                    // RomM / Manage screens. GBA/NDS in-place art & screen edits
+                    // act and return; the rest fall through to (re)install.
                     if (entry.installed) {
                         if (is3ds) {
-                            if (Dialog(target,0,0,320,240,{name,"Installed"},{"Reinstall","Back"}).handle()!=0) break;
-                        } else {
-                            int c = Dialog(target,0,0,320,240,{name,"Installed"},{"Reinstall","Change art","Back"}).handle();
-                            if (c==2 || c==-1) break;
-                            pickArt = (c==1);
+                            int c = actionMenu(target, name, "Installed",
+                                {{"Reinstall", "Stream the .cia into the title database again."}});
+                            if (c < 0) break;
+                        } else if (isGba && !isZip) {
+                            int c = actionMenu(target, name, "Installed", {
+                                {"Change art", "Pick a new HOME icon and/or banner; same slot, save kept."},
+                                {"Screen filter", "Re-bake with a different color preset; art and save kept."},
+                                {"Art + screen filter", "Pick the preset, then the art - one re-bake for both."},
+                                {"Reinstall", "Reinstall with the art and filter it already uses."}});
+                            if (c < 0) break;
+                            if (c == 0) { changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true); break; }
+                            if (c == 1 || c == 2) {
+                                int fc = pickGbaScreenPreset(target, config, name, artStoreGet(romBase).screen);
+                                if (fc < 0) break;
+                                if (c == 1) applyGbaScreenItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
+                                else        changeArtGbaItem(target, config, romBase, name, entry.coverPath, romPath, true, fc);
+                                break;
+                            }
+                            // c == 3: reinstall, art + filter reused -> fall through
+                        } else {   // installed NDS (or an installed zip row: reinstall)
+                            int c = actionMenu(target, name, "Installed", {
+                                {"Reinstall", "Rebuild and install the forwarder again."},
+                                {"Change art", "Pick a new HOME banner/icon, then reinstall."}});
+                            if (c < 0) break;
+                            pickArt = (c == 1);
                         }
+                    } else if (is3ds) {
+                        int c = actionMenu(target, name, humanSize(entry.sizeBytes),
+                            {{"Install", "Stream the .cia into the title database."}});
+                        if (c < 0) break;
                     } else if (isGba) {
-                        int c = Dialog(target,0,0,320,240,{"Install this game?",name,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),"Choose art",gLang.getString("menu_no")}).handle();
-                        if (c==2 || c==-1) break;
-                        pickArt = (c==1);
-                    } else {
-                        if (Dialog(target,0,0,320,240,{"Install this game?",name,humanSize(entry.sizeBytes)},{gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                        int c = actionMenu(target, name, humanSize(entry.sizeBytes), {
+                            {"Install", "Auto art and the default screen filter."},
+                            {"Install + choose art", "Pick the HOME icon and banner before installing."},
+                            {"Install + screen filter", "Pick the color preset baked into this install."},
+                            {"Install + art + filter", "Customize both: art picker, then the preset."}});
+                        if (c < 0) break;
+                        pickArt = (c == 1 || c == 3);
+                        if (c == 2 || c == 3) {
+                            screenPreset = pickGbaScreenPreset(target, config, name, artStoreGet(romBase).screen);
+                            if (screenPreset < 0) break;
+                        }
+                    } else {   // NDS not installed
+                        int c = actionMenu(target, name, humanSize(entry.sizeBytes), {
+                            {"Install", "Build the forwarder with auto art (the DS icon is the default)."},
+                            {"Install + choose art", "Pick the HOME art first."}});
+                        if (c < 0) break;
+                        pickArt = (c == 1);
                     }
                     if (!is3ds && !ensureCtrBuilder(target)) break;
+                    // .zip: extract the rom inside (next to the archive) first,
+                    // then install it like any other local file
+                    if (isZip) {
+                        bool consumed; std::string zerr;
+                        std::string extracted = resolveLocalRom(target, romPath, slug, consumed, zerr);
+                        if (extracted.empty()) {
+                            Dialog(target,0,0,320,240,{(zerr=="cancelled")?"Extract cancelled":"Extract failed",zerr},{"OK"}).handle();
+                            break;
+                        }
+                        romPath = extracted;
+                        fname = std::filesystem::path(extracted).filename().generic_string();
+                    }
                     bool installed = false;
                     if (is3ds) {
                         std::string ierr; u64 lastI = 0;
@@ -4177,13 +4427,31 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     } else if (isGba) {
                         ArtEntry ae; ArtPieces pieces;
                         resolveGbaArtInteractive(target, config, fname, name, entry.coverPath, ae, pieces, pickArt);
+                        if (screenPreset >= 0) ae.screen = screenPreset;   // bake the chosen preset
                         installed = installGbaInject(target, config, romPath, name, fname, ae, pieces);
                     } else {
                         installed = buildForwarderFor(target, config, romPath, name, entry.coverPath, pickArt);
                         if (installed) { gFwdReady = false; invalidateManagedRoms(); }
                     }
                     if (installed) {
-                        Dialog(target,0,0,320,240,{"Installed!",name},{"OK"}).handle();
+                        // clean up sources. zip: always drop the archive (the
+                        // extracted rom is the keeper). 3DS .cia: drop it too
+                        // (title-DB duplicate) when the setting is on. NDS/GBA
+                        // roms are kept — their forwarder/inject re-reads them
+                        // to launch and to change art.
+                        std::error_code ec;
+                        bool zipGone = false, ciaGone = false;
+                        if (isZip) zipGone = std::filesystem::remove(entry.path, ec);
+                        if (is3ds && config->deleteAfterInstall)
+                            ciaGone = std::filesystem::remove(std::filesystem::path(romPath), ec);
+                        std::string note = ciaGone ? "Source .cia removed."
+                                         : zipGone ? "Archive removed." : "";
+                        Dialog(target,0,0,320,240,{"Installed!",name,note},{"OK"}).handle();
+                        if (isZip || ciaGone) {
+                            // files changed on disk: rescan this folder
+                            while (this->queue.size() > 0) this->queue.pop();
+                            return generateLocalMenu(this, this->currentDirectory);
+                        }
                         for (auto e : this->entries)
                             if (e->action==LocalInstall && e->path==entry.path) {
                                 e->installed = true;

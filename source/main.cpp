@@ -198,8 +198,10 @@ int main()
 			}
 
 			else if(kDown & KEY_Y) {
-				if (menu->type == MENU_ROMM || menu->type == MENU_MANAGE) menu->toggleSelect();
-				else menu->toggleMark();   // Install-from-SD marks; other screens scroll
+				// Browse/RomM/Manage all use Y to mark a row for a batch
+				if (menu->type == MENU_ROMM || menu->type == MENU_MANAGE || menu->type == MENU_LOCAL)
+					menu->toggleSelect();
+				else menu->toggleMark();   // other screens: Y scrolls the description
 			}
 
 			else if(kDown & KEY_SELECT) menu = menu->searchPrompt();

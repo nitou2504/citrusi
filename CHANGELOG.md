@@ -4,6 +4,64 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
 
 ## [Unreleased]
 
+### Changed (2026-07-15) — offline-first refocus
+- **"Browse SD Card" is now a real folder browser, and leads the main menu.**
+  The old "Install from SD" was a flat merge of three fixed dirs (`sdmc:/cia`,
+  `sdmc:/roms/nds`, `sdmc:/roms/gba`). It's now a navigable browser rooted at
+  `sdmc:/roms`: `A` enters a subfolder, `B` (or the `.. (up)` row) walks up —
+  to the SD root and into any sibling folder — so ROMs kept anywhere (e.g.
+  `.cia` in `sdmc:/cias`) work. Files are typed by extension, not by folder.
+  Each folder keeps the full toolkit: install one, art / GBA screen-filter
+  pickers, `Y` multi-select + `R` all/none, `Install selected`, `Install all
+  here`. Main-menu order is now Browse SD Card → Manage → RomM Library →
+  Settings (RomM demoted to one optional source).
+- **Browse now matches the RomM / Manage interaction model** (was its own
+  thing): batch is `Y` mark + `START` (or `A` on a marked row), `R` = all/none
+  — the pinned "Install selected / Install all here" rows are gone. Per-item
+  `A` opens the same **vertical `actionMenu`** as Manage (GBA: install / +art /
+  +screen / +both, and in-place Change art / Screen filter when installed;
+  NDS: install / +art, or reinstall / change-art; 3DS: install / reinstall) —
+  not the old horizontal yes/no dialogs. `B` is context-aware: **Up** in a
+  subfolder, **Exit** to the main menu at the SD root.
+- **RomM is no longer the center of gravity** — it's one download source that
+  feeds the same on-console install flow as local files. Nothing about the
+  RomM flow itself changed.
+
+### Changed (2026-07-15) — menu coherence pass
+- **All confirm dialogs are now vertical** (were horizontal button rows).
+  `Dialog` stacks its options bottom-anchored with the accent highlight and
+  `UP`/`DOWN` nav — the same look as the `actionMenu` picker — so every
+  yes/no and 2-3 way confirm across all screens matches the vertical style.
+- **Header no longer double-draws the marked count**: the Browse screen was
+  appending "N selected" to the title *and* drawing the right-aligned counter,
+  which overlapped ("22selected" over "22 selected"). The count now lives only
+  in the right-aligned header counter, same as RomM/Manage. Browse heading also
+  shortened ("roms/nds - X free  (N hidden)") to stop it crowding the counter.
+- **Browse multiselect matches the RomM/Manage batch**: instead of a horizontal
+  "Install selected? yes/no", a mixed selection opens the vertical "Batch"
+  scope menu (Install new (K) / Install + reinstall all (N)); an all-new
+  selection installs straight away.
+- **3DS rows don't mention art/screen options** (a `.cia` install has none):
+  the details-card text is slug-aware now.
+
+### Added (2026-07-15)
+- **Zip archives in Browse SD Card**: a dropped `.zip` is now listed and
+  installable. The browser peeks inside (central directory only, no unzip) to
+  type it — `[NDS zip]` / `[GBA zip]` / `[3DS zip]` — and on install extracts
+  the rom next to the archive (deterministic name = zip stem + platform ext),
+  installs it, then deletes the archive (the extracted rom is the keeper;
+  a 3DS `.cia` still follows the delete-after-install setting). Works for
+  single installs and `Install all here` / multi-select batches. `zipInnerSlug`
+  helper added in `zip.cpp`.
+- **Delete-after-install (default on)**: after a Browse-SD **3DS** install the
+  `.cia` is deleted — it's a pure duplicate of the title now in the database,
+  and the game still appears in *Manage* (which reads the title DB, not the
+  file) with its own icon. `.nds` and `.gba` are always kept: their forwarder
+  / inject re-reads the ROM to launch and to change art, so deleting them
+  would break the game. New **Settings → After install** toggles between
+  *delete .cia source* and *keep source files*. (RomM downloads already
+  deleted their transient `.cia` after installing; unchanged.)
+
 ### Added (2026-07-14)
 - **NDS icon/banner/both everywhere**: every NDS art flow (Manage "Change
   art", "+ choose art" installs, zip installs) now asks which art — like

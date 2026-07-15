@@ -1,6 +1,6 @@
 # romm3ds
 
-Browse your self-hosted [RomM](https://github.com/rommapp/romm) NDS library **on the 3DS**, download ROMs to the SD card, and build YANBF-style HOME-menu forwarders that launch each game through nds-bootstrap — no PC in the loop. An hShop-like experience for your own DS collection.
+Drop `.cia` / `.nds` / `.gba` ROMs on your 3DS SD card and turn them into real HOME-menu titles — 3DS games installed to the title database, DS games as YANBF-style nds-bootstrap forwarders, GBA games as VC injects — each with proper box art, HOME icon and (DS) the game's jingle, all built on the console with no PC in the loop. **Offline-first**: everything works from the files on your card. A self-hosted [RomM](https://github.com/rommapp/romm) server is one optional source you can also download from.
 
 > **Branch `feat/3ds-cia` — 3DS base-game installer.** This variant points at RomM's
 > `3ds` platform instead of `nds` and, instead of building a forwarder, **installs the
@@ -21,14 +21,16 @@ Each installed forwarder appears on the HOME menu with real box art and the game
 
 ![a romm3ds forwarder on the 3DS HOME menu](docs/forwarder-home.png)
 
+The main menu leads with the offline flow:
+
 ## Features
 
-- **RomM Library** — lists the `nds` platform of your RomM server over HTTP Basic auth (works against a stock authenticated instance). Box art, year, genres, rating and summary are pulled from RomM metadata; covers are prefetched in the background and cached on the SD card so scrolling never blocks. `SELECT` searches the library instantly.
-- **One-tap install** — download (zip archives are extracted on-device), then build and install a forwarder whose banner carries the game's box art and sound, exactly like a YANBF forwarder — but generated entirely on the console. No ~40-title DSiWare cap.
-- **Install a whole folder at once** — in the **SD Card Browser**, the "Install All" entry builds forwarders for every `.nds` in the current folder in one go — point it at your DS collection and walk away.
-- **Manage Installed** — pick a system; the panel shows what each one costs on the card (bytes + counts for DS forwarders, GBA injects, 3DS apps, updates/DLC) and the SD free space. **NDS/GBA**: every ROM on the card with its install state (romm3ds / TWL / YANBF forwarder, or GBA inject) and title IDs — install one that isn't installed yet, change its art, or delete the title, the ROM, or both. **3DS**: *every* installed application, biggest first, named from its own SMDH — not just the ones your RomM library knows about. Uninstall any of them, optionally taking the game's update and DLC with it.
-- **SD Card Browser** — the classic NDSForwarder flow for local `.nds` files, including batch "Install All".
-- **Settings** — installer options and a dedicated RomM server screen (edit host / user / password individually, test the connection).
+- **Browse SD Card** *(primary, no server needed)* — a real folder browser. It opens on `sdmc:/roms` and you can walk **down** into subfolders and **up** (`B`, or the `.. (up)` row) all the way to the SD root and into any sibling folder — so ROMs you keep somewhere else (say `.cia` files in `sdmc:/cias`) work too. Each file is typed by its extension, not by which folder it's in, and marked `* ` when already installed. Per folder you can install one game (`A`), pick art / a GBA screen filter, multi-select with `Y` (`R` = all/none) and `Install selected`, or `Install all here` in one go. Point it at a folder of ROMs and walk away.
+- **Turn any ROM into a HOME title** — `.cia` streams straight into the title database (`am:net`), `.nds` becomes a YANBF-style forwarder booted via nds-bootstrap, `.gba` becomes a native VC inject — each with box art, a HOME icon (and, for DS, the game's jingle), built entirely on the console. Zip archives are extracted on-device. No ~40-title DSiWare cap.
+- **Clean up after install** — by default a `.cia` is **deleted** once installed: it's a pure duplicate of what's now in the title database, and the game still shows in *Manage* with its own icon. `.nds` and `.gba` are always kept — their forwarder / inject re-reads the ROM to launch and to change art. Toggle in **Settings → After install**.
+- **Manage Installed** — pick a system; the panel shows what each one costs on the card (bytes + counts for DS forwarders, GBA injects, 3DS apps, updates/DLC) and the SD free space. **NDS/GBA**: every ROM on the card with its install state (romm3ds / TWL / YANBF forwarder, or GBA inject) and title IDs — install one that isn't installed yet, change its art, or delete the title, the ROM, or both. **3DS**: *every* installed application, biggest first, named from its own SMDH. Uninstall any of them, optionally taking the game's update and DLC with it.
+- **RomM Library** *(optional)* — lists the `3ds` / `nds` / `gba` platforms of your RomM server over HTTP Basic auth. Box art, year, genres, rating and summary come from RomM metadata; covers are prefetched and cached so scrolling never blocks. `SELECT` searches; downloaded games install through the exact same on-console flow as local files.
+- **Settings** — installer options, the delete-after-install policy, and a dedicated RomM server screen (edit host / user / password individually, test the connection).
 
 ## What is a forwarder? (and what YANBF is)
 

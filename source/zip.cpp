@@ -13,9 +13,33 @@ static bool hasExtension(const std::string& lower, const std::vector<std::string
 }
 
 const std::vector<std::string>& zipRomExtsFor(const std::string& slug) {
+    static const std::vector<std::string> cia = {".cia"};
     static const std::vector<std::string> nds = {".nds", ".srl", ".ids"};
     static const std::vector<std::string> gba = {".gba", ".agb"};
+    if (slug == "3ds") return cia;
     return (slug == "gba") ? gba : nds;
+}
+
+std::string zipInnerSlug(const std::string& zipPath) {
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_file(&zip, zipPath.c_str(), 0)) return "";
+    static const std::vector<std::string> cia = {".cia"};
+    static const std::vector<std::string> nds = {".nds", ".srl", ".ids"};
+    static const std::vector<std::string> gba = {".gba", ".agb"};
+    std::string slug;
+    mz_zip_archive_file_stat st;
+    mz_uint n = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint i = 0; i < n && slug.empty(); i++) {
+        if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
+        if (st.m_is_directory) continue;
+        std::string low = toLowerCase(std::string(st.m_filename));
+        if      (hasExtension(low, cia)) slug = "3ds";
+        else if (hasExtension(low, nds)) slug = "nds";
+        else if (hasExtension(low, gba)) slug = "gba";
+    }
+    mz_zip_reader_end(&zip);
+    return slug;
 }
 
 struct ExtractCtx {

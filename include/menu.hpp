@@ -41,7 +41,7 @@ enum MenuType {
     MENU_MANAGE,
     MENU_SETTINGS,
     MENU_SERVER,
-    MENU_LOCAL             // "Install from SD": local files from the three dirs
+    MENU_LOCAL             // "Browse SD Card": navigable folder browser of local roms
 };
 
 class MenuSelection {
@@ -137,7 +137,7 @@ class Menu {
 
 };
 Menu* generateMenu(std::filesystem::path path, Menu* prev);
-Menu* generateLocalMenu(Menu* prev);
+Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir = std::filesystem::path());
 Menu* generateMainMenu(Menu* prev);
 Menu* generateSystemMenu(Menu* prev);
 Menu* generateRommMenu(Menu* prev, C3D_RenderTarget* target, const std::string& slug);
