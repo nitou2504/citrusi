@@ -498,6 +498,13 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
         std::error_code ec;
         std::filesystem::create_directories(std::filesystem::path(dir), ec);
         showLoading(target, {"Downloading...", entry.fsName});
+        // catch a mistaken "Install": B before the first byte cancels cleanly
+        hidScanInput();
+        if (hidKeysDown() & KEY_B) {
+            out.cancelled = true;
+            if (interactive) Dialog(target,0,0,320,240,{"Download cancelled"},{"OK"}).handle();
+            return out;
+        }
         u64 lastDrawn = 0;
         RommRom dlRom;
         dlRom.id = entry.rommId;
@@ -3212,6 +3219,8 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     if (is3ds && entry.fileId == -1) {
                         // file list still unresolved (library was opened offline)
                         showLoading(target, {"Checking files...", entry.title});
+                        hidScanInput();
+                        if (hidKeysDown() & KEY_B) break;   // mistaken tap: nothing fetched yet
                         if (!settle3dsFilePick(entry)) {
                             Dialog(target,0,0,320,240,{"Can't read file list",gRomm.lastError},{"OK"}).handle();
                             break;

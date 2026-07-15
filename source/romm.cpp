@@ -384,14 +384,16 @@ bool RommClient::download(const RommRom& rom, const std::string& destPath,
                 return false;
             }
             written += readSize;
-            if (progress && !progress(written, expected)) {
-                lastError = "cancelled";
-                fclose(f);
-                remove(tmpPath.c_str());
-                httpcCancelConnection(&ctx);
-                httpcCloseContext(&ctx);
-                return false;
-            }
+        }
+        // poll EVERY iteration (not only when bytes arrive) so B cancels even
+        // while the response is still pending / the first byte is slow
+        if (progress && !progress(written, expected)) {
+            lastError = "cancelled";
+            fclose(f);
+            remove(tmpPath.c_str());
+            httpcCancelConnection(&ctx);
+            httpcCloseContext(&ctx);
+            return false;
         }
     } while (res == (Result)HTTPC_RESULTCODE_DOWNLOADPENDING);
     fclose(f);

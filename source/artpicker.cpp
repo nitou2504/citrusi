@@ -339,11 +339,7 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
         if (kDown & PICKER_KEYS) idle = 0; else if (idle < 1000) idle++;
         int count = (int)cands.size();
 
-        if (kDown & KEY_B) {                       // skip this page
-            if (!advance()) break;
-            ensureCands();
-            continue;
-        }
+        if (kDown & KEY_B) break;   // back out; art already A'd is kept, Y switches pages
         if ((kDown & KEY_Y) && wantIcon && wantBanner) {
             page = 1 - page;
             cursor = scroll = 0;
@@ -477,7 +473,8 @@ bool artPickerRun(C3D_RenderTarget* target, const std::string& fsName,
             drawText(160, 26, 0, 0.38f, COL_BG, COL_TEXT_DIM, gn.c_str(), C2D_AlignCenter);
         }
         drawText(160, 227, 0, 0.42f, COL_BG, COL_TEXT_DIM,
-                 "A use   X search   B skip   L/R pages", C2D_AlignCenter);
+                 (wantIcon && wantBanner) ? "A use   Y page   X search   B back"
+                                          : "A use   X search   B back", C2D_AlignCenter);
         C3D_FrameEnd(0);
         if (firstFrame) { firstFrame = false; aplog.info("first frame drawn"); }
     }
