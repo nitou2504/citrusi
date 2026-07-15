@@ -2741,12 +2741,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         this->queue.push(MenuSelection(*this->selection));
     }
     // Y: toggle the batch mark on the current row. Only the installable
-    // library rows and the manage rows can be selected; a non-installable
-    // 3DS .3ds row is skipped (nothing to install).
+    // library rows and the manage rows (zip archives included) can be
+    // selected; a non-installable 3DS .3ds row is skipped.
     void Menu::toggleSelect() {
         if (this->entries.empty()) return;
         MenuSelection* sel = *this->selection;
-        if (sel->action != RommInstall && sel->action != ManageRom) return;
+        if (sel->action != RommInstall && sel->action != ManageRom &&
+            sel->action != ManageZip) return;
         if (sel->action == RommInstall && sel->platformSlug == ROMM_SLUG_3DS && !sel->installable) return;
         sel->selected = !sel->selected;
     }
@@ -2761,7 +2762,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (this->entries.empty()) return;
         auto selectable = [](MenuSelection* e) {
             if (e->action != RommInstall && e->action != ManageRom &&
-                e->action != LocalInstall) return false;
+                e->action != LocalInstall && e->action != ManageZip) return false;
             if (e->action == RommInstall && e->platformSlug == ROMM_SLUG_3DS && !e->installable) return false;
             return true;
         };
@@ -4130,9 +4131,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 }
                 case BatchManage: {
                     // the selected manage rows, straight from the live menu
+                    // (zip rows batch too: Install extracts them first,
+                    // Delete ROMs removes the archive file)
                     std::vector<MenuSelection*> items;
                     for (auto e : this->entries)
-                        if (e->selected && e->action == ManageRom)
+                        if (e->selected && (e->action == ManageRom || e->action == ManageZip))
                             items.push_back(e);
                     if (items.empty()) break;
                     int M = (int)items.size();
@@ -4298,8 +4301,41 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::vector<MenuSelection*> todo;
                         for (auto e : items)
                             if (!manageItemInstalled(slug, *e)) todo.push_back(e);
-                        int N = (int)todo.size();
                         CoverCachePause coverPause;
+                        std::vector<std::string> failed;
+                        // PHASE 0: finish interrupted downloads — extract zip
+                        // rows in place so the art/install phases see a ROM
+                        for (size_t zi = 0; zi < todo.size(); ) {
+                            MenuSelection* it = todo[zi];
+                            if (it->action != ManageZip) { zi++; continue; }
+                            std::string wantName = it->path.stem().generic_string() +
+                                                   (slug == ROMM_SLUG_GBA ? ".gba" : ".nds");
+                            Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",it->title},{},0).handle();
+                            std::string extracted, zerr;
+                            u64 lastZ = 0;
+                            bool zok = extractFirstRom(it->path.generic_string(), rommDirFor(slug),
+                                                       zipRomExtsFor(slug), extracted, zerr,
+                                [&](unsigned long long done, unsigned long long total) -> bool {
+                                    hidScanInput();
+                                    if (hidKeysDown() & KEY_B) return false;
+                                    if (done - lastZ < (2<<20) && done != total) return true;
+                                    lastZ = done;
+                                    int pct = (total>0)?(int)(done*100/total):0;
+                                    Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",it->title,std::to_string(pct)+"%"},{},0).handle();
+                                    return true;
+                                }, wantName);
+                            if (!zok) {   // keep the archive for a retry
+                                failed.push_back(it->title);
+                                todo.erase(todo.begin() + zi);
+                                continue;
+                            }
+                            std::error_code ec;
+                            std::filesystem::remove(it->path, ec);   // zip -> rom, single copy
+                            it->path = std::filesystem::path(extracted);
+                            it->action = ManageRom;   // menu rebuilds after the batch anyway
+                            zi++;
+                        }
+                        int N = (int)todo.size();
                         // PHASE 1: GBA art up front (prompts here, not mid-install)
                         std::vector<ArtEntry> aes(N);
                         std::vector<ArtPieces> pcs(N);
@@ -4313,7 +4349,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                         // PHASE 2: unattended build + install
                         int okCount = 0;
-                        std::vector<std::string> failed;
                         for (int i = 0; i < N; i++) {
                             MenuSelection* it = todo[i];
                             showLoading(target, {"Installing "+std::to_string(i+1)+"/"+std::to_string(N), it->title});
