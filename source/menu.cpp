@@ -2267,12 +2267,13 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->display = (inst ? "* " : "  ") + std::string("[") + tag + "] " + utf8FoldLatin(stem);
             files.push_back(e);
         }
-        // "Install all" pinned at the top makes the batch obvious; Y/R/START
-        // still work for a subset.
+        // "Install all" pinned at the top makes the batch obvious, but only
+        // when there are 2+ to install (pointless for one). Y/R/START still work.
         std::vector<MenuSelection*> entries;
         int notInstalled = 0;
         for (auto e : files) if (!e->installed) notInstalled++;
-        if (notInstalled > 0) {
+        bool pinned = (notInstalled >= 2);
+        if (pinned) {
             MenuSelection* all = new MenuSelection();
             all->action = LocalInstallAll;
             all->display = "Install all (" + std::to_string(notInstalled) + ")";
@@ -2293,6 +2294,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                       + (gLocalHidden && !gLocalShowInstalled
                          ? "  (" + std::to_string(gLocalHidden) + " hidden)" : "");
         menu->init();
+        // land the cursor on the first game, not the "Install all" batch row,
+        // so a single A opens the per-game menu (like RomM/Manage)
+        if (pinned && (int)entries.size() > 1) menu->selectIndex(1);
         return menu;
     }
     Menu* generateMainMenu(Menu* prev) {
