@@ -1421,7 +1421,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     // current folder persists across list rebuilds (X toggle / post-install).
     static const std::string BROWSE_ROOT = "sdmc:/roms";
     static std::string gBrowseDir;       // "" until the browser is first opened
-    static std::string browseParent(std::string p);   // defined with generateLocalMenu
 
     void Menu::drawMenu() {
             gTick++;
@@ -2013,19 +2012,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             return;
         }
         if (this->type == MENU_LOCAL) {
-            bool atRoot = browseParent(this->currentDirectory.generic_string()).empty();
-            const char* bTxt = atRoot ? "B Exit" : "B Up";
+            bool atRoot = (this->currentDirectory.generic_string() == BROWSE_ROOT);
             if (this->entries.empty()) {
-                drawBottomFrame(gLocalHidden ? (std::string("X Show installed    ") + bTxt).c_str() : bTxt);
+                drawBottomFrame(gLocalHidden ? "X Show installed    B Back" : "B Back");
                 if (gLocalHidden && !gLocalShowInstalled) {
                     drawText(160, 88, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Nothing new here.", C2D_AlignCenter);
                     drawWrapped(48, 112, 224, 14, 0.42f, COL_TEXT_DIM,
                                 "All " + std::to_string(gLocalHidden) + " games in this folder are already "
-                                "installed. Press X to show them and reinstall or change art.", 4);
+                                "installed. Press X to show them.", 4);
                 } else {
-                    drawText(160, 92, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "Empty folder.", C2D_AlignCenter);
+                    drawText(160, 92, 0.55f, 0.45f, COL_SURFACE, COL_TEXT_DIM, "No games here.", C2D_AlignCenter);
                     drawWrapped(48, 116, 224, 14, 0.42f, COL_TEXT_DIM,
-                                "Drop .cia / .nds / .gba (or a .zip) files here or in any folder, then browse to them.", 4);
+                                "Drop .cia / .nds / .gba (or a .zip) in this folder, then reopen it.", 3);
                 }
                 return;
             }
@@ -2035,7 +2033,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             MenuSelection* sel = *this->selection;
             u32 lineCol = C2D_Color32(0xC6,0xCF,0xE2,255);
             float y = CARD_Y + PAD;
-            if (sel->action == LocalInstall) {
+            if (sel->action == OpenFolder) {            // the folder picker (root)
+                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->display, 2);
+                y += 5; y = cardDivider(y) + 5;
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
+                            "Open this folder to install its games.", 2);
+            } else if (sel->action == LocalInstallAll) {   // pinned "Install all"
+                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, "Install all", 2);
+                y += 5; y = cardDivider(y) + 5;
+                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
+                            "Install every game in this folder that isn't installed yet.", 3);
+            } else {                                    // a rom row (LocalInstall)
                 y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT, sel->title, 2);
                 y += 5;
                 bool isZip = isZipName(sel->path.filename().generic_string());
@@ -2047,37 +2055,24 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (sel->selected)  drawChip(cxp, y, "SELECTED", COL_ACCENT);
                 y += 21;
                 y = cardDivider(y) + 5;
-                // per platform: 3DS has no art/filter (its .cia carries the
-                // icon); NDS has art but no filter; GBA has both
                 bool is3 = (sel->platformSlug == ROMM_SLUG_3DS);
                 bool isG = (sel->platformSlug == ROMM_SLUG_GBA);
                 const char* desc =
                     sel->installed
-                      ? (is3 ? "Installed. A reinstalls. Y marks several to install."
-                         : isG ? "Installed. A: reinstall, change art or filter. Y marks several."
-                               : "Installed. A: reinstall or change art. Y marks several.")
-                      : (is3 ? "A installs it to the HOME menu. Y marks several to install."
-                         : isG ? "A: install, with art / filter options. Y marks several."
-                               : "A: install, with an art option. Y marks several to install.");
+                      ? (is3 ? "Installed. A: reinstall or uninstall. Y marks several."
+                         : isG ? "Installed. A: uninstall, customize or reinstall. Y marks several."
+                               : "Installed. A: uninstall, change art or reinstall. Y marks several.")
+                      : (is3 ? "A: install or delete. Y marks several to install."
+                         : isG ? "A: install (Customize for art / filter) or delete. Y marks several."
+                               : "A: install (choose art) or delete. Y marks several.");
                 drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol, desc, 3);
-            } else {   // folder or ".." row
-                bool up = (sel->display.find("..") != std::string::npos);
-                y = drawWrapped(CTX, y, CTW, 17, 0.58f, COL_TEXT,
-                                up ? "Parent folder" : sel->path.filename().generic_string(), 2);
-                y += 5;
-                y = cardDivider(y) + 5;
-                drawWrapped(CTX, y, CTW, 14, 0.45f, lineCol,
-                            up ? "Press A (or B) to go up one folder."
-                               : "Folder. Press A to open it.", 2);
             }
             std::string hint;
-            if (nSel > 0)
-                hint = "START Install " + std::to_string(nSel) + "   R All/None   " + bTxt;
-            else if (sel->action == OpenFolder)
-                hint = std::string("A Open   Y Mark   ") + bTxt;
-            else
-                hint = std::string("A Install   Y Mark   X ") +
-                       (gLocalShowInstalled ? "Hide done   " : "Show all   ") + bTxt;
+            if (atRoot)                                   hint = "A Open   B Back";
+            else if (nSel > 0)                            hint = "START Install " + std::to_string(nSel) + "   R All/None   B Back";
+            else if (sel->action == LocalInstallAll)      hint = "A Install all   Y Mark   R Select all   B Back";
+            else                                          hint = std::string("A Install   Y Mark   R Select all   X ") +
+                                                                 (gLocalShowInstalled ? "Hide done" : "Show all") + "   B Back";
             drawText(160, BAR_Y + (240 - BAR_Y) / 2, 0.56f, 0.42f, 0, COL_TEXT_DIM,
                      hint.c_str(), C2D_AlignCenter);
             return;
@@ -2164,16 +2159,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
 
     Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir);   // fwd: rebuilds keep the folder
 
-    // parent of a browse dir as a plain string. Floors at the SD root:
-    // "sdmc:/roms/nds" -> "sdmc:/roms", "sdmc:/roms" -> "sdmc:/", root -> "".
-    static std::string browseParent(std::string p) {
-        while (p.size() > 1 && p.back() == '/') p.pop_back();   // strip trailing slash
-        size_t slash = p.find_last_of('/');
-        if (slash == std::string::npos) return "";              // at/above "sdmc:" -> main menu
-        if (slash <= 5) return "sdmc:/";                        // "sdmc:/xxx" -> SD root
-        return p.substr(0, slash);
-    }
-
     Menu* Menu::toggleShowInstalled() {
         if (this->type != MENU_LOCAL) return this;
         gLocalShowInstalled = !gLocalShowInstalled;
@@ -2183,29 +2168,39 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
     Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir) {
         delete prev;
         CoverCachePause coverPause;   // the scan owns the SD while it runs
-        // resolve the folder to scan; empty -> the persisted dir, else the root
+        // Browse works in three fixed folders only - roms/{3ds,nds,gba} - with
+        // no free navigation, for simplicity.
+        static const char* kDirs[3]  = {"sdmc:/roms/3ds", "sdmc:/roms/nds", "sdmc:/roms/gba"};
+        static const char* kNames[3] = {"Nintendo 3DS", "Nintendo DS", "Game Boy Advance"};
         std::string dirStr = dir.generic_string();
-        if (dirStr.empty()) dirStr = gBrowseDir.empty() ? BROWSE_ROOT : gBrowseDir;
         std::error_code ec;
-        if (!std::filesystem::is_directory(dirStr, ec)) {
-            // first run: make the roms folder so it's always there to land on
-            if (dirStr == BROWSE_ROOT) std::filesystem::create_directories(dirStr, ec);
-            if (!std::filesystem::is_directory(dirStr, ec)) dirStr = "sdmc:/";
+        // ROOT: the folder picker (3DS / DS / GBA), coherent with RomM/Manage
+        if (dirStr.empty() || dirStr == BROWSE_ROOT || dirStr == "sdmc:/roms/") {
+            gBrowseDir.clear();
+            std::vector<MenuSelection*> picks;
+            for (int i = 0; i < 3; i++) {
+                std::filesystem::create_directories(kDirs[i], ec);
+                MenuSelection* e = new MenuSelection();
+                e->action = OpenFolder; e->path = std::filesystem::path(kDirs[i]); e->display = kNames[i];
+                picks.push_back(e);
+            }
+            Menu* menu = new Menu(picks);
+            menu->currentDirectory = std::filesystem::path(BROWSE_ROOT);
+            menu->type = MENU_LOCAL; menu->heading = "Browse SD Card"; menu->init();
+            return menu;
         }
+        // FOLDER: list the roms in one folder (files only, no subfolders / no up)
+        std::filesystem::create_directories(dirStr, ec);
         gBrowseDir = dirStr;
         gLocalHidden = 0;
-        installed3dsRefresh();    // AM installed set: GBA inject + .cia detection
-        refreshNdsForwarders();   // NDS forwarder detection
-        // extension -> platform slug + tag. This is what makes the browser
-        // layout-agnostic: a file's system comes from its name, not its folder.
+        installed3dsRefresh();
+        refreshNdsForwarders();
         auto slugForExt = [](const std::string& ext, std::string& tag) -> std::string {
             if (ext == ".cia") { tag = "CIA"; return ROMM_SLUG_3DS; }
             if (ext == ".nds" || ext == ".srl" || ext == ".ids") { tag = "NDS"; return ROMM_SLUG_NDS; }
             if (ext == ".gba" || ext == ".agb") { tag = "GBA"; return ROMM_SLUG_GBA; }
             return "";
         };
-        // optional metadata reuse: filename -> cached library entry, per slug,
-        // only when that library is already loaded (never forces a load)
         auto libLookup = [](const std::string& slug, const std::string& fname) -> const RommRom* {
             if (!gCacheOk[slug]) return nullptr;
             std::string key = toLowerCase(fname);
@@ -2216,28 +2211,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             }
             return nullptr;
         };
-        std::vector<MenuSelection*> folders;   // subfolders (A enters)
         std::vector<MenuSelection*> files;     // installable roms in this folder
-        std::vector<std::filesystem::path> subdirs, romPaths;
+        std::vector<std::filesystem::path> romPaths;
         for (auto& de : std::filesystem::directory_iterator(dirStr, ec)) {
+            if (!de.is_regular_file()) continue;
             std::string fn = de.path().filename().generic_string();
             if (fn.empty() || fn[0] == '.') continue;
-            std::error_code de_ec;
-            if (de.is_directory(de_ec)) { subdirs.push_back(de.path()); continue; }
-            std::string tag;
-            std::string ext = toLowerCase(de.path().extension().generic_string());
+            std::string tag, ext = toLowerCase(de.path().extension().generic_string());
             if (slugForExt(ext, tag).empty() && ext != ".zip") continue;   // not a rom/zip we handle
             romPaths.push_back(de.path());
         }
-        std::sort(subdirs.begin(), subdirs.end());
         std::sort(romPaths.begin(), romPaths.end());
-        for (auto& p : subdirs) {
-            MenuSelection* e = new MenuSelection();
-            e->action = OpenFolder;
-            e->path = p;
-            e->display = "  " + utf8FoldLatin(p.filename().generic_string()) + "/";
-            folders.push_back(e);
-        }
         // predicted extracted rom name for a zip (deterministic: stem + the
         // platform's rom extension) — used for the marker and, at install, as
         // the forced extract name so markers/tids/covers all agree.
@@ -2283,19 +2267,17 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->display = (inst ? "* " : "  ") + std::string("[") + tag + "] " + utf8FoldLatin(stem);
             files.push_back(e);
         }
-        // assemble: [.. up] -> folders -> files. Batch install is by Y-mark +
-        // START (or A on a marked row) — same as the RomM / Manage screens — so
-        // no pinned action rows here; R marks all, then START installs them all.
+        // "Install all" pinned at the top makes the batch obvious; Y/R/START
+        // still work for a subset.
         std::vector<MenuSelection*> entries;
-        std::string parent = browseParent(dirStr);
-        if (!parent.empty()) {   // not the SD root: offer a ".." row (B also goes up)
-            MenuSelection* up = new MenuSelection();
-            up->action = OpenFolder;
-            up->path = std::filesystem::path(parent);
-            up->display = "  .. (up)";
-            entries.push_back(up);
+        int notInstalled = 0;
+        for (auto e : files) if (!e->installed) notInstalled++;
+        if (notInstalled > 0) {
+            MenuSelection* all = new MenuSelection();
+            all->action = LocalInstallAll;
+            all->display = "Install all (" + std::to_string(notInstalled) + ")";
+            entries.push_back(all);
         }
-        entries.insert(entries.end(), folders.begin(), folders.end());
         entries.insert(entries.end(), files.begin(), files.end());
         Menu* menu = new Menu(entries);
         menu->currentDirectory = std::filesystem::path(dirStr);
@@ -2304,13 +2286,9 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         std::string free = "";
         if (R_SUCCEEDED(FSUSER_GetArchiveResource(&sd, SYSTEM_MEDIATYPE_SD)))
             free = " - " + humanSize((u64)sd.freeClusters * sd.clusterSize) + " free";
-        // friendly heading: path relative to the SD root ("roms/nds"), or "SD root"
-        std::string rel = dirStr;
-        if (rel.rfind("sdmc:/", 0) == 0) rel = rel.substr(6);
-        while (!rel.empty() && rel.back() == '/') rel.pop_back();
-        if (rel.empty()) rel = "SD root";
-        // keep it short (like "Manage NDS - X free"): path + free, plus a terse
-        // hidden-count. The bottom panel / X hint explain the rest.
+        // heading = the system name (matches the RomM / Manage headings)
+        std::string rel = "Browse";
+        for (int i = 0; i < 3; i++) if (dirStr == kDirs[i]) rel = kNames[i];
         menu->heading = rel + free
                       + (gLocalHidden && !gLocalShowInstalled
                          ? "  (" + std::to_string(gLocalHidden) + " hidden)" : "");
@@ -3018,11 +2996,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (gConfigPtr) return generateSettingsMenu(this, gConfigPtr);
                 return generateMainMenu(this);
             case MENU_LOCAL: {
-                // Browse SD Card: B walks up one folder; at the SD root it
-                // leaves to the main menu.
-                std::string parent = browseParent(this->currentDirectory.generic_string());
-                if (parent.empty()) return generateMainMenu(this);
-                return generateLocalMenu(this, std::filesystem::path(parent));
+                // Browse SD Card: a folder list -> the folder picker; the
+                // picker -> the main menu.
+                std::string cur = this->currentDirectory.generic_string();
+                if (cur == BROWSE_ROOT || cur == "sdmc:/roms/" || cur.empty())
+                    return generateMainMenu(this);
+                return generateLocalMenu(this, std::filesystem::path(BROWSE_ROOT));
             }
             default:
                 return generateMainMenu(this);
@@ -4329,9 +4308,18 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             pickArt = (c == 1);
                         }
                     } else {
-                        // not installed: plain Install, art/filter behind Customize
-                        InstallChoice ic = buildInstallMenu(target, slug, name, humanSize(entry.sizeBytes));
+                        // not installed: plain Install, art/filter behind
+                        // Customize, and a Delete for a file you don't want
+                        InstallChoice ic = buildInstallMenu(target, slug, name, humanSize(entry.sizeBytes),
+                                                            "Install", "Delete file", "Remove this file from the SD card.");
                         if (ic == IC_CANCEL) break;
+                        if (ic == IC_EXTRA) {
+                            if (Dialog(target,0,0,320,240,{"Delete this file?",name},
+                                       {gLang.getString("menu_yes"),gLang.getString("menu_no")}).handle()!=0) break;
+                            std::error_code dec; std::filesystem::remove(entry.path, dec);
+                            while (this->queue.size() > 0) this->queue.pop();
+                            return generateLocalMenu(this, this->currentDirectory);
+                        }
                         pickArt = (ic == IC_ART || ic == IC_ART_FILTER);
                         if (ic == IC_FILTER || ic == IC_ART_FILTER) {
                             screenPreset = pickGbaScreenPreset(target, config, name, artStoreGet(romBase).screen);
