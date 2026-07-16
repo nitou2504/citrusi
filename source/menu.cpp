@@ -459,6 +459,7 @@ static std::string resolveLocalRom(C3D_RenderTarget* target, const std::string& 
     std::filesystem::path pp(path);
     std::string fname = pp.filename().generic_string();
     if (!isZipName(fname)) return path;
+    CoverCachePause pause;   // dedicate the SD to the extraction (no cover worker)
     std::string dir = pp.parent_path().generic_string() + "/";
     std::string forceName = pp.stem().generic_string() +
                             (slug == ROMM_SLUG_3DS ? ".cia" : slug == ROMM_SLUG_GBA ? ".gba" : ".nds");
@@ -540,6 +541,7 @@ static InstallOutcome installOneRomm(C3D_RenderTarget* target, Config* config,
             return out;
         }
         if (!is3ds && isZipName(entry.fsName)) {   // nds/gba zip archives are extracted on-device
+            CoverCachePause pause;   // dedicate the SD to the extraction
             Dialog(target,0,0,320,240,{"Extracting... (B = cancel)",entry.fsName},{},0).handle();
             std::string extracted, zerr;
             u64 lastZDrawn = 0;
