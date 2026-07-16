@@ -188,11 +188,13 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
         boxart = fetchBoxart(gRomm, romPath, coverPath);
     }
     if (boxart.empty()) {                          // SGDB logo tier (auto, strong only)
+        showLoading(target, {"Searching SteamGridDB...", title});   // each tier is a slow net fetch
         ArtEntry ne;
         boxart = artSgdbLogoAuto(gSgdb, gRomm, artQueriesFor(romBase, title), ne);
         if (!boxart.empty()) { ae = ne; persist = true; }
     }
     if (boxart.empty()) {                          // iiSU logo, last of the logo tiers
+        showLoading(target, {"Searching iiSU logo...", title});
         ArtEntry ne;
         for (const std::string& q : artQueriesFor(romBase, title)) {
             ne.query = q;
@@ -200,8 +202,10 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
             if (!boxart.empty()) { ae = ne; persist = true; break; }
         }
     }
-    if (boxart.empty())                            // GameTDB box — just above the RomM cover
+    if (boxart.empty()) {                          // GameTDB box — just above the RomM cover
+        showLoading(target, {"Fetching box art...", title});
         boxart = gametdbBoxart(gRomm, romPath);
+    }
     if (boxart.empty() && config && config->artNotify && interactive) {   // S2, banner line only
         ArtEntry ne;
         std::vector<std::string> qs = artQueriesFor(romBase, title);
@@ -231,6 +235,7 @@ static bool buildForwarderFor(C3D_RenderTarget* target, Config* config,
         }
     }
     if (boxart.empty() && !coverPath.empty()) {    // RomM cover fallback (⚠)
+        showLoading(target, {"Using RomM cover...", title});
         ArtPieces cov;
         if (artFromRommCover(gSgdb, gRomm, coverPath, false, true, cov) && !cov.bannerTex.empty()) {
             boxart = cov.bannerTex;
@@ -356,6 +361,7 @@ static void resolveGbaArtInteractive(C3D_RenderTarget* target, Config* config,
     // whatever is still missing falls back to the cover (or stays template)
     bool fellBack = false;
     if (piecesOut.icon48.empty() || piecesOut.bannerTex.empty()) {
+        showLoading(target, {"Using RomM cover...", title});
         ArtPieces cov;
         artFromRommCover(gSgdb, gRomm, coverPath,
                          piecesOut.icon48.empty(), piecesOut.bannerTex.empty(), cov);
@@ -745,6 +751,7 @@ static int applyGbaScreenItem(C3D_RenderTarget* target, Config* config,
                               bool interactive, int screenMode) {
     if (!ensureCtrBuilder(target)) return -1;
     ensureSgdb();
+    showLoading(target, {"Preparing art...", title});   // art rebuild can hit the network
     ArtEntry ae = artStoreGet(romBase);
     ArtPieces pieces;
     if (ae.valid) artBuildFromEntry(gSgdb, gRomm, romBase, coverPath, ae, pieces);
