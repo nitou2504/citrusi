@@ -197,7 +197,9 @@ static bool pickCiaFile(const nlohmann::json& files, RommRom& rom) {
     for (auto& fj : files) {
         std::string fn = fj.value("file_name", "");
         if (!isCiaName(fn)) continue;
-        bool isBase = !fj.contains("category") || fj["category"].is_null();
+        // RomM 4.x marks base files with a null category; 5.x tags them "game"
+        bool isBase = !fj.contains("category") || fj["category"].is_null() ||
+                      fj["category"] == "game";
         if (!found || isBase) {
             rom.fsName    = fn;
             rom.fileId    = fj.value("id", 0);
