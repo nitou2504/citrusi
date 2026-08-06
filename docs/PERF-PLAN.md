@@ -94,7 +94,7 @@ Jobs:
 - No change to install/delete flows (already interactive).
 - No speculative prefetch of covers beyond what the cover worker does.
 
-## Status (2026-07-11)
+## Status (updated 2026-07-23)
 
 Phase 1 landed. Manage→NDS first open went from ~56s to seconds; the 51s was
 `scanForwarderCias` walking the romfs file tables of decrypted *full-game*
@@ -103,7 +103,8 @@ after the NCCH header, >16MB files skipped, table walk capped).
 
 Phase 2 library part landed (`librefresh.cpp`): SD cache renders instantly,
 worker refetches list + missing 3DS tids, heading shows `~ updating...`,
-worker does the json save + cover-miss cleanup, take is a vector swap.
+worker does the JSON save + cover-miss cleanup, and the completed result is
+taken with a vector swap. The remaining items below are still open.
 
 ### Known issue — residual hitch when "updating..." ends
 

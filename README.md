@@ -1,102 +1,191 @@
 # romm3ds
 
-Drop `.cia` / `.nds` / `.gba` ROMs on your 3DS SD card and turn them into real HOME-menu titles — 3DS games installed to the title database, DS games as YANBF-style nds-bootstrap forwarders, GBA games as VC injects — each with proper box art, HOME icon and (DS) the game's jingle, all built on the console with no PC in the loop. **Offline-first**: everything works from the files on your card. A self-hosted [RomM](https://github.com/rommapp/romm) server is one optional source you can also download from.
+[![Build 3DS artifacts](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml)
 
-> **Branch `feat/3ds-cia` — 3DS base-game installer.** This variant points at RomM's
-> `3ds` platform instead of `nds` and, instead of building a forwarder, **installs the
-> downloaded `.cia` straight into the title database** (`am:net`, streamed to SD) — an
-> hShop-for-your-own-3DS-library. Only `.cia` entries install; `.3ds` entries prompt you to
-> convert on PC first with [`ready3ds`](../ready3ds). Pair it with `ready3ds all` to fill
-> RomM's 3ds platform with decrypted CIAs. Changed: `ROMM_PLATFORM_SLUG="3ds"`,
-> `ROMM_ROM_DIR="sdmc:/cia/"`, new `source/ciainstall.cpp`, and the `RommInstall` action in
-> `menu.cpp`. Test via the `.3dsx` in the Homebrew Launcher.
+Offline-first Nintendo 3DS homebrew for turning a personal ROM library into
+proper HOME-menu titles. `romm3ds` works from files on the SD card and can also
+use a self-hosted [RomM](https://github.com/rommapp/romm) server as an optional
+download source.
 
-![top screen: list + box-art rail — bottom screen: details card](docs/screens.png)
+![romm3ds library, manage and HOME screens](docs/screens.png)
 
-| Library | Manage | Home |
+| Library | Manage | HOME menu |
 |---|---|---|
-| ![library](docs/library.png) | ![manage](docs/manage.png) | ![home](docs/home.png) |
-
-Each installed forwarder appears on the HOME menu with real box art and the game's jingle, just like a store-bought title:
-
-![a romm3ds forwarder on the 3DS HOME menu](docs/forwarder-home.png)
-
-The main menu leads with the offline flow:
+| ![Library screen](docs/library.png) | ![Manage screen](docs/manage.png) | ![HOME screen](docs/home.png) |
 
 ## Features
 
-- **Browse SD Card** *(primary, no server needed)* — a real folder browser. It opens on `sdmc:/roms` and you can walk **down** into subfolders and **up** (`B`, or the `.. (up)` row) all the way to the SD root and into any sibling folder — so ROMs you keep somewhere else (say `.cia` files in `sdmc:/cias`) work too. Each file is typed by its extension, not by which folder it's in, and marked `* ` when already installed. Per folder you can install one game (`A`), pick art / a GBA screen filter, multi-select with `Y` (`R` = all/none) and `Install selected`, or `Install all here` in one go. Point it at a folder of ROMs and walk away.
-- **Turn any ROM into a HOME title** — `.cia` streams straight into the title database (`am:net`), `.nds` becomes a YANBF-style forwarder booted via nds-bootstrap, `.gba` becomes a native VC inject — each with box art, a HOME icon (and, for DS, the game's jingle), built entirely on the console. Zip archives are extracted on-device. No ~40-title DSiWare cap.
-- **Clean up after install** — by default a `.cia` is **deleted** once installed: it's a pure duplicate of what's now in the title database, and the game still shows in *Manage* with its own icon. `.nds` and `.gba` are always kept — their forwarder / inject re-reads the ROM to launch and to change art. Toggle in **Settings → After install**.
-- **Manage Installed** — pick a system; the panel shows what each one costs on the card (bytes + counts for DS forwarders, GBA injects, 3DS apps, updates/DLC) and the SD free space. **NDS/GBA**: every ROM on the card with its install state (romm3ds / TWL / YANBF forwarder, or GBA inject) and title IDs — install one that isn't installed yet, change its art, or delete the title, the ROM, or both. **3DS**: *every* installed application, biggest first, named from its own SMDH. Uninstall any of them, optionally taking the game's update and DLC with it.
-- **RomM Library** *(optional)* — lists the `3ds` / `nds` / `gba` platforms of your RomM server over HTTP Basic auth. Box art, year, genres, rating and summary come from RomM metadata; covers are prefetched and cached so scrolling never blocks. `SELECT` searches; downloaded games install through the exact same on-console flow as local files.
-- **Settings** — installer options, the delete-after-install policy, and a dedicated RomM server screen (edit host / user / password individually, test the connection).
-
-## What is a forwarder? (and what YANBF is)
-
-The 3DS can't run DS games itself, but [nds-bootstrap](https://github.com/DS-Homebrew/nds-bootstrap) can. A *forwarder* is a tiny HOME-menu title that, when launched, tells nds-bootstrap which `.nds` file to boot — so a DS game gets its own icon on the HOME menu instead of living inside a launcher.
-
-**[YANBF](https://github.com/YANBForwarder/YANBF)** ("Yet Another nds-bootstrap Forwarder", by lifehackerhansol) is the established PC tool for making these: it generates a CTR forwarder CIA per ROM with `makerom`/`bannertool` and installs it with FBI or custom-install. romm3ds does the same job **on the console** — it patches a prebuilt template so no PC toolchain is needed — and it deliberately reuses YANBF's runtime chain and art so its forwarders look and behave identically to YANBF's.
-
-**Where the banner art and sound come from:** for each game (matched by its 4-letter DS game code) romm3ds pulls the wide banner logo and jingle from the community **[YANBF assets](https://github.com/YANBForwarder/assets)** repository — the same source YANBF uses. These are mirrored to `sd:/3ds/forwarder/assets/` so they work offline. If a game has no YANBF asset it falls back to a [GameTDB](https://www.gametdb.com/) cover, and the HOME icon itself always comes from the ROM's own embedded DS banner.
+- **Browse SD Card** — navigate from `sd:/roms` into subfolders and back to the
+  SD root. Files are identified by extension, so `.cia`, `.nds` and `.gba`
+  files can live wherever the user keeps them. ZIP archives are inspected and
+  extracted on the 3DS.
+- **Install 3DS games** — install a `.cia` directly to the 3DS title database
+  through `am:net`. A source CIA is deleted after installation by default,
+  because the installed title is the copy that remains on the console.
+- **Install Nintendo DS games** — build a YANBF-style HOME-menu forwarder for
+  an `.nds` file. The forwarder launches the ROM through nds-bootstrap and can
+  use the ROM's icon plus downloaded banner art and sound.
+- **Install Game Boy Advance games** — build a native AGB_FIRM Virtual Console
+  CIA on the device. GBA installs support artwork and five built-in screen
+  presets, including per-game filter memory.
+- **Artwork tools** — use RomM covers, YANBF assets, GameTDB, libretro logos,
+  SteamGridDB and iiSU where available. Artwork is cached on the SD card and
+  can be changed later from Manage.
+- **Manage installed titles** — view storage usage, installation state and
+  title metadata; reinstall, change artwork, remove ROMs, uninstall games and
+  remove 3DS updates/DLC where applicable.
+- **Optional RomM Library** — browse the `3ds`, `nds` and `gba` platforms over
+  HTTP Basic authentication. RomM 4.x and 5.x base-game responses are
+  supported. Downloads use the same local install flow as files from the SD
+  card.
+- **Settings** — configure the RomM server, language, GBA screen preset,
+  artwork notifications, artwork source preferences and the delete-after-
+  install policy.
 
 ## Requirements
 
-- A 3DS with Luma3DS CFW (signature patches) and the Homebrew Launcher.
-- The nds-bootstrap forwarder chain already on the SD card: the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder) "DS Forwarder Pack" (`_nds` folder on the SD root) plus a working TWiLight Menu++ / nds-bootstrap install and the YANBF `bootstrap.cia` TWL title (`0004800546574452`) installed to NAND.
-- A RomM instance (4.x) reachable over plain HTTP on the LAN (HTTPS works with certificate verification disabled).
+### Console
 
-## Install
+- A 3DS with Luma3DS CFW and the Homebrew Launcher.
+- For Nintendo DS forwarders: the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)
+  DS Forwarder Pack (`_nds` on the SD root), a working
+  [TWiLight Menu++](https://github.com/DS-Homebrew/TWiLightMenu) /
+  nds-bootstrap installation, and the YANBF `bootstrap.cia` TWL title
+  (`0004800546574452`) installed to NAND.
+- A RomM instance is optional. When used, it must be reachable from the 3DS
+  over the local network. HTTP and HTTPS are accepted; HTTPS certificate
+  verification is disabled by the current client.
 
-Either:
+### Build machine
 
-- **.cia** (installs to the HOME menu): install `romm3ds.cia` with FBI.
-- **.3dsx** (Homebrew Launcher): copy `romm3ds.3dsx` to `sd:/3ds/`.
+- Docker, for the official `devkitpro/devkitarm` image.
+- Internet access on the first build so `makerom` and `bannertool` can be
+  downloaded into the ignored `tools/bin/` directory.
 
-On first run, open **RomM Library** and enter your server address, username and password.
+## Install on a 3DS
+
+Choose one of these application formats:
+
+- **CIA:** install `romm3ds.cia` with FBI. This creates a normal HOME-menu
+  application.
+- **3DSX:** copy `romm3ds.3dsx` to `sd:/3ds/` and launch it from the Homebrew
+  Launcher.
+
+On first launch, the app opens with the offline SD-card flow. To use RomM,
+open **Settings**, enter the server address, username and password, then test
+the connection from the RomM settings screen.
+
+The default browse location is `sd:/roms`. The browser is not restricted to
+that folder: use `B` or the `.. (up)` row to reach the SD root and browse any
+other folder containing ROMs.
 
 ## Build
 
-Everything builds in the official devkitPro docker image (no local toolchain needed beyond docker); `makerom` and `bannertool` are downloaded automatically on first run.
+The normal build creates the forwarder template, the Homebrew Launcher build
+and the installable CIA:
 
 ```sh
-./build.sh          # forwarder template + .3dsx + .cia
-./build.sh 3dsx     # just the Homebrew Launcher build
-./build.sh cia      # just the installable title
+./build.sh              # template + 3DSX + CIA
+./build.sh 3dsx         # template + 3DSX
+./build.sh cia          # template + 3DSX + CIA
+./build.sh template     # forwarder template only
 ```
 
-Outputs land at the repo root: `romm3ds.3dsx`, `romm3ds.smdh`, `romm3ds.cia`.
+Generated files are written at the repository root and are ignored by Git:
 
-Iterate on hardware over ftpd:
+```text
+romm3ds.3dsx
+romm3ds.smdh
+romm3ds.elf
+romm3ds.cia
+```
+
+The GitHub Actions workflow runs the complete `./build.sh all` path and
+uploads the `.3dsx`, `.smdh` and `.cia` as one build artifact.
+
+For hardware iteration over FTP:
 
 ```sh
-./push.sh 192.168.0.23   # clean-build + FTP the .3dsx to sd:/3ds/
+./push.sh 192.168.0.23
 ```
 
-## How a forwarder works
+This performs a clean 3DSX build and uploads it to `sd:/3ds/romm3ds.3dsx`.
 
-Each forwarder is a CTR application (title ID `000400000FF8xxxx`) built on-device by patching a template CIA (`romfs/ctr/template.cia`, produced by `ctr-template/build.sh` from a small libctru payload + `makerom`/`bannertool`). Per game the builder patches the title IDs, rebuilds the ExeFS with an SMDH icon from the DS banner, swaps the banner's RGBA4444 box-art texture and CWAV sound, recomputes every hash, and installs it with `AM_StartCiaInstall` to the SD. At launch the payload writes the ROM path to `sd:/_nds/ntr-forwarder/path.txt` and chainloads the YANBF bootstrap TWL title via `aptSetChainloader`, which runs NTR_Forwarder → nds-bootstrap → the game. Box art and sound come from the [YANBF assets](https://github.com/YANBForwarder/assets) repository (mirrored to `sd:/3ds/forwarder/assets/` for offline use) with GameTDB as a fallback.
+## How the formats work
 
-## Credits & licenses
+### 3DS CIA
 
-romm3ds is a fork of **NDSForwarder** and stands on a lot of other people's work.
+A downloaded or local `.cia` is streamed into the 3DS title database with
+`AM_StartCiaInstall`. It does not need the DS forwarder chain and has no
+artwork or screen-filter customization because the CIA already contains its
+own application metadata.
 
-- **[NDSForwarder](https://github.com/volkanturkut/NDSForwarder)** by Volkan Turkut, itself a fork of **[ndsForwarder](https://github.com/MechanicalDragon0687/ndsForwarder)** by RandalHoffman (MechanicalDragon0687) — the on-device DSiWare CIA builder, browser UI and forwarder machinery this project is built on. **GPL-3.0.**
-- **[YANBF](https://github.com/YANBForwarder/YANBF)** and **[YANBF assets](https://github.com/YANBForwarder/assets)** by lifehackerhansol — the forwarder payload design, `bootstrap.cia` TWL title, `build-cia.rsf`, and the per-game banner art/sound this app reuses. (MIT for the forwarder payload; see the YANBF repo.)
-- **[NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)**, **[nds-bootstrap](https://github.com/DS-Homebrew/nds-bootstrap)** and **[TWiLight Menu++](https://github.com/DS-Homebrew/TWiLightMenu)** by RocketRobz and the DS-Homebrew team — the runtime chain that actually boots the ROMs.
-- **[RomM](https://github.com/rommapp/romm)** by the RomM team — the library server this client talks to.
-- Forwarder DSiWare template from **Olmectron**'s Forwarder3-DS (`sdcard.nds`/`.fwd`).
-- Tooling: **[makerom / ctrtool](https://github.com/3DSGuy/Project_CTR)** by 3DSGuy, **[bannertool](https://github.com/carstene1ns/3ds-bannertool)** (carstene1ns' maintained fork of Steveice10's), and the **[devkitPro](https://devkitpro.org/)** toolchain (devkitARM, libctru, citro2d) by WinterMute et al.
-- FS/AM usage patterns referenced from **[FBI](https://github.com/Steveice10/FBI)** by Steveice10.
+### Nintendo DS forwarder
+
+The 3DS cannot run DS games directly. A forwarder is a small HOME-menu title
+that tells nds-bootstrap which `.nds` file to boot. `romm3ds` patches a
+prebuilt template CIA on the console, adds the selected icon/banner/sound and
+installs it with a unique title ID.
+
+At launch, the forwarder writes the ROM path to
+`sd:/_nds/ntr-forwarder/path.txt` and chainloads the YANBF bootstrap title.
+The runtime chain is:
+
+```text
+HOME menu → romm3ds forwarder → YANBF bootstrap → NTR_Forwarder → nds-bootstrap → game
+```
+
+Banner assets are mirrored under `sd:/3ds/forwarder/assets/` for offline use.
+The [YANBF assets](https://github.com/YANBForwarder/assets) repository is the
+primary source, with GameTDB and other artwork sources used as fallbacks.
+
+### Game Boy Advance VC inject
+
+A GBA ROM is embedded into a native AGB_FIRM Virtual Console CIA. The builder
+uses the bundled template pieces in `romfs/gba/`, detects the save type using
+the bundled database and patches the selected colour LUT before installing the
+CIA to the HOME menu.
+
+GBA ROMs remain on the SD card after installation because the app needs the
+source ROM for artwork changes and reinstall operations.
+
+## Documentation
+
+- [GBA design and implementation notes](docs/GBA-PLAN.md)
+- [Artwork and install UX](docs/ART-UX-SPEC.md)
+- [Manage installed 3DS titles](docs/MANAGE-3DS-TITLES.md)
+- [3DS installation detection](docs/3DS-INSTALL-DETECTION.md)
+- [NDS forwarder detection](docs/NDS-FORWARDER-DETECTION.md)
+- [Menu consistency model](docs/menu-consistency.md)
+- [Performance investigation](docs/PERF-PLAN.md)
+- [Responsiveness investigation](docs/RESPONSIVENESS-PLAN.md)
+
+## Credits and licences
+
+`romm3ds` is a fork of **NDSForwarder** and incorporates work from many
+upstream projects:
+
+- **[NDSForwarder](https://github.com/volkanturkut/NDSForwarder)** by Volkan
+  Turkut, itself based on **[ndsForwarder](https://github.com/MechanicalDragon0687/ndsForwarder)**
+  by RandalHoffman. GPL-3.0.
+- **[YANBF](https://github.com/YANBForwarder/YANBF)** and
+  **[YANBF assets](https://github.com/YANBForwarder/assets)** by lifehackerhansol.
+- **[NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)**,
+  **[nds-bootstrap](https://github.com/DS-Homebrew/nds-bootstrap)** and
+  **[TWiLight Menu++](https://github.com/DS-Homebrew/TWiLightMenu)** by the
+  RocketRobz and DS-Homebrew teams.
+- **[RomM](https://github.com/rommapp/romm)** by the RomM team.
+- The forwarder DSiWare template from **Olmectron**'s Forwarder3-DS.
+- **[makerom / ctrtool](https://github.com/3DSGuy/Project_CTR)**,
+  **[bannertool](https://github.com/carstene1ns/3ds-bannertool)** and the
+  **[devkitPro](https://devkitpro.org/)** toolchain.
+- **[FBI](https://github.com/Steveice10/FBI)** for FS/AM usage patterns.
 
 Vendored third-party source:
 
-- **[miniz](https://github.com/richgel999/miniz)** (Rich Geldreich) — on-device zip extraction. MIT.
-- **[stb_image](https://github.com/nothings/stb)** (Sean Barrett) — cover decoding. Public domain / MIT.
-- **[nlohmann/json](https://github.com/nlohmann/json)** — RomM API parsing. MIT.
+- [miniz](https://github.com/richgel999/miniz) — MIT.
+- [stb_image](https://github.com/nothings/stb) — public domain / MIT.
+- [nlohmann/json](https://github.com/nlohmann/json) — MIT.
 
-This project is released under the **GPL-3.0** (inherited from NDSForwarder). See `LICENSE.md`. The upstream NDSForwarder README is preserved as `README.upstream.md`.
-
-## Thanks
-
-To everyone above, and to Martin Korth (GBATEK) for the NDS/DSi format documentation that makes any of this possible.
+This project is released under the **GPL-3.0**. See [LICENSE.md](LICENSE.md).
+The upstream README is preserved as [README.upstream.md](README.upstream.md).

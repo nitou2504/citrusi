@@ -1,9 +1,10 @@
 # Art & install UX — full spec (GBA + NDS)
 
-Status: **implemented (2026-07-11) — pending hardware test.** All flows below
-are built on `feat/gba` (`artquery` / `artfetch` / `artstore` / `artpicker` +
-menu wiring; see the [GBA-PLAN.md](GBA-PLAN.md) progress log for the module
-map). Implementation deviations: art.json keys by extension-less stem, the
+Status: **implemented and hardware-verified (2026-07-12 onward).** All flows below
+are part of the stable `main` build (`artquery` / `artfetch` / `artstore` /
+`artpicker` + menu wiring; see the [GBA-PLAN.md](GBA-PLAN.md) progress log for
+the module map). Remaining test caveats are called out explicitly below.
+Implementation deviations: art.json keys by extension-less stem, the
 Manage marker renders as `[!]` (font safety), the NDS notify runs at build
 time (after download — the GameTDB chain needs the ROM on SD), GameTDB
 isn't repeated as a picker candidate (the RomM cover shows the same box),
@@ -49,8 +50,8 @@ Notes:
   stalled forever (no timeout in `RommClient::get`) while curl kept working —
   one hang even froze the console before soc init moved to app boot. `httpc`
   remains only for the proven paths: game downloads and the cover-prefetch
-  worker (paused while art resolves). NDS `fetchBoxart` (assets/YANBF/GameTDB)
-  still uses httpc — untested risk, same flow.
+  worker (paused while art resolves). NDS `fetchBoxart` (assets/YANBF/GameTDB) still uses httpc; this remains a
+  known transport caveat and is kept in the open-test notes below.
 
 ## 3. Name handling
 

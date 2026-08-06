@@ -4,15 +4,15 @@ Status: **core + art layer shipped and hardware-verified (2026-07-12).**
 The on-device VC injector, save-type detection, full GBA app integration and
 the icon/banner art layer ([ART-UX-SPEC.md](ART-UX-SPEC.md)) all work on the
 New 3DS XL. See CHANGELOG.md ("the GBA + art release") for the full feature
-and fix list. Companion server is the user's existing RomM instance.
+and fix list. A RomM instance is an optional companion server.
 
 ## Progress log
 
-Done (on `feat/gba`, verified on hardware):
+Done on `main` (verified on hardware):
 - **SGDB TLS transport** — curl+mbedtls (TLS 1.2 ECDHE-ECDSA) reaches
   SteamGridDB where `httpc`/`sslc` (TLS 1.1) can't. `sgdb.cpp` client (search
   / icons / image fetch), key from `sd:/3ds/romm3ds/sgdb.env`. Hardware-tested
-  end to end; **not yet wired to any UI** (that's the art layer).
+  end to end and wired into the artwork picker and install flows.
 - **VC inject builder** (`ctrbuilder.cpp buildGbaCIA`) — `.code` = ROM +
   AGB_FIRM `.CAA` footer; NCCH assembled from vendored vcoven template pieces
   (`romfs/gba/`, MIT); CIA shell reused from the forwarder template. Assembles
@@ -50,10 +50,10 @@ it work are worth keeping:
   fetches go over curl/soc, initialized at app boot, with the cover-prefetch
   worker paused while the foreground owns the network.
 
-Art layer (was "built, pending hardware test"):
+Art layer (implemented and hardware-verified):
 - **Art layer** (icons + banners) for GBA *and* NDS — the
-  [ART-UX-SPEC.md](ART-UX-SPEC.md) flow, built 2026-07-11 (untested on
-  hardware). New modules: `artquery.cpp` (sanitizer/norm/confidence),
+  [ART-UX-SPEC.md](ART-UX-SPEC.md) flow, built and verified on hardware.
+  New modules: `artquery.cpp` (sanitizer/norm/confidence),
   `artfetch.cpp` (icon48/bannerTex renderers + tiered fetch), `artstore.cpp`
   (art.json + raw image cache under `sd:/3ds/romm3ds/cache/art/`),
   `artpicker.cpp` (S4 thumb grid). Wiring: GBA install auto-resolve before
@@ -309,24 +309,22 @@ GET http://<bridge>:PORT/gba-icon?name=<No-Intro name>        (or ?crc= / ?sgdb_
 Alternative if any inject step runs on a PC: bake the SteamGridDB icon straight
 into the SMDH at build time (Option B) — highest fidelity, zero 3DS networking.
 
-## Art layer (BUILT 2026-07-11 — pending hardware test)
+## Art layer implementation record
 
-Everything below is documented in full in [ART-UX-SPEC.md](ART-UX-SPEC.md);
-this was the build-order summary. All six steps are implemented (see the
-progress log above for the module map and spec deviations); what remains is
-the on-hardware pass over the flows.
+Everything below is documented in full in [ART-UX-SPEC.md](ART-UX-SPEC.md).
+This section records the implementation order and the remaining limitations;
+the shipped flows have been exercised on hardware.
 
 Build order (all done):
 1. **`sgdb.cpp` → UI glue.** The client works; add: sanitizer (`artquery`),
    `norm()` confidence scoring, on-disk cache under
    `sdmc:/3ds/romm3ds/cache/art/`. First consumer: bake the chosen 48×48 into
-   the GBA SMDH (`buildGbaCIA` already accepts an `icon48` arg — currently
-   passed `""`).
-2. **libretro banner fetch** (GBA) over the existing `httpc` — exact No-Intro
-   name, 404-retry with tags stripped. Feeds `buildGbaCIA`'s `bannerTex` arg.
+   the GBA SMDH (`buildGbaCIA` accepts the resolved `icon48` art piece).
+2. **libretro banner fetch** (GBA) — exact No-Intro name with a
+   tag-stripped retry. Feeds `buildGbaCIA`'s `bannerTex` argument.
 3. **Auto path + missing-art notify** (screens S1/S2 in the spec): strong SGDB
-   match → silent; weak/none → the one notify dialog with `[Search]` /
-   `[Use RomM cover]`. Wire into `RommInstall`.
+   match → silent; weak/none → one notify dialog with search or cover
+   fallback. Wired into local, batch and RomM installs.
 4. **Picker** (screen S4): bottom-screen thumb grid, reuse the covercache
    async pattern; `X` refine, `Y` icon/banner page. Shared by GBA + NDS.
 5. **`art.json` persistence** + the ⚠ Manage marker; **Change art** in Manage

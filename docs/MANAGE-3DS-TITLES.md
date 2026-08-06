@@ -1,6 +1,6 @@
 # Manage → 3DS: list ALL installed titles (DONE, 2026-07-12)
 
-Shipped on `feat/manage-3ds`. What landed:
+Shipped on `main`. What landed:
 
 - `installedtitles.{hpp,cpp}` — AM enumeration + `TitleKind` classification,
   SMDH name reader with an SD name cache (`sd:/3ds/forwarder/smdhnames.json`,
@@ -11,8 +11,9 @@ Shipped on `feat/manage-3ds`. What landed:
   metadata and get an "on RomM" chip; the rest are named from their SMDH.
   Our own forwarders/injects, DSiWare, system titles and the app itself are
   filtered out.
-- Uninstall works on any listed title and offers **+ extras** when an update
-  (`0004000E`) or DLC (`0004008C`) with the same unique id is installed.
+- Uninstall works on any listed title. For an update (`0004000E`) or DLC
+  (`0004008C`) with the same unique id, the current menu offers removal of
+  the game, both extras, the update only or the DLC only.
 - The Manage system picker's bottom panel shows bytes + counts per system
   (DS forwarders / GBA injects / 3DS apps / updates+DLC) and SD free.
 - Deferred: A-Z sort toggle, "orphaned update/DLC" cleanup for games that are
@@ -95,17 +96,16 @@ banners not SMDH, orphaned updates/DLC, cover-worker SD contention (pause it).
 
 ---
 
-## Status: implemented (2026-07-12, branch feat/manage-3ds -> feat/integration)
+## Status: implemented (2026-07-12)
 
 Built as planned: `installedtitles.{hpp,cpp}` (enumerate + classify + SMDH
 names + `smdhnames.json` cache + storage tally), Manage->3DS listing every
-installed app biggest-first, uninstall with protection and an optional
-`+ extras` (update/DLC) step, and the storage panel on the Manage system
-picker. Build-verified; not yet exercised on hardware.
+installed app biggest-first, protected uninstall with granular update/DLC
+removal, and the storage panel on the Manage system picker. The implementation
+is included in `main`; the hardware findings are recorded below.
 
 Deferred:
 - A-Z sort toggle (size-desc is the only order today).
-- Batch uninstall doesn't offer the `+ extras` step (single uninstall does).
 - Orphaned update/DLC cleanup for games that are no longer installed.
 
 
@@ -133,7 +133,5 @@ Deferred:
 
 - Cache-first + background refresh for the Manage list/tally (the librefresh
   pattern), so the first open of a session isn't a blocking AM+SMDH sweep.
-- Managing updates/DLC individually (today: counted, shown per game, and
-  removable with their game via `+ extras`).
-- A-Z sort toggle; batch uninstall doesn't offer `+ extras`; orphaned
-  update/DLC cleanup for games that are already gone.
+- A-Z sort toggle.
+- Orphaned update/DLC cleanup for games that are already gone.

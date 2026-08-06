@@ -2,7 +2,12 @@
 
 All notable changes to romm3ds. Dates are the working days the changes landed.
 
-## v1.1 — offline-first, plain language & menu coherence (2026-07-15)
+## v1.1 — offline-first, plain language & menu coherence (2026-07-23)
+
+### Fixed (2026-07-23)
+
+- **RomM 5.x base-game downloads** now accept the server's `game` base-file
+  category as well as the older null-category form used by RomM 4.x.
 
 ### Changed (2026-07-15) — plain language & consolidation
 - **The UI speaks in plain terms.** The mechanism is hidden: no more
