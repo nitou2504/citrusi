@@ -28,7 +28,8 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 
 APP_TITLE	:= romm3ds
-APP_DESCRIPTION := Install 3DS, GBA and DS games with art
+APP_VERSION	:= $(shell sed -n 's/^#define VERSION "\([^\"]*\)"/\1/p' include/settings.hpp | tr -d '\r')
+APP_DESCRIPTION := Install 3DS, GBA and DS games with art ($(APP_VERSION))
 APP_AUTHOR := Nitou25
 
 TARGET		:=	$(notdir $(CURDIR))

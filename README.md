@@ -7,6 +7,9 @@ proper HOME-menu titles. `romm3ds` works from files on the SD card and can also
 use a self-hosted [RomM](https://github.com/rommapp/romm) server as an optional
 download source.
 
+**Current release: `v1.1`** — offline-first browsing, GBA artwork and screen
+presets, coherent install/manage flows and RomM 5.x compatibility.
+
 ![romm3ds library, manage and HOME screens](docs/screens.png)
 
 | Library | Manage | HOME menu |
@@ -101,7 +104,11 @@ romm3ds.cia
 ```
 
 The GitHub Actions workflow runs the complete `./build.sh all` path and
-uploads the `.3dsx`, `.smdh` and `.cia` as one build artifact.
+checks the `.3dsx`, `.smdh` and `.cia`. Push a matching version tag such as
+`v1.1` to create a GitHub Release with the individual files as raw downloads.
+The separate Actions build artifact may still be presented as a ZIP because
+that is how GitHub packages workflow artifacts; use the Release page for the
+uncompressed files.
 
 For hardware iteration over FTP:
 
@@ -110,6 +117,23 @@ For hardware iteration over FTP:
 ```
 
 This performs a clean 3DSX build and uploads it to `sd:/3ds/romm3ds.3dsx`.
+
+## Release files
+
+The release page contains these individual downloads:
+
+- **`romm3ds.3dsx`** — the executable Homebrew Launcher build. Copy it to
+  `sd:/3ds/` and launch it from the Homebrew Launcher.
+- **`romm3ds.smdh`** — the 3DS metadata file. It contains the app title, author,
+  description and icon used by 3DS homebrew tooling. It is not executable; the
+  3DSX build already receives this metadata during packaging, but keeping the
+  sidecar beside the 3DSX is useful for tools and launchers.
+- **`romm3ds.cia`** — the installable HOME-menu title. Install it with FBI;
+  this is the file to use when you want a normal icon on the HOME menu.
+- **`SHA256SUMS`** — checksums for the three release files.
+
+GitHub may also show automatic source-code ZIP/TAR links. Those are generated
+by GitHub and are separate from the raw application assets above.
 
 ## How the formats work
 
