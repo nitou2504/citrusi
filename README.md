@@ -2,14 +2,32 @@
 
 [![Build 3DS artifacts](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml)
 
-Offline-first Nintendo 3DS homebrew for turning a personal ROM library into
-proper HOME-menu titles. `romm3ds` works from files on the SD card and can also
-use a self-hosted [RomM](https://github.com/rommapp/romm) server as an optional
-download source.
+Install your 3DS, Nintendo DS and Game Boy Advance games directly on the
+console. Put your game files on the SD card, or connect an optional
+[RomM](https://github.com/rommapp/romm) server, choose a game and press
+**Install**. `romm3ds` does the rest on the 3DS:
 
-**Current release: `v1.1`** — offline-first browsing, GBA artwork and screen
-presets, coherent install/manage flows and RomM 5.x compatibility. Download
-it from the [v1.1 release page](https://github.com/nitou2504/romm3ds/releases/tag/v1.1).
+- It finds and downloads cover art, HOME-menu icons and banners from the
+  available artwork sources.
+- For Nintendo DS games, it also finds the matching banner and game jingle.
+- It builds the required HOME-menu title and installs it without a PC in the
+  middle of the process.
+- Downloaded art is cached on the SD card, so it can be reused offline later.
+
+The supported inputs are:
+
+- **3DS:** ready-to-install `.cia` files.
+- **Nintendo DS:** `.nds` files, which become individual HOME-menu games.
+- **Game Boy Advance:** `.gba` files, which become individual HOME-menu games
+  with selectable screen presets.
+- **ZIP archives:** extracted on the console before installation.
+
+A RomM server is optional. The app is designed to work from the files already
+on the SD card first.
+
+**Current release: `v1.1`** — offline-first browsing, on-console artwork,
+GBA screen presets, coherent install/manage flows and RomM 5.x compatibility.
+Download it from the [v1.1 release page](https://github.com/nitou2504/romm3ds/releases/tag/v1.1).
 
 ![romm3ds library, manage and HOME screens](docs/screens.png)
 
@@ -19,32 +37,26 @@ it from the [v1.1 release page](https://github.com/nitou2504/romm3ds/releases/ta
 
 ## Features
 
-- **Browse SD Card** — navigate from `sd:/roms` into subfolders and back to the
-  SD root. Files are identified by extension, so `.cia`, `.nds` and `.gba`
-  files can live wherever the user keeps them. ZIP archives are inspected and
-  extracted on the 3DS.
-- **Install 3DS games** — install a `.cia` directly to the 3DS title database
-  through `am:net`. A source CIA is deleted after installation by default,
-  because the installed title is the copy that remains on the console.
-- **Install Nintendo DS games** — build a YANBF-style HOME-menu forwarder for
-  an `.nds` file. The forwarder launches the ROM through nds-bootstrap and can
-  use the ROM's icon plus downloaded banner art and sound.
-- **Install Game Boy Advance games** — build a native AGB_FIRM Virtual Console
-  CIA on the device. GBA installs support artwork and five built-in screen
-  presets, including per-game filter memory.
-- **Artwork tools** — use RomM covers, YANBF assets, GameTDB, libretro logos,
-  SteamGridDB and iiSU where available. Artwork is cached on the SD card and
-  can be changed later from Manage.
-- **Manage installed titles** — view storage usage, installation state and
-  title metadata; reinstall, change artwork, remove ROMs, uninstall games and
-  remove 3DS updates/DLC where applicable.
+- **Browse SD Card** — open `sd:/roms`, enter folders, return to the SD root
+  and install games wherever they are stored. Use `Y` to mark several games
+  and `R` to select all or none.
+- **Install 3DS games** — install a supplied `.cia` to the HOME menu. The
+  source CIA is deleted after installation by default because the installed
+  title is the copy that remains on the console.
+- **Install Nintendo DS games** — turn an `.nds` file into its own HOME-menu
+  game with its icon, banner art and matching jingle.
+- **Install Game Boy Advance games** — turn a `.gba` file into its own
+  HOME-menu game with artwork and five built-in screen presets.
+- **Artwork and sound** — automatically search several game-art sources for
+  the best available cover, icon, banner and DS jingle. Chosen artwork can be
+  changed later from Manage.
+- **Manage installed games** — see storage usage, reinstall games, change art,
+  remove ROMs, uninstall titles and remove 3DS updates/DLC where applicable.
 - **Optional RomM Library** — browse the `3ds`, `nds` and `gba` platforms over
   HTTP Basic authentication. RomM 4.x and 5.x base-game responses are
-  supported. Downloads use the same local install flow as files from the SD
-  card.
-- **Settings** — configure the RomM server, language, GBA screen preset,
-  artwork notifications, artwork source preferences and the delete-after-
-  install policy.
+  supported, and downloads use the same install flow as local files.
+- **Settings** — configure RomM, language, GBA screen presets, artwork
+  notifications and the delete-after-install policy.
 
 ## Requirements
 
