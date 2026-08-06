@@ -70,7 +70,7 @@ void Dialog::draw() {
     if (oy < this->y + 30.0f) oy = this->y + 30.0f;
     for (size_t i = 0; i < n; i++) {
         float ry = oy + (float)i*pitch;
-        bool hot = (this->selected == (int)i);
+        bool hot = (this->selected == i);
         if (hot) C2D_DrawRectSolid(this->x+12, ry, 0.4f, this->width-24, rowH, COL_ACCENT);
         drawText(this->x+22, ry + rowH*0.5f, 0.5f, 0.5f, 0,
                  hot ? HIGHLIGHT_FOREGROUND : COL_TEXT_DIM, this->options[i].c_str(), 0);

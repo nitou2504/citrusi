@@ -3024,29 +3024,6 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         return this->queue.size() > 0;
     }
 
-    // TWL forwarder duplicate-title flow (item: random tid on demand): the
-    // first build keeps the rom's own game code; when that title id is
-    // already installed (rom hacks share the original's code), ask — install
-    // as a new copy with a random title id (keeps both) or overwrite.
-    // B keeps the ALREADY_EXISTS result, which the caller reports as-is.
-    static ReturnResult* buildTwlResolvingDuplicate(Builder* builder, C3D_RenderTarget* target,
-                                                    const std::string& romPath,
-                                                    const std::string& showName,
-                                                    const std::string& customTitle,
-                                                    bool force) {
-        ReturnResult* r = builder->buildCIA(romPath, false, customTitle, force);
-        if (r != nullptr && r->code == ERROR_INSTALL_ALREADY_EXISTS) {
-            int c = actionMenu(target, "Already installed", showName, {
-                {"Install as new", "Give this copy a random title ID so both stay installed. For rom hacks that share the original's game code."},
-                {"Overwrite", "Replace the installed game with this one."}});
-            if (c >= 0) {
-                delete r;
-                r = builder->buildCIA(romPath, c == 0, customTitle, true);
-            }
-        }
-        return r;
-    }
-
     Menu* Menu::handleQueue(Builder* builder, C3D_RenderTarget* target, Config* config) {
         gConfigPtr = config;
         // collect a finished background library refresh (only between actions).

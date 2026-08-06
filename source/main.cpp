@@ -162,7 +162,6 @@ int main()
 		//Scan all the inputs. This should be done once for each frame
 		hidScanInput();
 		u32 kDown = hidKeysDown();
-		u32 kHeld = hidKeysHeld();
 
 		// Touch Handling
 		touchPosition touch;
