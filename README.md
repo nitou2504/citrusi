@@ -12,15 +12,13 @@ use.
 ZIP files are supported, but uncompressed files are recommended because ZIP
 extraction takes longer on the console.
 
-**Current release: `v1.1`** — on-console installation, artwork and sound,
-GBA screen presets, folder installs and RomM support. Download it from the
-[v1.1 release page](https://github.com/nitou2504/romm3ds/releases/tag/v1.1).
-
 ![romm3ds library, manage and HOME screens](docs/screens.png)
 
 | Library | Manage | HOME menu |
 |---|---|---|
 | ![Library screen](docs/library.png) | ![Manage screen](docs/manage.png) | ![HOME screen](docs/home.png) |
+
+**[Get the latest release here.](https://github.com/nitou2504/romm3ds/releases/tag/v1.1)**
 
 ## Features
 
@@ -47,23 +45,13 @@ GBA screen presets, folder installs and RomM support. Download it from the
 
 ## Requirements
 
-### Console
-
 - A 3DS with Luma3DS CFW and the Homebrew Launcher.
-- For Nintendo DS forwarders: the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)
-  DS Forwarder Pack (`_nds` on the SD root), a working
-  [TWiLight Menu++](https://github.com/DS-Homebrew/TWiLightMenu) /
-  nds-bootstrap installation, and the YANBF `bootstrap.cia` TWL title
-  (`0004800546574452`) installed to NAND.
-- A RomM instance is optional. When used, it must be reachable from the 3DS
-  over the local network. HTTP and HTTPS are accepted; HTTPS certificate
-  verification is disabled by the current client.
-
-### Build machine
-
-- Docker, for the official `devkitpro/devkitarm` image.
-- Internet access on the first build so `makerom` and `bannertool` can be
-  downloaded into the ignored `tools/bin/` directory.
+- To install Nintendo DS games, the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)
+  DS Forwarder Pack, TWiLight Menu++ / nds-bootstrap and the YANBF
+  `bootstrap.cia` title must already be installed on the SD card/console.
+- Internet access is optional for local files, but is needed for RomM and for
+  the first download of artwork and DS sound. Cached artwork can be reused
+  offline.
 
 ## Install on a 3DS
 
@@ -81,59 +69,6 @@ the connection from the RomM settings screen.
 The default browse location is `sd:/roms`. The browser is not restricted to
 that folder: use `B` or the `.. (up)` row to reach the SD root and browse any
 other folder containing ROMs.
-
-## Build
-
-The normal build creates the forwarder template, the Homebrew Launcher build
-and the installable CIA:
-
-```sh
-./build.sh              # template + 3DSX + CIA
-./build.sh 3dsx         # template + 3DSX
-./build.sh cia          # template + 3DSX + CIA
-./build.sh template     # forwarder template only
-```
-
-Generated files are written at the repository root and are ignored by Git:
-
-```text
-romm3ds.3dsx
-romm3ds.smdh
-romm3ds.elf
-romm3ds.cia
-```
-
-The GitHub Actions workflow runs the complete `./build.sh all` path and
-checks the `.3dsx`, `.smdh` and `.cia`. Push a matching version tag such as
-`v1.1` to create a GitHub Release with the individual files as raw downloads.
-The separate Actions build artifact may still be presented as a ZIP because
-that is how GitHub packages workflow artifacts; use the Release page for the
-uncompressed files.
-
-For hardware iteration over FTP:
-
-```sh
-./push.sh 192.168.0.23
-```
-
-This performs a clean 3DSX build and uploads it to `sd:/3ds/romm3ds.3dsx`.
-
-## Release files
-
-The release page contains these individual downloads:
-
-- **`romm3ds.3dsx`** — the executable Homebrew Launcher build. Copy it to
-  `sd:/3ds/` and launch it from the Homebrew Launcher.
-- **`romm3ds.smdh`** — the 3DS metadata file. It contains the app title, author,
-  description and icon used by 3DS homebrew tooling. It is not executable; the
-  3DSX build already receives this metadata during packaging, but keeping the
-  sidecar beside the 3DSX is useful for tools and launchers.
-- **`romm3ds.cia`** — the installable HOME-menu title. Install it with FBI;
-  this is the file to use when you want a normal icon on the HOME menu.
-- **`SHA256SUMS`** — checksums for the three release files.
-
-GitHub may also show automatic source-code ZIP/TAR links. Those are generated
-by GitHub and are separate from the raw application assets above.
 
 ## How the formats work
 
@@ -173,17 +108,6 @@ CIA to the HOME menu.
 GBA ROMs remain on the SD card after installation because the app needs the
 source ROM for artwork changes and reinstall operations.
 
-## Documentation
-
-- [GBA design and implementation notes](docs/GBA-PLAN.md)
-- [Artwork and install UX](docs/ART-UX-SPEC.md)
-- [Manage installed 3DS titles](docs/MANAGE-3DS-TITLES.md)
-- [3DS installation detection](docs/3DS-INSTALL-DETECTION.md)
-- [NDS forwarder detection](docs/NDS-FORWARDER-DETECTION.md)
-- [Menu consistency model](docs/menu-consistency.md)
-- [Performance investigation](docs/PERF-PLAN.md)
-- [Responsiveness investigation](docs/RESPONSIVENESS-PLAN.md)
-
 ## Credits and licences
 
 `romm3ds` is a fork of **NDSForwarder** and incorporates work from many
@@ -213,3 +137,35 @@ Vendored third-party source:
 
 This project is released under the **GPL-3.0**. See [LICENSE.md](LICENSE.md).
 The upstream README is preserved as [README.upstream.md](README.upstream.md).
+
+## Building from source
+
+Builds require Docker and internet access on the first run so `makerom` and
+`bannertool` can be downloaded.
+
+```sh
+./build.sh              # template + 3DSX + CIA
+./build.sh 3dsx         # template + 3DSX
+./build.sh cia          # template + 3DSX + CIA
+./build.sh template     # forwarder template only
+```
+
+Generated files are written at the repository root and are ignored by Git:
+
+```text
+romm3ds.3dsx
+romm3ds.smdh
+romm3ds.elf
+romm3ds.cia
+```
+
+GitHub Actions builds the same files. Version tags create releases with the
+individual CIA, 3DSX and SMDH files.
+
+For hardware iteration over FTP:
+
+```sh
+./push.sh 192.168.0.23
+```
+
+This performs a clean 3DSX build and uploads it to `sd:/3ds/romm3ds.3dsx`.
