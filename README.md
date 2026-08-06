@@ -8,7 +8,8 @@ use a self-hosted [RomM](https://github.com/rommapp/romm) server as an optional
 download source.
 
 **Current release: `v1.1`** — offline-first browsing, GBA artwork and screen
-presets, coherent install/manage flows and RomM 5.x compatibility.
+presets, coherent install/manage flows and RomM 5.x compatibility. Download
+it from the [v1.1 release page](https://github.com/nitou2504/romm3ds/releases/tag/v1.1).
 
 ![romm3ds library, manage and HOME screens](docs/screens.png)
 

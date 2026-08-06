@@ -30,6 +30,27 @@ jobs:
       - name: Build all release files
         run: ./build.sh all
 
+      - name: Extract release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_TAG"]
+          lines = Path("CHANGELOG.md").read_text().splitlines()
+          heading = re.compile(r"^## " + re.escape(version) + r"(?:\s|$)")
+          start = next((i for i, line in enumerate(lines) if heading.match(line)), None)
+          if start is None:
+              raise SystemExit(f"No changelog section found for {version}")
+          end = next((i for i in range(start + 1, len(lines))
+                      if lines[i].startswith("## ")), len(lines))
+          notes = "\n".join(lines[start + 1:end]).strip() + "\n"
+          Path("release-notes.md").write_text(notes)
+          PY
+
       - name: Publish raw release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -38,7 +59,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "romm3ds $GITHUB_REF_NAME" \
-            --generate-notes \
+            --verify-tag \
+            --notes-file release-notes.md \
             romm3ds.3dsx \
             romm3ds.smdh \
             romm3ds.cia \
