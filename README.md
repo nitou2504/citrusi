@@ -2,15 +2,12 @@
 
 [![Release build](https://github.com/nitou2504/romm3ds/actions/workflows/release.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/release.yml)
 
-Install 3DS, Nintendo DS and Game Boy Advance games directly on the
-console. Copy `.cia`, `.nds` or `.gba` files to the SD card, or connect an
-optional [RomM](https://github.com/rommapp/romm) server. Install one game or a
-whole folder; artwork can be selected automatically or chosen by you. DS
-games also get matching banner art and sound, and artwork is cached for offline
-use.
+Install 3DS, DS and GBA games directly on your console with nice looking art! No PC needed.
+Copy `.cia`, `.nds` or `.gba` files to the SD card (or connect a [RomM](https://github.com/rommapp/romm) instance). Install one game or a
+whole folder. Artwork (Icon and Banner) is scraped automatically (Or chosen per game). DS
+games also get a jingle from the [YANBF sounds repo](https://github.com/YANBForwarder/assets).
 
-ZIP files are supported, but uncompressed files are recommended because ZIP
-extraction takes longer on the console.
+ZIP files are supported, but uncompressed files are recommended to speed up the installs.
 
 ![romm3ds library, manage and HOME screens](docs/screens.png)
 
@@ -25,92 +22,70 @@ extraction takes longer on the console.
 - **Browse SD Card** — open `sd:/roms`, enter folders, return to the SD root
   and install games wherever they are stored. Use `Y` to mark several games
   and `R` to select all or none.
-- **Install 3DS games** — install a supplied `.cia` to the HOME menu. The
-  source CIA is deleted after installation by default because the installed
-  title is the copy that remains on the console.
+- **Install 3DS games** — install a supplied `.cia` to the HOME menu.
 - **Install Nintendo DS games** — turn an `.nds` file into its own HOME-menu
-  game with its icon, banner art and matching jingle.
+  game with its icon, banner art and jingle.
 - **Install Game Boy Advance games** — turn a `.gba` file into its own
-  HOME-menu game with artwork and five built-in screen presets.
-- **Artwork and sound** — automatically search several game-art sources for
-  the best available cover, icon, banner and DS jingle. Chosen artwork can be
-  changed later from Manage.
-- **Manage installed games** — see storage usage, reinstall games, change art,
-  remove ROMs, uninstall titles and remove 3DS updates/DLC where applicable.
-- **Optional RomM Library** — browse the `3ds`, `nds` and `gba` platforms over
-  HTTP Basic authentication. RomM 4.x and 5.x base-game responses are
-  supported, and downloads use the same install flow as local files.
-- **Settings** — configure RomM, language, GBA screen presets, artwork
-  notifications and the delete-after-install policy.
+  HOME-menu game with artwork and optionally choose screen presets.
+- **Artwork** — automatically search several online sources for icon and banner art.
+- **Manage installed games** — see storage usage, change art, uninstall titles or remove 3DS updates/DLC to free up space.
+- **RomM Integration** — browse and install from your `3ds`, `nds` and `gba` lan instance over
+  HTTP Basic authentication. RomM 4.x and 5.x versions are
+  supported.
+- **Settings** — configure RomM, Default GBA screen presets, artwork
+  flow and the roms delete policy.
 
 ## Requirements
 
 - A 3DS with Luma3DS CFW and the Homebrew Launcher.
-- To install Nintendo DS games, the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)
+- For DS games, the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)
   DS Forwarder Pack, TWiLight Menu++ / nds-bootstrap and the YANBF
   `bootstrap.cia` title must already be installed on the SD card/console.
 - Internet access is optional for local files, but is needed for RomM and for
-  the first download of artwork and DS sound. Cached artwork can be reused
-  offline.
+  the artwork and DS jingles.
 
-## Install on a 3DS
-
-Choose one of these application formats:
+## Installation
 
 - **CIA:** install `romm3ds.cia` with FBI. This creates a normal HOME-menu
   application.
 - **3DSX:** copy `romm3ds.3dsx` to `sd:/3ds/` and launch it from the Homebrew
   Launcher.
 
-On first launch, the app opens with the offline SD-card flow. To use RomM,
-open **Settings**, enter the server address, username and password, then test
-the connection from the RomM settings screen.
+To use RomM, open **Settings**, enter the server address, username and password.
 
-The default browse location is `sd:/roms`. The browser is not restricted to
-that folder: use `B` or the `.. (up)` row to reach the SD root and browse any
-other folder containing ROMs.
+The default browse location is `sd:/roms`.
 
-## How the formats work
+## How each format works
 
-### 3DS CIA
+### 3DS
 
-A downloaded or local `.cia` is streamed into the 3DS title database with
-`AM_StartCiaInstall`. It does not need the DS forwarder chain and has no
-artwork or screen-filter customization because the CIA already contains its
-own application metadata.
+A `.cia` is streamed into the 3DS title database with
+`AM_StartCiaInstall`. Each game has its icon, banner and sound.
 
-### Nintendo DS forwarder
+### Nintendo DS
 
-The 3DS cannot run DS games directly. A forwarder is a small HOME-menu title
+A forwarder is a HOME-menu title
 that tells nds-bootstrap which `.nds` file to boot. `romm3ds` patches a
-prebuilt template CIA on the console, adds the selected icon/banner/sound and
+template CIA on the console, adds the selected icon/banner/sound and
 installs it with a unique title ID.
 
-At launch, the forwarder writes the ROM path to
-`sd:/_nds/ntr-forwarder/path.txt` and chainloads the YANBF bootstrap title.
-The runtime chain is:
+At launch, the forwarder passes the ROM path to
+`sd:/_nds/ntr-forwarder/path.txt` to boot the game.
 
-```text
-HOME menu → romm3ds forwarder → YANBF bootstrap → NTR_Forwarder → nds-bootstrap → game
-```
-
-Banner assets are mirrored under `sd:/3ds/forwarder/assets/` for offline use.
 The [YANBF assets](https://github.com/YANBForwarder/assets) repository is the
-primary source, with GameTDB and other artwork sources used as fallbacks.
+primary source for art.
 
-### Game Boy Advance VC inject
+### Game Boy Advance
 
-A GBA ROM is embedded into a native AGB_FIRM Virtual Console CIA. The builder
-uses the bundled template pieces in `romfs/gba/`, detects the save type using
-the bundled database and patches the selected colour LUT before installing the
-CIA to the HOME menu.
+A GBA ROM is embedded into a native AGB_FIRM Virtual Console CIA (**Not emulation**). The builder
+uses the bundled template pieces to create a GBA forwarder on the HOME-menu.
 
 GBA ROMs remain on the SD card after installation because the app needs the
-source ROM for artwork changes and reinstall operations.
+source ROM for artwork changes.
 
 ## Credits and licences
 
-`romm3ds` is a fork of **NDSForwarder** and incorporates work from many
+`romm3ds` started as fork of **NDSForwarder** and incorporates work from many
 upstream projects:
 
 - **[NDSForwarder](https://github.com/volkanturkut/NDSForwarder)** by Volkan
@@ -165,7 +140,7 @@ individual CIA, 3DSX and SMDH files.
 For hardware iteration over FTP:
 
 ```sh
-./push.sh 192.168.0.23
+./push.sh 192.168.0.23 #depending on your 3DS ip
 ```
 
 This performs a clean 3DSX build and uploads it to `sd:/3ds/romm3ds.3dsx`.
