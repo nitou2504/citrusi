@@ -1,6 +1,6 @@
 # romm3ds
 
-[![Build 3DS artifacts](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml)
+[![Release build](https://github.com/nitou2504/romm3ds/actions/workflows/release.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/release.yml)
 
 Install 3DS, Nintendo DS and Game Boy Advance games directly on the
 console. Copy `.cia`, `.nds` or `.gba` files to the SD card, or connect an
