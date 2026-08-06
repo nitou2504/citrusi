@@ -2,32 +2,19 @@
 
 [![Build 3DS artifacts](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/build.yml)
 
-Install your 3DS, Nintendo DS and Game Boy Advance games directly on the
-console. Put your game files on the SD card, or connect an optional
-[RomM](https://github.com/rommapp/romm) server, choose a game and press
-**Install**. `romm3ds` does the rest on the 3DS:
+Install 3DS, Nintendo DS and Game Boy Advance games directly on the
+console. Copy `.cia`, `.nds` or `.gba` files to the SD card, or connect an
+optional [RomM](https://github.com/rommapp/romm) server. Install one game or a
+whole folder; artwork can be selected automatically or chosen by you. DS
+games also get matching banner art and sound, and artwork is cached for offline
+use.
 
-- It finds and downloads cover art, HOME-menu icons and banners from the
-  available artwork sources.
-- For Nintendo DS games, it also finds the matching banner and game jingle.
-- It builds the required HOME-menu title and installs it without a PC in the
-  middle of the process.
-- Downloaded art is cached on the SD card, so it can be reused offline later.
+ZIP files are supported, but uncompressed files are recommended because ZIP
+extraction takes longer on the console.
 
-The supported inputs are:
-
-- **3DS:** ready-to-install `.cia` files.
-- **Nintendo DS:** `.nds` files, which become individual HOME-menu games.
-- **Game Boy Advance:** `.gba` files, which become individual HOME-menu games
-  with selectable screen presets.
-- **ZIP archives:** extracted on the console before installation.
-
-A RomM server is optional. The app is designed to work from the files already
-on the SD card first.
-
-**Current release: `v1.1`** — offline-first browsing, on-console artwork,
-GBA screen presets, coherent install/manage flows and RomM 5.x compatibility.
-Download it from the [v1.1 release page](https://github.com/nitou2504/romm3ds/releases/tag/v1.1).
+**Current release: `v1.1`** — on-console installation, artwork and sound,
+GBA screen presets, folder installs and RomM support. Download it from the
+[v1.1 release page](https://github.com/nitou2504/romm3ds/releases/tag/v1.1).
 
 ![romm3ds library, manage and HOME screens](docs/screens.png)
 
