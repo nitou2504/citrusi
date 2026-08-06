@@ -1,27 +1,39 @@
-name: Build 3dsx
+name: Build 3DS artifacts
 
-on:  workflow_dispatch
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Build CIA and 3DSX
     runs-on: ubuntu-latest
-    outputs:
-      VERSTRING: ${{ steps.verstring.outputs.VERSTRING }}
-    container:
-      image: devkitpro/devkitarm
-      options: --user 1001
     steps:
-    - uses: actions/checkout@v4
-    - name: build
-      run: |
-            make TARGET=ndsForwarder
-            mkdir -p build_output
-            cp -t build_output ndsForwarder.3dsx ndsForwarder.smdh
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4.6.2
-      with:
-        name: ndsForwarder
-        path: build_output
-        retention-days: 90
-        overwrite: true
-        
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build all artifacts
+        run: ./build.sh all
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p build_output
+          cp romm3ds.3dsx romm3ds.smdh romm3ds.cia build_output/
+          sha256sum build_output/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: romm3ds-build
+          path: build_output
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true

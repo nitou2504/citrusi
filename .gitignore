@@ -15,6 +15,7 @@ core
 *.srl1
 
 # downloaded tools + generated intermediates + local backups
+build_output/
 tools/bin/
 ctr-template/template.bnr
 cia/app.bnr
