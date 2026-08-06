@@ -75,6 +75,13 @@ static void artCacheStats(int& files, u64& bytes) {
         }
     }
 }
+// Scanning hundreds of files on the 3DS SD card is deliberately lazy. The
+// settings list must render without doing a full cache walk; the Art cache
+// row refreshes these values only after the user opens it.
+static bool gArtCacheStatsReady = false;
+static int gArtCacheFiles = 0;
+static u64 gArtCacheBytes = 0;
+
 static int artCacheClear() {
     int gone = 0;
     std::error_code ec;
@@ -2157,13 +2164,12 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         }
     }
 
-    // "Browse SD Card": a real folder browser, offline-first. Starts at the
-    // roms folder (sdmc:/roms) and walks up to the SD root and into any
-    // sibling folder — so a .cia the user keeps in sdmc:/cias, or roms parked
-    // anywhere, just work. Rows are subfolders (A enters, B goes up) plus the
-    // rom files in THIS folder, auto-typed by extension and marked "* " when
-    // installed. Per-folder: install one (A), art/screen pickers, Y multiselect,
-    // R all, "Install all here". No RomM needed; a cached library, if present,
+    // "Browse SD Card": an offline-first browser rooted at sdmc:/roms. It
+    // exposes only the three platform folders below; each folder lists its
+    // supported ROM files and nothing outside /roms is reachable here. Rows
+    // are typed by extension and marked "* " when installed. Per-folder:
+    // install one (A), art/screen pickers, Y multiselect, R all, and
+    // "Install all here". No RomM is needed; a cached library, if present,
     // lends its title/cover to the art pipeline.
 
     Menu* generateLocalMenu(Menu* prev, std::filesystem::path dir);   // fwd: rebuilds keep the folder
@@ -2380,12 +2386,11 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         static const char* gbaScreenNames[] = {"AGS-101 colors", "original dark filter", "unfiltered", "brighter gamma", "night (warm)"};
         add(SETTING_GBA_SCREEN,   std::string("GBA screen: ") + gbaScreenNames[config->gbaScreen % GBA_SCREEN_COUNT]);
         add(SETTING_MANAGE_ART,   std::string("Manage art: ") + (config->manageIcons ? "title icons" : "RomM covers"));
-        {
-            int cf; u64 cb;
-            artCacheStats(cf, cb);
-            add(SETTING_ART_CACHE, std::string("Art cache: ") +
-                (cf ? std::to_string(cf) + " files - " + humanSize(cb) : "empty"));
-        }
+        add(SETTING_ART_CACHE, std::string("Art cache: ") +
+            (gArtCacheStatsReady
+                ? (gArtCacheFiles ? std::to_string(gArtCacheFiles) + " files - " + humanSize(gArtCacheBytes)
+                                   : "empty")
+                : "press A to inspect"));
         if (config->templates.size() > 1)
             add(SETTING_TEMPLATE, "Template: " + config->templates.at(config->currentTemplate));
         gRomm.loadConfig();
@@ -3152,8 +3157,14 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                             break;
                         }
                         case SETTING_ART_CACHE: {
-                            int cf; u64 cb;
-                            artCacheStats(cf, cb);
+                            // This is the only place that walks the cache
+                            // directories. Keep the slow SD operation behind
+                            // an explicit action and show progress first.
+                            showLoading(target, {"Reading art cache..."});
+                            artCacheStats(gArtCacheFiles, gArtCacheBytes);
+                            gArtCacheStatsReady = true;
+                            int cf = gArtCacheFiles;
+                            u64 cb = gArtCacheBytes;
                             if (cf == 0) {
                                 Dialog(target,0,0,320,240,{"Art cache is empty."},{"OK"}).handle();
                                 break;
@@ -3170,6 +3181,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 CoverCachePause pause;   // the worker owns httpc + the SD
                                 gone = artCacheClear();
                             }
+                            gArtCacheStatsReady = false; // refresh lazily after the next A
                             coverCacheClearMisses();     // missing covers retry next browse
                             installedTitlesInvalidate(); // drop the RAM icon cache too
                             Dialog(target,0,0,320,240,{"Cleared " + std::to_string(gone) + " files",
