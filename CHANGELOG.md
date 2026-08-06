@@ -2,6 +2,24 @@
 
 All notable changes to romm3ds. Dates are the working days the changes landed.
 
+## v1.1.1 — settings responsiveness & HOME screenshots (2026-08-06)
+
+### Fixed
+
+- **Settings no longer stalls on every open or toggle.** Art-cache statistics
+  are now read only when the Art cache row is opened, with a loading message
+  shown while the SD card is scanned.
+
+### Changed
+
+- **Browse SD Card documentation now matches the app.** Local browsing is
+  limited to `sd:/roms/3ds`, `sd:/roms/nds` and `sd:/roms/gba`.
+
+### Added
+
+- Added current 3DS HOME-menu screenshots for Pokémon Pinball, Final Fantasy
+  Tactics A2 and Super Mario Bros. 3 to the README.
+
 ## v1.1 — offline-first, plain language & menu coherence (2026-07-23)
 
 ### Fixed (2026-07-23)
