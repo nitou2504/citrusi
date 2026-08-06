@@ -1,0 +1,45 @@
+name: Release 3DS artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Verify tag matches app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          app_version="$(sed -n 's/^#define VERSION "\([^\"]*\)"/\1/p' include/settings.hpp | tr -d '\r')"
+          test -n "$app_version"
+          test "$app_version" = "$RELEASE_TAG" || {
+            echo "Tag $RELEASE_TAG does not match app version $app_version"
+            exit 1
+          }
+
+      - name: Build all release files
+        run: ./build.sh all
+
+      - name: Publish raw release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum romm3ds.3dsx romm3ds.smdh romm3ds.cia > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "romm3ds $GITHUB_REF_NAME" \
+            --generate-notes \
+            romm3ds.3dsx \
+            romm3ds.smdh \
+            romm3ds.cia \
+            SHA256SUMS
