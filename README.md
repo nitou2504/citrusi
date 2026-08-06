@@ -1,27 +1,39 @@
 # romm3ds
 
+![Pokémon Pinball on the 3DS HOME menu](docs/home-pokemon-pinball.jpg)
+
 [![Release build](https://github.com/nitou2504/romm3ds/actions/workflows/release.yml/badge.svg)](https://github.com/nitou2504/romm3ds/actions/workflows/release.yml)
 
 Install 3DS, DS and GBA games directly on your console with nice looking art! No PC needed.
 Copy `.cia`, `.nds` or `.gba` files to the SD card (or connect a [RomM](https://github.com/rommapp/romm) instance). Install one game or a
-whole folder. Artwork (Icon and Banner) is scraped automatically (Or chosen per game). DS
+whole folder. Artwork (Icon and Banner) is scraped automatically (or chosen per game). DS
 games also get a jingle from the [YANBF sounds repo](https://github.com/YANBForwarder/assets).
+
+For local installs, the SD browser exposes only `sd:/roms/3ds`, `sd:/roms/nds`
+and `sd:/roms/gba`. Files in other folders are not shown by that browser.
 
 ZIP files are supported, but uncompressed files are recommended to speed up the installs.
 
-![romm3ds library, manage and HOME screens](docs/screens.png)
+![romm3ds library, manage and app menu screens](docs/screens.png)
 
-| Library | Manage | HOME menu |
+| Library | Manage | App menu |
 |---|---|---|
-| ![Library screen](docs/library.png) | ![Manage screen](docs/manage.png) | ![HOME screen](docs/home.png) |
+| ![Library screen](docs/library.png) | ![Manage screen](docs/manage.png) | ![App menu screen](docs/home.png) |
 
-**[Get the latest release here.](https://github.com/nitou2504/romm3ds/releases/tag/v1.1)**
+### Recent HOME-menu screenshots
+
+| Pokémon Pinball | Final Fantasy Tactics A2 | Super Mario Bros. 3 |
+|---|---|---|
+| ![Pokémon Pinball on the HOME menu](docs/home-pokemon-pinball.jpg) | ![Final Fantasy Tactics A2 on the HOME menu](docs/home-final-fantasy-tactics-a2.jpg) | ![Super Mario Bros. 3 on the HOME menu](docs/home-super-mario-bros-3.jpg) |
+
+**[Get the latest release here.](https://github.com/nitou2504/romm3ds/releases/tag/v1.1.1)**
 
 ## Features
 
-- **Browse SD Card** — open `sd:/roms`, enter folders, return to the SD root
-  and install games wherever they are stored. Use `Y` to mark several games
-  and `R` to select all or none.
+- **Browse SD Card** — open `sd:/roms` and choose one of the three exposed
+  folders: `3ds`, `nds` or `gba`. Put local `.cia`, `.nds` and `.gba` files in
+  the matching folder. Use `Y` to mark several games and `R` to select all or
+  none.
 - **Install 3DS games** — install a supplied `.cia` to the HOME menu.
 - **Install Nintendo DS games** — turn an `.nds` file into its own HOME-menu
   game with its icon, banner art and jingle.
@@ -53,7 +65,16 @@ ZIP files are supported, but uncompressed files are recommended to speed up the 
 
 To use RomM, open **Settings**, enter the server address, username and password.
 
-The default browse location is `sd:/roms`.
+The default browse location is `sd:/roms`. The local browser exposes only
+these folders:
+
+| Folder | Files |
+|---|---|
+| `sd:/roms/3ds` | `.cia` |
+| `sd:/roms/nds` | `.nds` and supported ZIP archives |
+| `sd:/roms/gba` | `.gba` and supported ZIP archives |
+
+It does not browse arbitrary folders outside `/roms`.
 
 ## How each format works
 
@@ -140,7 +161,7 @@ individual CIA, 3DSX and SMDH files.
 For hardware iteration over FTP:
 
 ```sh
-./push.sh 192.168.0.23 #depending on your 3DS ip
+./push.sh 192.168.0.22 # current 3DS IP; change it if DHCP assigns another address
 ```
 
 This performs a clean 3DSX build and uploads it to `sd:/3ds/romm3ds.3dsx`.
