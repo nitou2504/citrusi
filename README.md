@@ -2,7 +2,7 @@
   <h1>romm3ds</h1>
   <p>
     <strong>Install 3DS, DS and GBA games directly on your console with nice looking art!</strong><br>
-    No PC is needed to create DS and GBA HOME-menu titles.
+    No PC needed.
   </p>
   <p>
     <a href="https://github.com/nitou2504/romm3ds/releases/tag/v1.1.1"><img src="https://github.com/nitou2504/romm3ds/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
@@ -15,12 +15,14 @@
   <p align="center">
     <img src="docs/home-pokemon-pinball.jpg" width="250" alt="Pokémon Pinball installed on the 3DS HOME menu">
   </p>
-  <p><em>Pokémon Pinball running as a native HOME-menu title.</em></p>
+  <p><em>Pokémon Pinball HOME-menu title.</em></p>
 </div>
 
 ## What is romm3ds?
 
-Copy `.cia`, `.nds` or `.gba` files to the SD card (or connect a
+A 3DS Homebrew app to install 3DS, NDS, GBA games to your console's Home-menu including art. 
+
+To use it just copy `.cia`, `.nds` or `.gba` files to the SD card (or connect to your
 [RomM](https://github.com/rommapp/romm) instance). Install one game or a whole
 folder. Artwork (Icon and Banner) is scraped automatically (or chosen per
 game). DS games also get a jingle from the
@@ -35,7 +37,7 @@ the installs.
   <tr>
     <td align="center" valign="top">
       <img src="docs/home.png" width="210" alt="Current romm3ds base screen"><br>
-      <strong>Base screen</strong>
+      <strong>romm3ds</strong>
     </td>
     <td align="center" valign="top">
       <img src="docs/search.png" width="210" alt="Current RomM search screen"><br>
@@ -43,12 +45,12 @@ the installs.
     </td>
     <td align="center" valign="top">
       <img src="docs/manage.png" width="210" alt="Current Manage Installed screen with sizes"><br>
-      <strong>Manage with sizes</strong>
+      <strong>Manage</strong>
     </td>
   </tr>
 </table>
 
-<p align="center"><strong>GBA art selection</strong> — bottom-screen icon and banner pickers</p>
+<p align="center"><strong>Art selection</strong> — icon and banner pickers</p>
 
 <table align="center">
   <tr>
@@ -66,40 +68,20 @@ the installs.
 ## Features
 
 - **Browse SD Card** — open `sd:/roms` and choose one of the three exposed
-  folders: `3ds`, `nds` or `gba`. Put local `.cia`, `.nds` and `.gba` files in
-  the matching folder. Use `Y` to mark several games and `R` to select all or
-  none.
+  folders: `3ds`, `nds` or `gba`.
 - **Install 3DS games** — install a supplied `.cia` to the HOME menu.
-- **Install Nintendo DS games** — turn an `.nds` file into its own HOME-menu
+- **Install DS games** — turn an `.nds` file into its own HOME-menu
   game with its icon, banner art and jingle.
-- **Install Game Boy Advance games** — turn a `.gba` file into its own
-  HOME-menu game with artwork and optionally choose screen presets.
+- **Install GBA games** — turn a `.gba` file into its own
+  HOME-menu game with artwork (and optionally choose screen presets).
 - **Artwork** — automatically search several online sources for icon and banner
   art.
 - **Manage installed games** — see storage usage, change art, uninstall titles
   or remove 3DS updates/DLC to free up space.
 - **RomM Integration** — browse and install from your `3ds`, `nds` and `gba`
-  RomM libraries over HTTP Basic authentication. RomM 4.x and 5.x are
+  RomM library. RomM 4.x and 5.x are
   supported.
-- **Settings** — configure RomM, default GBA screen presets, artwork flow and
-  the roms delete policy.
 
-## Art sources
-
-SteamGridDB is the primary art source when a key is configured. It is searched
-first for a strong game match and is the first-choice source for GBA HOME icons.
-The key is read from `sd:/3ds/forwarder/sgdb.env`.
-
-| Source | Used for | Notes |
-|---|---|---|
-| [SteamGridDB](https://www.steamgriddb.com/) | GBA icons; NDS/GBA logos and picker art | Highest priority for strong matches and HOME icons; requires an API key. |
-| [libretro Named_Logos](http://thumbnails.libretro.com/Nintendo%20-%20Game%20Boy%20Advance/Named_Logos/) | GBA banners | Exact No-Intro filename match, with a tag-stripped retry. |
-| [iiSU](https://assets.iisu.community/) | Icons and logos | Exact-name fallback and picker source; no key required. |
-| SD assets, [YANBF assets](https://github.com/YANBForwarder/assets), and GameTDB | DS banners and sounds | Existing SD art is preferred, followed by the online DS sources. |
-| RomM covers | Icon/banner fallback and picker art | Uses the cover from the configured RomM library when other art is missing. |
-
-For GBA banners, the exact libretro logo is tried before iiSU and the RomM
-cover. SteamGridDB remains the primary match and icon source.
 
 ## Requirements
 
@@ -107,8 +89,8 @@ cover. SteamGridDB remains the primary match and icon source.
 - For DS games, the [NTR_Forwarder](https://github.com/RocketRobz/NTR_Forwarder)
   DS Forwarder Pack, TWiLight Menu++ / nds-bootstrap and the YANBF
   `bootstrap.cia` title must already be installed on the SD card/console.
-- Internet access is optional for local files, but is needed for RomM and for
-  the artwork and DS jingles.
+- Internet access is needed for RomM and for
+  the artwork.
 
 ## Quick start
 
@@ -124,21 +106,49 @@ Choose one format:
 
 The local SD browser exposes only these folders:
 
-| Folder | Files | Purpose |
-|---|---|---|
-| `sd:/roms/3ds` | `.cia` | Install 3DS titles |
-| `sd:/roms/nds` | `.nds` and supported ZIP archives | Build DS HOME-menu titles |
-| `sd:/roms/gba` | `.gba` and supported ZIP archives | Build GBA Virtual Console titles |
+- `sd:/roms/3ds` — `.cia` files
+- `sd:/roms/nds` — `.nds` and supported ZIP archives
+- `sd:/roms/gba` — `.gba` and supported ZIP archives
 
-> **Scope:** The local browser does not show arbitrary folders outside
-> `/roms`. Put each file in the matching platform folder.
+### 3. SGDB key (optional but recommended)
 
-Open **Browse SD Card**, choose a platform, and press **A** on a game. Use
-**Y** to mark several games and **R** to select all or none.
+- Get a free API key from **https://www.steamgriddb.com/profile/preferences/api**.
+- Save your key in `sd:/3ds/forwarder/sgdb.env` or input it manually on settings.
 
-### 3. Connect RomM (optional)
+### 4. Connect RomM (optional)
 
 To use RomM, open **Settings**, enter the server address, username and password.
+
+## Manage and customize
+
+From **Manage Installed**, you can:
+
+- see installed titles and storage usage
+- change icons, banners, and GBA screen filters
+- uninstall games
+- remove 3DS updates and DLC
+
+**Settings** controls the RomM connection, GBA defaults, missing-art prompts,
+art display preferences, and the delete-after-install policy.
+
+
+## Art Sources
+
+Artwork is scraped in the following order:
+
+1. **SteamGridDB** *(recommended)*
+   - Uses the API key from `sd:/3ds/forwarder/sgdb.env` or input it in settings manually.
+2. **libretro Named Logos** *(GBA banners only)*
+   - Requires an exact No-Intro ROM filename match.
+3. **iiSU**
+   - Uses exact game names.
+   - No API key required.
+4. **YANBF assets**
+   - For NDS banner and jingle.
+5. **RomM covers**
+   - Final fallback for icons and banners from your configured RomM library.
+
+> **Note:** SteamGridDB is always preferred when an API key is configured. For GBA banners, the libretro logo is checked before iiSU and RomM covers.
 
 ## How each format works
 
@@ -156,8 +166,6 @@ icon/banner/sound and installs it with a unique title ID.
 At launch, the forwarder passes the ROM path to
 `sd:/_nds/ntr-forwarder/path.txt` to boot the game.
 
-The [YANBF assets](https://github.com/YANBForwarder/assets) repository is the
-primary source for art.
 
 ### Game Boy Advance
 
@@ -167,19 +175,6 @@ HOME-menu.
 
 GBA ROMs remain on the SD card after installation because the app needs the
 source ROM for artwork changes.
-
-## Manage and customize
-
-From **Manage Installed**, you can:
-
-- see installed titles and storage usage;
-- change icons, banners, and GBA screen filters;
-- reinstall or uninstall games;
-- remove 3DS updates and DLC; and
-- clear downloaded art caches without removing your saved per-game art picks.
-
-**Settings** controls the RomM connection, GBA defaults, missing-art prompts,
-art display preferences, and the delete-after-install policy.
 
 ## Build from source
 
