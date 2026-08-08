@@ -69,7 +69,7 @@ static inline u32 align200(u32 v) { return (v + 0x1FF) & ~0x1FF; }
 
 // GBA template pieces, read from romfs once at init — re-reading them per
 // build meant a romfs open could fail mid-batch (and used to crash)
-static std::string tplNcch, tplExh, tplIcn, tplLogo, tplRfs, tplCfg, tplBnr;
+static std::string tplNcch, tplExh, tplIcn, tplLogo, tplRfs, tplCfg, tplBnr, tplGbaChime;
 static void loadGbaTemplates() {
     if (!tplNcch.empty()) return;
     tplNcch = readEntireFile(GBA_TPL_DIR + "ncchheader.bin");
@@ -77,8 +77,9 @@ static void loadGbaTemplates() {
     tplIcn  = readEntireFile(GBA_TPL_DIR + "icon.icn");
     tplLogo = readEntireFile(GBA_TPL_DIR + "logo.darc.lz");
     tplRfs  = readEntireFile(GBA_TPL_DIR + "romfs.bin");
-    tplCfg  = readEntireFile(GBA_TPL_DIR + "config_block.bin");
-    tplBnr  = readEntireFile(GBA_TPL_DIR + "template.bnr");
+    tplCfg      = readEntireFile(GBA_TPL_DIR + "config_block.bin");
+    tplBnr      = readEntireFile(GBA_TPL_DIR + "template.bnr");
+    tplGbaChime = wavToCwav(readEntireFile(GBA_TPL_DIR + "gba-chime.wav"));
 }
 
 ReturnResult* CtrBuilder::initialize() {
@@ -799,12 +800,10 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
         if (dbg) { fwrite(smdh.data(), 1, smdh.size(), dbg); fclose(dbg); }
     }
 
-    // --- banner (reuse the CBMD patcher). Force an explicit, code-generated
-    // silent CWAV rather than trusting the romfs template's embedded sound, so
-    // the injected title never plays a jingle when highlighted on HOME. Falls
-    // back to the template sound if the generator ever fails (returns "").
-    std::string silent = silentCwav();
-    std::string banner = buildBanner(bnrT, bannerTex, silent);
+    // --- banner (reuse the CBMD patcher). Use the bundled GBA startup chime;
+    // fall back to the known-good silent CWAV if the asset cannot be converted.
+    std::string gbaSound = tplGbaChime.empty() ? silentCwav() : tplGbaChime;
+    std::string banner = buildBanner(bnrT, bannerTex, gbaSound);
 
     // --- ExeFS header: .code, banner, icon, logo (official VC order; logo
     // is required or AGB_FIRM refuses to boot)
