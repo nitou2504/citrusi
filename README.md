@@ -1,4 +1,5 @@
 <div align="center">
+  <p><img src="icon.png" width="64" alt="Citrusi logo"></p>
   <h1>citrusi</h1>
   <p>
     <strong>Install 3DS, DS and GBA games directly on your console with nice looking art!</strong><br>
