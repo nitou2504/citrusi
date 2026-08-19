@@ -1,9 +1,8 @@
 <div align="center">
-  <p><img src="icon.png" width="64" alt="Citrusi logo"></p>
-  <h1>citrusi</h1>
+  <h1><img src="icon.png" width="48" alt="Citrusi logo" style="vertical-align: middle;"> citrusi</h1>
   <p>
     <strong>Install 3DS, DS and GBA games directly on your console with nice looking art!</strong><br>
-    No PC needed.
+    Build and install everything directly on your 3DS.
   </p>
   <p>
     <a href="https://github.com/nitou2504/citrusi/releases/tag/v1.2.0"><img src="https://github.com/nitou2504/citrusi/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
