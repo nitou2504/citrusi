@@ -1,4 +1,4 @@
-# Responsiveness investigation — how other homebrew stays fast, and what romm3ds should adopt
+# Responsiveness investigation — how other homebrew stays fast, and what citrusi should adopt
 
 Status: investigation only (2026-07-13). No code changes; this is the design
 input for a future "instant UI" milestone. Findings verified against the
@@ -121,7 +121,7 @@ architectural, not raw speed.
 - Frame budget: `C3D_FrameBegin(SYNCDRAW)` gives 16.7ms for both screens on a
   268MHz core; `C3D_GetProcessingTime/GetDrawingTime` are free profilers.
 
-## Where romm3ds violates these today
+## Where citrusi violates these today
 
 1. Library open path (`ensurePlatformLoaded` → `loadLibCache` →
    `resolveTitleIds` → cover start) runs on the main thread; every SD/JSON/

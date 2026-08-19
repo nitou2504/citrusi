@@ -245,7 +245,7 @@ std::string CtrBuilder::buildSmdh(const std::string& templateSmdh, const std::st
         memset(&smdh[o], 0, 0x200);
         utf16Write(smdh, o,          shortT, 0x40);
         utf16Write(smdh, o + 0x80,   title.substr(0, 0x7F), 0x80);
-        utf16Write(smdh, o + 0x180,  "romm3ds", 0x40);
+        utf16Write(smdh, o + 0x180,  "citrusi", 0x40);
     }
     if (icon48.size() == 48*48*2) {
         // custom icon (art picker): 48x48 as-is + nearest 24x24
@@ -783,7 +783,7 @@ ReturnResult* CtrBuilder::buildGbaCIA(const std::string& romPath, const std::str
             memset(&smdh[o], 0, 0x200);
             utf16Write(smdh, o,         shortT, 0x40);
             utf16Write(smdh, o + 0x80,  title.substr(0, 0x7F), 0x80);
-            utf16Write(smdh, o + 0x180, "romm3ds", 0x40);
+            utf16Write(smdh, o + 0x180, "citrusi", 0x40);
         }
         if (icon48.size() == 48*48*2) {
             static u16 lin24[24*24];

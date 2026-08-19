@@ -6,7 +6,7 @@
 
 #define CTR_TEMPLATE_PATH "romfs:/ctr/template.cia"
 #define CTR_CONFIG_DIR std::string("sdmc:/3ds/forwarder/ctr/")
-// unique-id range for romm3ds CTR forwarders (YANBF uses 0xFF400-0xFF7FF)
+// unique-id range for citrusi CTR forwarders (YANBF uses 0xFF400-0xFF7FF)
 #define CTR_UID_BASE  0xFF800
 #define CTR_UID_COUNT 0x400
 // GBA VC injects get their own range above the forwarders

@@ -16,7 +16,7 @@
 enum TitleKind {
     TK_APP,          // regular 3DS application
     TK_DEMO,         // 0002: demo
-    TK_NDS_FWD,      // ours: romm3ds CTR forwarder for a .nds rom
+    TK_NDS_FWD,      // ours: citrusi CTR forwarder for a .nds rom
     TK_GBA_INJECT,   // ours: GBA VC inject
     TK_YANBF,        // YANBF forwarder (made by the PC tool)
     TK_UPDATE,       // 000E: update data of some app

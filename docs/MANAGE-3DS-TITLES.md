@@ -43,7 +43,7 @@ Extend `generateManageMenu` (3DS branch):
 1. **Enumerate**: `AM_GetTitleList(MEDIATYPE_SD)`, keep `hi == 0x00040000`
    (apps). Exclude the app's own forwarder titles:
    - YANBF range `0FF40000–0FF7FFFF`
-   - romm3ds CTR forwarders (`getRommCtrForwarders` tids + `0FF3FF00` self)
+   - citrusi CTR forwarders (`getCitrusiCtrForwarders` tids + `0FF3FF00` self)
 2. **Size/version**: `AM_GetTitleInfo` → `AM_TitleEntry.size` (also gives
    version — could show `v1.1`).
 3. **Names**: read each title's SMDH — the ExeFS `icon` IS readable from

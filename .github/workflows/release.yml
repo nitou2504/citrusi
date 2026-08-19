@@ -56,13 +56,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum romm3ds.3dsx romm3ds.smdh romm3ds.cia > SHA256SUMS
+          sha256sum citrusi.3dsx citrusi.smdh citrusi.cia > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "romm3ds $GITHUB_REF_NAME" \
+            --title "citrusi $GITHUB_REF_NAME" \
             --verify-tag \
             --notes-file release-notes.md \
-            romm3ds.3dsx \
-            romm3ds.smdh \
-            romm3ds.cia \
+            citrusi.3dsx \
+            citrusi.smdh \
+            citrusi.cia \
             SHA256SUMS

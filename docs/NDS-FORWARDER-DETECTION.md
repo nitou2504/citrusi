@@ -15,7 +15,7 @@ AM-verified sources:
 
 | Type | Title id | How matched |
 |---|---|---|
-| **romm3ds CTR** | `0004000000xxxx00` | `getRommCtrForwarders` — `sd:/3ds/forwarder/ctr/<tid>.txt` bookkeeping (only exists for forwarders **this app** built), verified against AM |
+| **citrusi CTR** | `0004000000xxxx00` | `getCitrusiCtrForwarders` — `sd:/3ds/forwarder/ctr/<tid>.txt` bookkeeping (only exists for forwarders **this app** built), verified against AM |
 | **TWL** | `0004800400000000 \| rev(gamecode)` | `computeForwarderTID(nds)` vs `getInstalledTwlTitles` (NAND cat `0x8004/0x8005`) |
 | **YANBF** | `000400000FF4xxxx`–`0FF7xxxx` | `getYanbfForwarders` — romfs mount when possible, else **plaintext `.cia` parsing** (see below) |
 

@@ -1,14 +1,14 @@
 <div align="center">
-  <h1>romm3ds</h1>
+  <h1>citrusi</h1>
   <p>
     <strong>Install 3DS, DS and GBA games directly on your console with nice looking art!</strong><br>
     No PC needed.
   </p>
   <p>
-    <a href="https://github.com/nitou2504/romm3ds/releases/tag/v1.1.1"><img src="https://github.com/nitou2504/romm3ds/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
+    <a href="https://github.com/nitou2504/citrusi/releases/tag/v1.2.0"><img src="https://github.com/nitou2504/citrusi/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
   </p>
   <p>
-    <a href="https://github.com/nitou2504/romm3ds/releases/tag/v1.1.1"><strong>Download v1.1.1</strong></a>
+    <a href="https://github.com/nitou2504/citrusi/releases/tag/v1.2.0"><strong>Download v1.2.0</strong></a>
     · <a href="#quick-start">Quick start</a>
     · <a href="#build-from-source">Build from source</a>
   </p>
@@ -18,7 +18,7 @@
   <p><em>Pokémon Pinball HOME-menu title.</em></p>
 </div>
 
-## What is romm3ds?
+## What is citrusi?
 
 A 3DS Homebrew app to install 3DS, NDS, GBA games to your console's Home-menu including art. 
 
@@ -36,8 +36,8 @@ the installs.
 <table align="center">
   <tr>
     <td align="center" valign="top">
-      <img src="docs/home.png" width="210" alt="Current romm3ds base screen"><br>
-      <strong>romm3ds</strong>
+      <img src="docs/home.png" width="210" alt="Current citrusi base screen"><br>
+      <strong>citrusi</strong>
     </td>
     <td align="center" valign="top">
       <img src="docs/search.png" width="210" alt="Current RomM search screen"><br>
@@ -92,9 +92,9 @@ is only needed if you use the `.3dsx` version instead of installing the CIA.
 
 Choose one format:
 
-- **CIA:** install `romm3ds.cia` from Universal Updater (or with FBI). This
+- **CIA:** install `citrusi.cia` from Universal Updater (or with FBI). This
   creates a normal HOME-menu app.
-- **3DSX:** copy `romm3ds.3dsx` to `sd:/3ds/` and launch it from the Homebrew
+- **3DSX:** copy `citrusi.3dsx` to `sd:/3ds/` and launch it from the Homebrew
   Launcher.
 
 ### 2. Install the YANBF bootstrap title
@@ -120,7 +120,7 @@ sd:/_nds/ntr_forwarder.ini
 sd:/_nds/release-bootstrap.ver
 ```
 
-The full TWiLight Menu++ application is not required by romm3ds when these
+The full TWiLight Menu++ application is not required by citrusi when these
 NTR_Forwarder and nds-bootstrap files are present.
 
 ### 4. Add local games
@@ -140,14 +140,16 @@ Open **Browse SD Card**, choose a platform, and press **A** on a game. Use
 ### 5. SGDB key (optional but recommended)
 
 - Get a free API key from **https://www.steamgriddb.com/profile/preferences/api**.
-- Save your key in `sd:/3ds/forwarder/sgdb.env` or input it manually in Settings.
+- Save your key in `sd:/3ds/citrusi/sgdb.env` or input it manually in Settings.
+
+Existing installations keep reading saved SteamGridDB keys and cached artwork.
 
 ### 6. Connect RomM (optional)
 
 To use RomM, open **Settings**, enter the server address, username and password.
 
 Internet access is optional for local installation, but is needed for RomM,
-online artwork, and DS jingles. The romm3ds templates are bundled in the app;
+online artwork, and DS jingles. The citrusi templates are bundled in the app;
 no separate template or artwork files are required.
 
 ## Manage and customize
@@ -168,7 +170,7 @@ art display preferences, and the delete-after-install policy.
 Artwork is scraped in the following order:
 
 1. **SteamGridDB** *(recommended)*
-   - Uses the API key from `sd:/3ds/forwarder/sgdb.env` or input it in settings manually.
+   - Uses the API key from `sd:/3ds/citrusi/sgdb.env` or input it in Settings.
 2. **libretro Named Logos** *(GBA banners only)*
    - Requires an exact No-Intro ROM filename match.
 3. **iiSU**
@@ -216,10 +218,10 @@ Builds require Docker and internet access on the first run so `makerom` and
 Generated files are written at the repository root and are ignored by Git:
 
 ```text
-romm3ds.3dsx
-romm3ds.smdh
-romm3ds.elf
-romm3ds.cia
+citrusi.3dsx
+citrusi.smdh
+citrusi.elf
+citrusi.cia
 ```
 
 GitHub Actions builds the same files. Version tags create releases with the
@@ -232,11 +234,11 @@ CIA, 3DSX, SMDH, and checksum files.
 ```
 
 This performs a clean 3DSX build and uploads it to
-`sd:/3ds/romm3ds.3dsx`.
+`sd:/3ds/citrusi.3dsx`.
 
 ## Credits and licenses
 
-`romm3ds` started as a fork of **NDSForwarder** and incorporates work from
+`citrusi` started as a fork of **NDSForwarder** and incorporates work from
 many upstream projects:
 
 - **[NDSForwarder](https://github.com/volkanturkut/NDSForwarder)** by Volkan

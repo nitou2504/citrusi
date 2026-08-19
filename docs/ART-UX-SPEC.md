@@ -184,7 +184,7 @@ Same TID → HOME position and save data untouched.
 ### SET · Settings (one new row)
 `Art: notify when missing (default) / silent fallback`
 Plus the SGDB key status line: "SteamGridDB key: found / missing
-(sd:/3ds/romm3ds/sgdb.env)".
+(sd:/3ds/citrusi/sgdb.env)".
 
 ## 5. Flows
 
@@ -240,7 +240,7 @@ Notifies queue per game but strong matches sail through — with good names a
 }
 ```
 - `weak: true` drives the ⚠ marker; cleared when the user picks real art.
-- Image cache: `sdmc:/3ds/romm3ds/cache/art/` — `sgdb-<game>-<id>.png`,
+- Image cache: `sdmc:/3ds/citrusi/cache/art/` — `sgdb-<game>-<id>.png`,
   `libretro-<sha1 of name>.png`, `search-<norm query>.json`. Serves the
   picker instantly on revisit and spares SGDB's rate limit.
 

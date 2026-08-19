@@ -1,6 +1,17 @@
 # Changelog
 
-All notable changes to romm3ds. Dates are the working days the changes landed.
+All notable changes to citrusi. Dates are the working days the changes landed.
+
+## v1.2.0 — Citrusi rename & branding (2026-08-08)
+
+### Changed
+
+- Renamed the application, build outputs, HOME Menu metadata, and release
+  artifacts to **citrusi**.
+- Added the Citrus Slice production draft and four documented retro logo
+  concepts.
+- Existing SteamGridDB keys and cached artwork remain readable after the rename.
+- Added the approved GBA startup chime to GBA HOME Menu banners.
 
 ## v1.1.1 — settings responsiveness & HOME screenshots (2026-08-06)
 
@@ -34,7 +45,7 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   game*. ~90 strings rewritten ("build the forwarder / bake the inject" →
   "install the game"; "stream into the title database" → "install to the HOME
   menu"; "batch" → "selected"/"all"; "screen filter" → "filter"). An installed
-  DS game shows one "installed" chip instead of its engine (romm3ds/TWL/YANBF).
+  DS game shows one "installed" chip instead of its engine (citrusi/TWL/YANBF).
 - **Same operation, same words, every screen.** RomM / Browse / Manage now
   share one vocabulary and matching option sets. Browse's installed **GBA** and
   **NDS** games gained **Uninstall** (parity — NDS reuses Manage's uninstall
@@ -169,7 +180,7 @@ All notable changes to romm3ds. Dates are the working days the changes landed.
   opens the Manage actions right there (hint reads "A Manage"). 3DS:
   Reinstall / Redownload plus the granular uninstall rows (update/DLC).
   GBA: Change art / Screen filter / Art + screen filter / Reinstall /
-  Uninstall. NDS: Reinstall / Change art (romm3ds forwarders) / Uninstall.
+  Uninstall. NDS: Reinstall / Change art (citrusi forwarders) / Uninstall.
   Uninstalling clears the row's installed marker in place. A rom hack
   sharing an installed game's title id still gets the replace warning, not
   the hub.
@@ -470,7 +481,7 @@ manager for the 3DS, distributed as `.3dsx` (Homebrew Launcher) and installable
   forwarder entirely on the console. No ~40-title DSiWare cap.
 - **Install a whole folder at once** — SD Card Browser → "Install All".
 - **Manage Installed** — every ROM in `sd:/roms/nds` with its forwarder state
-  (romm3ds / TWL / YANBF) and title IDs; install a forwarder for a ROM that has
+  (citrusi / TWL / YANBF) and title IDs; install a forwarder for a ROM that has
   none, or delete forwarder / ROM / both.
 - **Settings** — installer options plus a dedicated RomM server screen (edit
   host / user / password individually, test the connection).

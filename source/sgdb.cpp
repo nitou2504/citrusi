@@ -51,8 +51,10 @@ void sgdbNetExit() {
 }
 
 bool SgdbClient::loadKey() {
-    if (!fileExists(SGDB_ENV_PATH)) return false;
-    std::ifstream f(SGDB_ENV_PATH);
+    const char* path = fileExists(SGDB_ENV_PATH) ? SGDB_ENV_PATH :
+                       fileExists(LEGACY_SGDB_ENV_PATH) ? LEGACY_SGDB_ENV_PATH : nullptr;
+    if (!path) return false;
+    std::ifstream f(path);
     std::string line;
     while (std::getline(f, line)) {
         size_t eq = line.find("STEAMGRIDDB_API_KEY=");
@@ -94,7 +96,7 @@ bool SgdbClient::get(const std::string& url, std::string& out, const std::string
     curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, writeCb);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
-    curl_easy_setopt(c, CURLOPT_USERAGENT, "romm3ds/0.1");
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "citrusi/0.1");
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 5L);
     curl_easy_setopt(c, CURLOPT_TIMEOUT, 12L);

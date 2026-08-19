@@ -10,7 +10,7 @@ struct ManagedRom {
     u64 tid;              // expected TWL forwarder title id (0 if unknown)
     bool installed;       // TWL forwarder present on NAND
     u64 yanbfTid;         // YANBF CTR forwarder title id on SD (0 if none)
-    u64 rommTid;          // romm3ds CTR forwarder title id on SD (0 if none)
+    u64 citrusiTid;          // citrusi CTR forwarder title id on SD (0 if none)
     std::string orphanCia; // forwarder .cia for this rom found on SD but not installed
     u64 sizeBytes;
 };
@@ -35,13 +35,13 @@ std::map<std::string, std::string> getOrphanForwarderCias();
 std::vector<ManagedRom> scanManagedRoms(const std::string& romDir);
 void invalidateManagedRoms();
 
-// romm3ds CTR forwarders: maps lowercase rom filename -> tid
+// citrusi CTR forwarders: maps lowercase rom filename -> tid
 // (from sd:/3ds/forwarder/ctr/<tid>.txt bookkeeping, verified against AM)
-std::map<std::string, u64> getRommCtrForwarders();
+std::map<std::string, u64> getCitrusiCtrForwarders();
 
 Result deleteForwarder(u64 tid);            // TWL, NAND
 Result deleteYanbfForwarder(u64 tid);       // CTR, SD
-Result deleteRommCtrForwarder(u64 tid);     // CTR, SD + path file
+Result deleteCitrusiCtrForwarder(u64 tid);     // CTR, SD + path file
 
 
 std::string humanSize(u64 bytes);

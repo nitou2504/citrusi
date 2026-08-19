@@ -11,7 +11,7 @@ and fix list. A RomM instance is an optional companion server.
 Done on `main` (verified on hardware):
 - **SGDB TLS transport** — curl+mbedtls (TLS 1.2 ECDHE-ECDSA) reaches
   SteamGridDB where `httpc`/`sslc` (TLS 1.1) can't. `sgdb.cpp` client (search
-  / icons / image fetch), key from `sd:/3ds/romm3ds/sgdb.env`. Hardware-tested
+  / icons / image fetch), key from `sd:/3ds/citrusi/sgdb.env`. Hardware-tested
   end to end and wired into the artwork picker and install flows.
 - **VC inject builder** (`ctrbuilder.cpp buildGbaCIA`) — `.code` = ROM +
   AGB_FIRM `.CAA` footer; NCCH assembled from vendored vcoven template pieces
@@ -55,12 +55,12 @@ Art layer (implemented and hardware-verified):
   [ART-UX-SPEC.md](ART-UX-SPEC.md) flow, built and verified on hardware.
   New modules: `artquery.cpp` (sanitizer/norm/confidence),
   `artfetch.cpp` (icon48/bannerTex renderers + tiered fetch), `artstore.cpp`
-  (art.json + raw image cache under `sd:/3ds/romm3ds/cache/art/`),
+  (art.json + raw image cache under `sd:/3ds/citrusi/cache/art/`),
   `artpicker.cpp` (S4 thumb grid). Wiring: GBA install auto-resolve before
   the download + missing-art notify + `+ Art` confirm option; NDS forwarder
   banner chain extended (SGDB logo on strong match → notify → RomM cover →
   DS-icon stamp); Manage `Change art` rebuilds in place (same TID) for GBA
-  injects and romm3ds NDS forwarders, `[!]` list marker while fallback art
+  injects and citrusi NDS forwarders, `[!]` list marker while fallback art
   is in use; Settings: art-notify toggle + SGDB key status. Deviations from
   the spec: art.json keys by extension-less stem (so `game.zip` ↔ `game.gba`
   share an entry), `[!]` instead of ⚠ (font safety), NDS notify happens at
@@ -191,7 +191,7 @@ search, icon list, and cdn2 fetch over curl+mbedtls — byte-identical PNG.
 
 **API key: user-supplied, never embedded.** The remaining blocker was only key
 secrecy for public distribution. Delivery: read the key from a dotenv-style
-file on SD (e.g. `sd:/3ds/romm3ds/sgdb.env`, `STEAMGRIDDB_API_KEY=...`) at
+file on SD (e.g. `sd:/3ds/citrusi/sgdb.env`, `STEAMGRIDDB_API_KEY=...`) at
 startup, with a swkbd prompt as fallback/first-run setup — same pattern as the
 RomM host config. The user copies the key from their RomM compose file (RomM
 does **not** expose `/icons` through its own API — only box covers — so going
@@ -268,7 +268,7 @@ blocked and never ends artless:
 
 ### Picker (one shared component, three entrances)
 Bottom-screen grid (~5×3 thumbs, L/R pages), lazily downloaded via the
-covercache async pattern, disk-cached under `sdmc:/3ds/romm3ds/cache/sgdb/`.
+covercache async pattern, disk-cached under `sdmc:/3ds/citrusi/cache/sgdb/`.
 Controls: D-pad move, A use, B back/skip, X refine search (swkbd), Y switch
 art page (icon ↔ banner) / source tab. Footer shows dims + count.
 - GBA icon sources: SGDB icons → RomM cover tile.
@@ -318,7 +318,7 @@ the shipped flows have been exercised on hardware.
 Build order (all done):
 1. **`sgdb.cpp` → UI glue.** The client works; add: sanitizer (`artquery`),
    `norm()` confidence scoring, on-disk cache under
-   `sdmc:/3ds/romm3ds/cache/art/`. First consumer: bake the chosen 48×48 into
+   `sdmc:/3ds/citrusi/cache/art/`. First consumer: bake the chosen 48×48 into
    the GBA SMDH (`buildGbaCIA` accepts the resolved `icon48` art piece).
 2. **libretro banner fetch** (GBA) — exact No-Intro name with a
    tag-stripped retry. Feeds `buildGbaCIA`'s `bannerTex` argument.

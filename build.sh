@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds romm3ds: the CTR forwarder template, the .3dsx (Homebrew Launcher),
+# Builds citrusi: the CTR forwarder template, the .3dsx (Homebrew Launcher),
 # and the installable .cia. Requires docker (devkitpro/devkitarm) plus makerom
 # and bannertool. Point TOOLS at a dir containing them, or let it auto-download.
 #
@@ -35,12 +35,12 @@ build_template() {
   docker run --rm -v "$ROOT/ctr-payload":/fwd -w /fwd "$DKA" make >/dev/null
   cp ctr-payload/fwd.elf ctr-template/forwarder.elf
   fetch_tools
-  "$BANNERTOOL" makesmdh -i ctr-template/icon.png -s "romm3ds forwarder" -l "romm3ds forwarder" -p romm3ds -o ctr-template/template.smdh >/dev/null
+  "$BANNERTOOL" makesmdh -i ctr-template/icon.png -s "citrusi forwarder" -l "citrusi forwarder" -p citrusi -o ctr-template/template.smdh >/dev/null
   "$BANNERTOOL" makebanner -i ctr-template/banner.png -a ctr-template/dsboot.wav -o ctr-template/template.bnr >/dev/null
   "$MAKEROM" -f cia -target t -exefslogo -rsf ctr-template/build-cia.rsf -elf ctr-template/forwarder.elf \
     -banner ctr-template/template.bnr -icon ctr-template/template.smdh \
     -major 0 -minor 1 -micro 0 \
-    -DAPP_PRODUCT_CODE=CTR-H-ROMM -DAPP_TITLE="romm3ds forwarder" -DAPP_UNIQUE_ID=0xFF800 \
+    -DAPP_PRODUCT_CODE=CTR-H-CITR -DAPP_TITLE="citrusi forwarder" -DAPP_UNIQUE_ID=0xFF800 \
     -o ctr-template/template.cia
   mkdir -p romfs/ctr
   mv ctr-template/template.cia romfs/ctr/template.cia
@@ -49,7 +49,7 @@ build_template() {
 build_3dsx() {
   echo ">> building .3dsx"
   # UI sprite atlas (hbmenu-style): gfx/*.png -> pre-tiled romfs t3x
-  docker run --rm -v "$ROOT":/romm3ds -w /romm3ds "$DKA" sh -c \
+  docker run --rm -v "$ROOT":/citrusi -w /citrusi "$DKA" sh -c \
     "mkdir -p romfs/gfx && cd gfx && tex3ds -i battery.t3s -o ../romfs/gfx/battery.t3x && cd .. && make clean >/dev/null && make"
 }
 
@@ -58,11 +58,11 @@ build_cia() {
   fetch_tools
   "$BANNERTOOL" makebanner -i cia/banner.png -a ctr-template/dsboot.wav -o cia/app.bnr >/dev/null
   "$MAKEROM" -f cia -target t -exefslogo -rsf cia/app.rsf \
-    -elf romm3ds.elf -icon romm3ds.smdh -banner cia/app.bnr \
-    -major 1 -minor 0 -micro 0 -DAPP_TITLE=romm3ds \
-    -o romm3ds.cia
-  echo ">> romm3ds.cia ready"
-  ls -la romm3ds.cia
+    -elf citrusi.elf -icon citrusi.smdh -banner cia/app.bnr \
+    -major 1 -minor 2 -micro 0 -DAPP_TITLE=citrusi \
+    -o citrusi.cia
+  echo ">> citrusi.cia ready"
+  ls -la citrusi.cia
 }
 
 case "$WHAT" in

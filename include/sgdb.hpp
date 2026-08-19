@@ -6,7 +6,9 @@
 // SteamGridDB client over curl+mbedtls (TLS 1.2 — the 3DS sslc tops out at
 // TLS 1.1 and can't reach SGDB's ECDSA-only cert, see docs/GBA-PLAN.md).
 // Key is user-supplied, read from sd, never embedded.
-#define SGDB_ENV_PATH "sdmc:/3ds/romm3ds/sgdb.env"
+#define SGDB_ENV_PATH "sdmc:/3ds/citrusi/sgdb.env"
+// Keep reading the pre-Citrusi location so a rename does not discard a user's key.
+#define LEGACY_SGDB_ENV_PATH "sdmc:/3ds/romm3ds/sgdb.env"
 
 struct SgdbGame {
     int id;

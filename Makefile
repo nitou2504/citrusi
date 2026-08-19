@@ -27,12 +27,12 @@ include $(DEVKITARM)/3ds_rules
 #     - <libctru folder>/default_icon.png
 #---------------------------------------------------------------------------------
 
-APP_TITLE	:= romm3ds
+APP_TITLE	:= citrusi
 APP_VERSION	:= $(shell sed -n 's/^#define VERSION "\([^\"]*\)"/\1/p' $(TOPDIR)/include/settings.hpp | tr -d '\r')
 APP_DESCRIPTION := Install 3DS, GBA and DS games with art ($(APP_VERSION))
 APP_AUTHOR := Nitou25
 
-TARGET		:=	$(notdir $(CURDIR))
+TARGET		:=	citrusi
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=

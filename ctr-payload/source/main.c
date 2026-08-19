@@ -1,9 +1,9 @@
 /*
-romm3ds CTR forwarder payload
+citrusi CTR forwarder payload
 Based on YANBF forwarder (MIT) Copyright (C) 2022-present lifehackerhansol
 
 Reads the rom path from sd:/3ds/forwarder/ctr/<TITLEID>.txt (written by the
-romm3ds generator at install time), stages it for NTR_Forwarder, then chains
+citrusi generator at install time), stages it for NTR_Forwarder, then chains
 to the YANBF bootstrap TWL title (FWDR).
 */
 
@@ -55,7 +55,7 @@ int main() {
     FILE* f = fopen(cfgPath, "r");
     if (!f) {
         logline("missing %s", cfgPath);
-        fatal("Missing forwarder path file.\nReinstall this forwarder with romm3ds.", 0);
+        fatal("Missing forwarder path file.\nReinstall this forwarder with citrusi.", 0);
         amExit();
         return 1;
     }
@@ -66,7 +66,7 @@ int main() {
     while (len && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = 0;
     logline("path=[%s]", line);
     if (!len) {
-        fatal("Empty forwarder path file.\nReinstall this forwarder with romm3ds.", 0);
+        fatal("Empty forwarder path file.\nReinstall this forwarder with citrusi.", 0);
         amExit();
         return 1;
     }

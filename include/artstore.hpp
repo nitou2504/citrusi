@@ -5,7 +5,9 @@
 // ownership files, keyed by the RomM fs_name. Reinstalls reuse the entry
 // silently; weak=true drives the Manage ⚠ marker until the user picks art.
 #define ART_JSON_PATH  (FORWARDER_DIR + std::string("/art.json"))
-#define ART_CACHE_DIR  std::string("sdmc:/3ds/romm3ds/cache/art/")
+#define ART_CACHE_DIR  std::string("sdmc:/3ds/citrusi/cache/art/")
+// Existing raw art remains readable after the application rename.
+#define LEGACY_ART_CACHE_DIR std::string("sdmc:/3ds/romm3ds/cache/art/")
 
 struct ArtEntry {
     bool valid = false;       // entry exists in art.json

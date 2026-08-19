@@ -105,7 +105,11 @@ std::string artCachePath(const std::string& key) {
 
 std::string artCacheRead(const std::string& key) {
     std::string p = artCachePath(key);
-    if (!fileExists(p)) return "";
+    if (!fileExists(p)) {
+        std::string name = p.substr(ART_CACHE_DIR.size());
+        p = LEGACY_ART_CACHE_DIR + name;
+        if (!fileExists(p)) return "";
+    }
     return readEntireFile(p);
 }
 

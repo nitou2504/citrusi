@@ -448,7 +448,7 @@ static std::string rommLocalPath(const std::string& fsName, const std::string& s
     return dir + fsName.substr(0, fsName.size()-4) + ext;
 }
 
-// normalized names of NDS roms that have ANY forwarder installed (TWL/YANBF/romm3ds)
+// normalized names of NDS roms that have ANY forwarder installed (TWL/YANBF/citrusi)
 static std::set<std::string> gFwdNames;
 static bool gFwdReady = false;
 static void refreshNdsForwarders();
@@ -858,7 +858,7 @@ static int changeArtGbaItem(C3D_RenderTarget* target, Config* config,
     return rc;
 }
 
-// change art for one romm3ds NDS forwarder in place (same rtid). Banner page
+// change art for one citrusi NDS forwarder in place (same rtid). Banner page
 // only — the SMDH icon stays the ROM's own DS icon. 1 / 0 / -1 like above.
 static int changeArtNdsRommItem(C3D_RenderTarget* target, Config* config,
                                 const std::string& name, const std::string& title,
@@ -1033,7 +1033,7 @@ static bool uninstallManageItem(Config* config, const MenuSelection& it) {
         else if (config->dsiwareCount > 0) config->dsiwareCount--;
     }
     if (it.ytid != 0 && R_FAILED(deleteYanbfForwarder(it.ytid))) err = true;
-    if (it.rtid != 0 && R_FAILED(deleteRommCtrForwarder(it.rtid))) err = true;
+    if (it.rtid != 0 && R_FAILED(deleteCitrusiCtrForwarder(it.rtid))) err = true;
     if (!err) {
         std::error_code ec;
         if (!std::filesystem::remove(it.path, ec)) err = true;
@@ -1953,7 +1953,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 }
             } else {
                 // one "installed" chip - the user doesn't need the engine type
-                // (romm3ds / TWiLight / YANBF) behind an installed DS game
+                // (citrusi / TWiLight / YANBF) behind an installed DS game
                 bool anyFwd = sel->rtid || sel->installed || sel->ytid;
                 if (anyFwd) drawChip(cxp, y, "installed", COL_ACCENT);
                 else drawChip(cxp, y, sel->fwdCia.empty() ? "not installed" : ".cia on SD", COL_TEXT_DIM);
@@ -2017,7 +2017,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                 if (id >= 0 && id <= 5) d = descs[id];
                 else if (id == SETTING_DELETE_SRC) d = "After installing from the SD card: delete the .cia (a duplicate of the installed game) or keep all files. DS/GBA game files are always kept - the game needs them to run and to change art.";
                 else if (id == SETTING_ART_NOTIFY) d = "What happens when icon/banner art isn't found at install. Press A to choose - each choice is explained there.";
-                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/romm3ds/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
+                else if (id == SETTING_SGDB_KEY) d = "HOME icons come from SteamGridDB. Press A to type the key, or create sd:/3ds/citrusi/sgdb.env yourself - a text file with one line: STEAMGRIDDB_API_KEY=e51f8a33...";
                 else if (id == SETTING_GBA_SCREEN) d = "Default color filter for new GBA installs. Press A to pick from the presets. Per game: Manage -> game -> Filter.";
                 else if (id == SETTING_MANAGE_ART) d = "Art shown for installed games in Manage: each game's own HOME icon, or its RomM cover. Press A to choose.";
                 else if (id == SETTING_ART_CACHE) d = "Downloaded covers, banner previews and title icons. Safe to clear - everything re-downloads or rebuilds on demand. The art you picked per game (art.json) is kept.";
@@ -2096,7 +2096,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         // main menu / systems / SD browser
         drawBottomFrame("A Select    B Back");
         if (this->type == MENU_MAIN) {
-            drawText(160, 70, 0.5f, 0.9f, COL_SURFACE, COL_TEXT, "romm3ds", C2D_AlignCenter);
+            drawText(160, 70, 0.5f, 0.9f, COL_SURFACE, COL_TEXT, "citrusi", C2D_AlignCenter);
             drawText(160, 96, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, VERSION, C2D_AlignCenter);
             if (!gRomm.host.empty())
                 drawText(160, 124, 0.5f, 0.45f, COL_SURFACE, COL_TEXT_DIM, gRomm.host.c_str(), C2D_AlignCenter);
@@ -2337,7 +2337,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         Menu* menu = new Menu(entries);
         menu->currentDirectory=std::filesystem::path("/");
         menu->type=MENU_MAIN;
-        menu->heading="romm3ds";
+        menu->heading="citrusi";
         menu->init();
         return menu;
     }
@@ -2422,7 +2422,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
         if (gFwdReady) return;
         gFwdNames.clear();
         for (auto& m : scanManagedRoms(ROMM_NDS_DIR))
-            if (m.installed || m.yanbfTid || m.rommTid)
+            if (m.installed || m.yanbfTid || m.citrusiTid)
                 gFwdNames.insert(normNds(m.display));
         gFwdReady = true;
     }
@@ -2814,7 +2814,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             std::string clean = rom.display;
             size_t dot = clean.find_last_of('.');
             if (dot != std::string::npos) clean = clean.substr(0, dot);
-            bool hasFwd = rom.rommTid || rom.installed || rom.yanbfTid;
+            bool hasFwd = rom.citrusiTid || rom.installed || rom.yanbfTid;
             bool weakArt = hasFwd && artStoreGet(rom.display).weak;   // ⚠: fallback art
             e->display = (hasFwd ? "* " : "  ") + std::string(weakArt ? "[!] " : "") + utf8FoldLatin(clean);
             e->title = utf8FoldLatin(clean);
@@ -2822,7 +2822,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
             e->path=std::filesystem::path(rom.path);
             e->tid=rom.tid;
             e->ytid=rom.yanbfTid;
-            e->rtid=rom.rommTid;
+            e->rtid=rom.citrusiTid;
             e->installed=rom.installed;
             e->fwdCia=rom.orphanCia;
             e->sizeBytes=rom.sizeBytes;
@@ -3208,7 +3208,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     k = (b == std::string::npos) ? "" : k.substr(b, e2 - b + 1);
                                     if (!k.empty()) {
                                         std::error_code ec;
-                                        std::filesystem::create_directories("sdmc:/3ds/romm3ds", ec);
+                                        std::filesystem::create_directories("sdmc:/3ds/citrusi", ec);
                                         FILE* f = fopen(SGDB_ENV_PATH, "wb");
                                         if (f) {
                                             fprintf(f, "STEAMGRIDDB_API_KEY=%s\n", k.c_str());
@@ -3368,7 +3368,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         std::string nrompath = romPath;
                         for (auto& m : scanManagedRoms(ROMM_NDS_DIR)) {
                             if (normNds(m.display) != normNds(entry.fsName)) continue;
-                            ntid = m.tid; nytid = m.yanbfTid; nrtid = m.rommTid;
+                            ntid = m.tid; nytid = m.yanbfTid; nrtid = m.citrusiTid;
                             nrompath = m.path;
                             break;
                         }
@@ -3534,7 +3534,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                     if (hit == ndsBy.end()) { failed.push_back(it->title); continue; }
                                     um.tid = hit->second.tid;
                                     um.ytid = hit->second.yanbfTid;
-                                    um.rtid = hit->second.rommTid;
+                                    um.rtid = hit->second.citrusiTid;
                                     um.installed = hit->second.installed;
                                     um.path = std::filesystem::path(hit->second.path);
                                 }
@@ -3947,7 +3947,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     }
                     std::string fwdState = "Installed";
                     if (artStoreGet(name).weak) fwdState += " - using fallback art";
-                    // Change art only for our own forwarders (romm3ds TID range)
+                    // Change art only for our own forwarders (citrusi TID range)
                     if (entry.rtid) {
                         int m = actionMenu(target, name, fwdState, {
                             {"Uninstall", "Uninstall and delete the game file."},
@@ -3994,7 +3994,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                         }
                     }
                     if (delFwd && entry.rtid!=0) {
-                        if (R_FAILED(deleteRommCtrForwarder(entry.rtid))) {
+                        if (R_FAILED(deleteCitrusiCtrForwarder(entry.rtid))) {
                             Dialog(target,0,0,320,240,{"Uninstall failed"},{"OK"}).handle();
                             err=true;
                         }
@@ -4081,7 +4081,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                         if (!ndsScanned) { ndsScan = scanManagedRoms(ROMM_NDS_DIR); ndsScanned = true; }
                                         u64 ntid=0,nytid=0,nrtid=0; std::string np = it->path.generic_string();
                                         for (auto& m : ndsScan) if (normNds(m.display)==normNds(it->fsName)) {
-                                            ntid=m.tid; nytid=m.yanbfTid; nrtid=m.rommTid; np=m.path; break; }
+                                            ntid=m.tid; nytid=m.yanbfTid; nrtid=m.citrusiTid; np=m.path; break; }
                                         MenuSelection um; um.platformSlug=ROMM_SLUG_NDS; um.installed=(ntid!=0);
                                         um.tid=ntid; um.ytid=nytid; um.rtid=nrtid; um.path=std::filesystem::path(np);
                                         if (uninstallManageItem(config, um)) okU++;
@@ -4293,7 +4293,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                                 u64 ntid=0,nytid=0,nrtid=0; std::string nrompath = romPath;
                                 for (auto& m : scanManagedRoms(ROMM_NDS_DIR)) {
                                     if (normNds(m.display) != normNds(entry.fsName)) continue;
-                                    ntid=m.tid; nytid=m.yanbfTid; nrtid=m.rommTid; nrompath=m.path; break;
+                                    ntid=m.tid; nytid=m.yanbfTid; nrtid=m.citrusiTid; nrompath=m.path; break;
                                 }
                                 MenuSelection um;
                                 um.platformSlug = ROMM_SLUG_NDS;
@@ -4408,7 +4408,7 @@ static std::string fitEllipsis(const std::string& s, float maxW, float fscale) {
                     int M = (int)items.size();
                     std::string slug = this->platformSlug;
                     bool is3ds = (slug == ROMM_SLUG_3DS);
-                    // rebuildable = Change-art applies: GBA injects + romm3ds NDS forwarders
+                    // rebuildable = Change-art applies: GBA injects + citrusi NDS forwarders
                     int rebuildable = 0;
                     for (auto e : items)
                         if ((slug == ROMM_SLUG_GBA && e->installed) || (slug == ROMM_SLUG_NDS && e->rtid))

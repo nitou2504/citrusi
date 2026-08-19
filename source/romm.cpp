@@ -145,7 +145,7 @@ Result RommClient::get(const std::string& url, std::string& out, u32* statusOut)
     if (R_FAILED(res)) { lastError = "httpcOpenContext failed"; return res; }
     httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
     httpcSetKeepAlive(&ctx, HTTPC_KEEPALIVE_ENABLED);
-    httpcAddRequestHeaderField(&ctx, "User-Agent", "romm3ds/0.1");
+    httpcAddRequestHeaderField(&ctx, "User-Agent", "citrusi/0.1");
     if (!this->authHeader.empty())
         httpcAddRequestHeaderField(&ctx, "Authorization", this->authHeader.c_str());
     httpcAddRequestHeaderField(&ctx, "Connection", "Keep-Alive");
@@ -350,7 +350,7 @@ bool RommClient::download(const RommRom& rom, const std::string& destPath,
     if (R_FAILED(res)) { lastError = "httpcOpenContext failed"; return false; }
     httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
     httpcSetKeepAlive(&ctx, HTTPC_KEEPALIVE_ENABLED);
-    httpcAddRequestHeaderField(&ctx, "User-Agent", "romm3ds/0.1");
+    httpcAddRequestHeaderField(&ctx, "User-Agent", "citrusi/0.1");
     httpcAddRequestHeaderField(&ctx, "Authorization", this->authHeader.c_str());
     res = httpcBeginRequest(&ctx);
     if (R_FAILED(res)) { lastError = "httpcBeginRequest failed"; httpcCloseContext(&ctx); return false; }
@@ -421,7 +421,7 @@ bool RommClient::fetchCiaHeader(const RommRom& rom, std::string& out) {
     httpcContext ctx;
     if (R_FAILED(httpcOpenContext(&ctx, HTTPC_METHOD_GET, url.c_str(), 1))) return false;
     httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
-    httpcAddRequestHeaderField(&ctx, "User-Agent", "romm3ds/0.1");
+    httpcAddRequestHeaderField(&ctx, "User-Agent", "citrusi/0.1");
     if (!this->authHeader.empty())
         httpcAddRequestHeaderField(&ctx, "Authorization", this->authHeader.c_str());
     httpcAddRequestHeaderField(&ctx, "Range", "bytes=0-16383");   // just the header+TMD

@@ -52,13 +52,13 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p build_output
-          cp romm3ds.3dsx romm3ds.smdh romm3ds.cia build_output/
+          cp citrusi.3dsx citrusi.smdh citrusi.cia build_output/
           sha256sum build_output/*
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: romm3ds-build
+          name: citrusi-build
           path: build_output
           if-no-files-found: error
           retention-days: 90

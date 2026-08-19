@@ -306,7 +306,7 @@ std::map<std::string, u64> getYanbfForwarders() {
     return out;
 }
 
-std::map<std::string, u64> getRommCtrForwarders() {
+std::map<std::string, u64> getCitrusiCtrForwarders() {
     std::map<std::string, u64> out;
     std::error_code ec;
     if (!std::filesystem::exists(CTR_CONFIG_DIR, ec)) return out;
@@ -348,7 +348,7 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
     std::vector<u64> installed = getInstalledTwlTitles();
     std::map<std::string, u64> yanbf = getYanbfForwarders();
     std::map<std::string, std::string> orphans = getOrphanForwarderCias();
-    std::map<std::string, u64> rommCtr = getRommCtrForwarders();
+    std::map<std::string, u64> citrusiCtr = getCitrusiCtrForwarders();
     u64 t1 = osGetTime();
     for (const auto& entry : std::filesystem::directory_iterator(romDir, ec)) {
         if (entry.is_directory()) continue;
@@ -363,8 +363,8 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         r.installed = r.tid != 0 && twlTitleInstalled(installed, r.tid);
         auto y = yanbf.find(toLowerCase(filename));
         r.yanbfTid = (y != yanbf.end()) ? y->second : 0;
-        auto rc = rommCtr.find(toLowerCase(filename));
-        r.rommTid = (rc != rommCtr.end()) ? rc->second : 0;
+        auto rc = citrusiCtr.find(toLowerCase(filename));
+        r.citrusiTid = (rc != citrusiCtr.end()) ? rc->second : 0;
         auto o = orphans.find(toLowerCase(filename));
         r.orphanCia = (o != orphans.end()) ? o->second : "";
         out.push_back(r);
@@ -374,8 +374,8 @@ std::vector<ManagedRom> scanManagedRoms(const std::string& romDir) {
         return toLowerCase(a.display) < toLowerCase(b.display);
     });
     char b[128];
-    snprintf(b, sizeof(b), "scan: twl(NAND)=%d yanbf=%d rommCtr=%d roms=%d fwd=%llums roms=%llums",
-             (int)installed.size(), (int)yanbf.size(), (int)rommCtr.size(), (int)out.size(),
+    snprintf(b, sizeof(b), "scan: twl(NAND)=%d yanbf=%d citrusiCtr=%d roms=%d fwd=%llums roms=%llums",
+             (int)installed.size(), (int)yanbf.size(), (int)citrusiCtr.size(), (int)out.size(),
              (unsigned long long)(t1 - t0), (unsigned long long)(osGetTime() - t1));
     mlog.info(b);
     gManagedCache = out;
@@ -396,7 +396,7 @@ Result deleteYanbfForwarder(u64 tid) {
     return res;
 }
 
-Result deleteRommCtrForwarder(u64 tid) {
+Result deleteCitrusiCtrForwarder(u64 tid) {
     Result res = AM_DeleteTitle(MEDIATYPE_SD, tid);
     AM_DeleteTicket(tid);
     char cfg[64];
