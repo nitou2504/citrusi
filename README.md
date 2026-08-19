@@ -152,6 +152,9 @@ Internet access is optional for local installation, but is needed for RomM,
 online artwork, and DS jingles. The citrusi templates are bundled in the app;
 no separate template or artwork files are required.
 
+The remaining offline behavior and fallback-art work are tracked in the
+[offline install and fallback-art plan](docs/OFFLINE-INSTALL-PLAN.md).
+
 ## Manage and customize
 
 From **Manage Installed**, you can:
