@@ -137,7 +137,7 @@ The local SD browser exposes only these folders:
 Open **Browse SD Card**, choose a platform, and press **A** on a game. Use
 **Y** to mark several games and **R** to select all or none.
 
-### 5. SGDB key (optional but recommended)
+### 5. SGDB key
 
 - Get a free API key from **https://www.steamgriddb.com/profile/preferences/api**.
 - Save your key in `sd:/3ds/citrusi/sgdb.env` or input it manually in Settings.
@@ -148,9 +148,10 @@ Existing installations keep reading saved SteamGridDB keys and cached artwork.
 
 To use RomM, open **Settings**, enter the server address, username and password.
 
-Internet access is optional for local installation, but is needed for RomM,
-online artwork, and DS jingles. The citrusi templates are bundled in the app;
-no separate template or artwork files are required.
+Connect the 3DS to Wi-Fi to scrape artwork and download DS jingles. Wi-Fi is
+not required for local installation or cached artwork. RomM also requires a
+network connection. The citrusi templates are bundled in the app; no separate
+template or artwork files are required.
 
 The remaining offline behavior and fallback-art work are tracked in the
 [offline install and fallback-art plan](docs/OFFLINE-INSTALL-PLAN.md).
